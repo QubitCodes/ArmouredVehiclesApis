@@ -18,8 +18,14 @@ import RefundDetailsPage from "@/pages/account/refund-details";
 import UserProfilePage from "@/pages/account/user-profile";
 import LoginPage from "@/pages/auth/user-login";
 import RegisterPage from "@/pages/auth/register";
-import SellerDashboard from "@/pages/seller/dashboard";
 import ProfilePage from "@/pages/account/profile";
+
+import VendorDashboard from "@/pages/vendor/dashboard";
+import VendorProducts from "@/pages/vendor/products";
+import VendorOrders from "@/pages/vendor/orders";
+import VendorCustomers from "@/pages/vendor/customers";
+import VendorAnalytics from "@/pages/vendor/analytics";
+import VendorSettings from "@/pages/vendor/settings";
 
 function Router() {
   return (
@@ -37,8 +43,16 @@ function Router() {
       <Route path="/account/profile/edit" component={UserProfilePage} />
       <Route path="/auth/login" component={LoginPage} />
       <Route path="/auth/register" component={RegisterPage} />
-      <Route path="/seller/dashboard" component={SellerDashboard} />
       <Route path="/account/profile" component={ProfilePage} />
+      
+      {/* Vendor Routes */}
+      <Route path="/vendor/dashboard" component={VendorDashboard} />
+      <Route path="/vendor/products" component={VendorProducts} />
+      <Route path="/vendor/orders" component={VendorOrders} />
+      <Route path="/vendor/customers" component={VendorCustomers} />
+      <Route path="/vendor/analytics" component={VendorAnalytics} />
+      <Route path="/vendor/settings" component={VendorSettings} />
+      <Route path="/seller/dashboard" component={VendorDashboard} />
       
       {/* Fallback to 404 */}
       <Route component={NotFound} />

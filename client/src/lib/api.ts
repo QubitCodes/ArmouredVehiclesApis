@@ -221,6 +221,38 @@ export const api = {
       fetchJson<{ revenue: number; orders: number; products: number }>("/vendor/stats"),
     
     getProducts: () => fetchJson<Product[]>("/vendor/products"),
+    
+    createProduct: (data: Partial<Product>) =>
+      fetchJson<Product>("/vendor/products", { method: "POST", body: JSON.stringify(data) }),
+    
+    updateProduct: (id: number, data: Partial<Product>) =>
+      fetchJson<Product>(`/vendor/products/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    
+    deleteProduct: (id: number) =>
+      fetchJson<{ success: boolean }>(`/vendor/products/${id}`, { method: "DELETE" }),
+    
+    getOrders: () => fetchJson<any[]>("/vendor/orders"),
+    
+    updateOrderStatus: (orderId: string, status: string, note?: string) =>
+      fetchJson<any>(`/vendor/orders/${orderId}/status`, { 
+        method: "PATCH", 
+        body: JSON.stringify({ status, note }) 
+      }),
+    
+    getOrderHistory: (orderId: string) => fetchJson<any[]>(`/vendor/orders/${orderId}/history`),
+    
+    getCustomers: () => fetchJson<any[]>("/vendor/customers"),
+    
+    getAnalytics: () => fetchJson<{
+      totalRevenue: number;
+      totalOrders: number;
+      totalProducts: number;
+      totalCustomers: number;
+      revenueByMonth: { month: string; revenue: number }[];
+      topProducts: { id: number; name: string; revenue: number; quantity: number }[];
+      ordersByStatus: { status: string; count: number }[];
+      recentOrders: any[];
+    }>("/vendor/analytics"),
   },
 
   // Filters
