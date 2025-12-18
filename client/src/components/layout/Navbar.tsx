@@ -1,16 +1,71 @@
 import { Link, useLocation } from "wouter";
-import { Search, ShoppingCart, User, Menu, X, LayoutDashboard } from "lucide-react";
-import { useState } from "react";
+import { Search, ShoppingCart, User, Menu, X, LayoutDashboard, LogOut } from "lucide-react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
+interface AuthUser {
+  id: string;
+  name: string;
+  email: string;
+  userType: 'customer' | 'vendor' | 'admin' | 'super_admin';
+}
 
 export default function Navbar() {
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [user, setUser] = useState<AuthUser | null>(null);
   
-  const isLoggedIn = location.includes('/account') || location.includes('/seller');
-  const isVendor = location.includes('/seller');
+  // Check localStorage for auth state on mount and when location changes
+  useEffect(() => {
+    const checkAuth = () => {
+      const storedUser = localStorage.getItem('user');
+      const token = localStorage.getItem('auth_token');
+      if (storedUser && token) {
+        try {
+          setUser(JSON.parse(storedUser));
+        } catch {
+          setUser(null);
+        }
+      } else {
+        setUser(null);
+      }
+    };
+    
+    checkAuth();
+    
+    // Listen for storage changes (e.g., login/logout in another tab)
+    window.addEventListener('storage', checkAuth);
+    return () => window.removeEventListener('storage', checkAuth);
+  }, [location]);
+
+  const handleLogout = async () => {
+    const token = localStorage.getItem('auth_token');
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+    } catch (e) {
+      // Ignore errors
+    }
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('user');
+    setUser(null);
+    setLocation('/');
+  };
+  
+  const isLoggedIn = !!user;
+  const isVendor = user?.userType === 'vendor';
 
   // New darker Green theme matching Figma
   const NAV_BG = "bg-white"; 
@@ -73,11 +128,34 @@ export default function Navbar() {
               </Link>
             )}
             
-            <Link href={isLoggedIn ? "/account/profile" : "/auth/login"}>
-              <Button className={`${BUTTON_ORANGE} text-white hover:bg-orange-700 font-bold text-xs uppercase h-9 rounded-full px-6`}>
-                {isLoggedIn ? "My Account" : "Login"}
-              </Button>
-            </Link>
+            {isLoggedIn ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button className={`${BUTTON_ORANGE} text-white hover:bg-orange-700 font-bold text-xs uppercase h-9 rounded-full px-6`}>
+                    <User className="h-4 w-4 mr-2" />
+                    {user?.name?.split(' ')[0] || "Account"}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem asChild>
+                    <Link href="/account/profile" className="cursor-pointer">
+                      <User className="h-4 w-4 mr-2" />
+                      My Account
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleLogout} className="cursor-pointer text-red-600">
+                    <LogOut className="h-4 w-4 mr-2" />
+                    Logout
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <Link href="/auth/login">
+                <Button className={`${BUTTON_ORANGE} text-white hover:bg-orange-700 font-bold text-xs uppercase h-9 rounded-full px-6`}>
+                  Login
+                </Button>
+              </Link>
+            )}
 
             <Link href="/cart">
               <Button variant="ghost" size="icon" className="relative text-slate-600 hover:text-[#D97706]">
