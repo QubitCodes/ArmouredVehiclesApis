@@ -264,7 +264,7 @@ export default function ProfilePage() {
                           </div>
                           <div className="flex-1">
                             <h4 className="font-bold text-sm text-slate-900">{order.items[0].name}</h4>
-                            <div className="font-bold text-sm mt-1">AED {order.items[0].price.toFixed(2)}</div>
+                            <div className="font-bold text-sm mt-1">AED {parseFloat(order.items[0].price?.toString() || '0').toFixed(2)}</div>
                           </div>
                         </div>
                         
@@ -307,7 +307,7 @@ export default function ProfilePage() {
                           </div>
                           <div className="flex-1">
                             <h4 className="font-bold text-sm text-slate-900">{order.items[0].name}</h4>
-                            <div className="font-bold text-sm mt-1">AED {order.items[0].price.toFixed(2)}</div>
+                            <div className="font-bold text-sm mt-1">AED {parseFloat(order.items[0].price?.toString() || '0').toFixed(2)}</div>
                           </div>
                         </div>
                         
