@@ -27,6 +27,9 @@ export default function ProfilePage() {
   const queryClient = useQueryClient();
   const [showAddressDialog, setShowAddressDialog] = useState(false);
   const [editingAddress, setEditingAddress] = useState<Address | null>(null);
+  const [addressType, setAddressType] = useState<'home' | 'work' | 'other'>('home');
+  const [addressCountry, setAddressCountry] = useState('AE');
+  const [addressIsDefault, setAddressIsDefault] = useState(false);
 
   const { data: orders, isLoading: ordersLoading } = useQuery({
     queryKey: ['orders'],
@@ -478,9 +481,23 @@ export default function ProfilePage() {
                 <>
                   <div className="flex items-center justify-between mb-6">
                     <h1 className="text-2xl font-display font-bold uppercase">Saved Addresses</h1>
-                    <Dialog open={showAddressDialog} onOpenChange={setShowAddressDialog}>
+                    <Dialog open={showAddressDialog} onOpenChange={(open) => {
+                      if (!open) {
+                        setEditingAddress(null);
+                      }
+                      setShowAddressDialog(open);
+                    }}>
                       <DialogTrigger asChild>
-                        <Button className="bg-[#3D4736] hover:bg-[#2A3324]" data-testid="button-add-address">
+                        <Button 
+                          className="bg-[#3D4736] hover:bg-[#2A3324]" 
+                          data-testid="button-add-address"
+                          onClick={() => {
+                            setEditingAddress(null);
+                            setAddressType('home');
+                            setAddressCountry('AE');
+                            setAddressIsDefault(false);
+                          }}
+                        >
                           <Plus className="h-4 w-4 mr-2" />
                           Add New Address
                         </Button>
@@ -494,7 +511,7 @@ export default function ProfilePage() {
                           const formData = new FormData(e.currentTarget);
                           const addressData = {
                             label: formData.get('label') as string,
-                            addressType: formData.get('addressType') as 'home' | 'work' | 'other',
+                            addressType: addressType,
                             fullName: formData.get('fullName') as string,
                             phone: formData.get('phone') as string,
                             addressLine1: formData.get('addressLine1') as string,
@@ -502,8 +519,8 @@ export default function ProfilePage() {
                             city: formData.get('city') as string,
                             state: formData.get('state') as string,
                             postalCode: formData.get('postalCode') as string,
-                            country: formData.get('country') as string,
-                            isDefault: formData.get('isDefault') === 'on',
+                            country: addressCountry,
+                            isDefault: addressIsDefault,
                           };
                           if (editingAddress) {
                             updateAddressMutation.mutate({ id: editingAddress.id, data: addressData });
@@ -518,7 +535,7 @@ export default function ProfilePage() {
                             </div>
                             <div>
                               <Label htmlFor="addressType">Type</Label>
-                              <Select name="addressType" defaultValue={editingAddress?.addressType || 'home'}>
+                              <Select value={addressType} onValueChange={(v) => setAddressType(v as 'home' | 'work' | 'other')}>
                                 <SelectTrigger>
                                   <SelectValue />
                                 </SelectTrigger>
@@ -565,7 +582,7 @@ export default function ProfilePage() {
                             </div>
                             <div>
                               <Label htmlFor="country">Country</Label>
-                              <Select name="country" defaultValue={editingAddress?.country || 'AE'}>
+                              <Select value={addressCountry} onValueChange={setAddressCountry}>
                                 <SelectTrigger>
                                   <SelectValue />
                                 </SelectTrigger>
@@ -580,7 +597,7 @@ export default function ProfilePage() {
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
-                            <Checkbox id="isDefault" name="isDefault" defaultChecked={editingAddress?.isDefault || false} />
+                            <Checkbox id="isDefault" checked={addressIsDefault} onCheckedChange={(checked) => setAddressIsDefault(!!checked)} />
                             <Label htmlFor="isDefault">Set as default address</Label>
                           </div>
                           <div className="flex justify-end gap-2">
@@ -649,7 +666,13 @@ export default function ProfilePage() {
                               variant="outline" 
                               size="sm" 
                               className="text-xs"
-                              onClick={() => { setEditingAddress(address); setShowAddressDialog(true); }}
+                              onClick={() => { 
+                                setEditingAddress(address); 
+                                setAddressType(address.addressType as 'home' | 'work' | 'other');
+                                setAddressCountry(address.country);
+                                setAddressIsDefault(address.isDefault || false);
+                                setShowAddressDialog(true); 
+                              }}
                               data-testid={`button-edit-address-${address.id}`}
                             >
                               Edit
