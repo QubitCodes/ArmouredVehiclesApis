@@ -94,10 +94,21 @@ export const orderItems = pgTable("order_items", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   orderId: varchar("order_id").notNull().references(() => orders.id),
   productId: integer("product_id").notNull().references(() => products.id),
+  vendorId: varchar("vendor_id").references(() => users.id),
   name: text("name").notNull(),
   image: text("image").notNull(),
   price: decimal("price", { precision: 10, scale: 2 }).notNull(),
   quantity: integer("quantity").notNull(),
+});
+
+// Order status history table for tracking status changes
+export const orderStatusHistory = pgTable("order_status_history", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  orderId: varchar("order_id").notNull().references(() => orders.id),
+  status: orderStatusEnum("status").notNull(),
+  changedBy: varchar("changed_by").references(() => users.id),
+  note: text("note"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 // Refunds table
@@ -289,6 +300,7 @@ export const ordersRelations = relations(orders, ({ one, many }) => ({
     references: [users.id],
   }),
   items: many(orderItems),
+  statusHistory: many(orderStatusHistory),
 }));
 
 export const orderItemsRelations = relations(orderItems, ({ one }) => ({
@@ -299,6 +311,21 @@ export const orderItemsRelations = relations(orderItems, ({ one }) => ({
   product: one(products, {
     fields: [orderItems.productId],
     references: [products.id],
+  }),
+  vendor: one(users, {
+    fields: [orderItems.vendorId],
+    references: [users.id],
+  }),
+}));
+
+export const orderStatusHistoryRelations = relations(orderStatusHistory, ({ one }) => ({
+  order: one(orders, {
+    fields: [orderStatusHistory.orderId],
+    references: [orders.id],
+  }),
+  changedByUser: one(users, {
+    fields: [orderStatusHistory.changedBy],
+    references: [users.id],
   }),
 }));
 
@@ -365,6 +392,11 @@ export const insertOrderItemSchema = createInsertSchema(orderItems).omit({
   id: true,
 });
 
+export const insertOrderStatusHistorySchema = createInsertSchema(orderStatusHistory).omit({
+  id: true,
+  createdAt: true,
+});
+
 export const insertAuthSessionSchema = createInsertSchema(authSessions).omit({
   id: true,
   lastUsedAt: true,
@@ -415,6 +447,9 @@ export type InsertOrder = z.infer<typeof insertOrderSchema>;
 
 export type OrderItem = typeof orderItems.$inferSelect;
 export type InsertOrderItem = z.infer<typeof insertOrderItemSchema>;
+
+export type OrderStatusHistory = typeof orderStatusHistory.$inferSelect;
+export type InsertOrderStatusHistory = z.infer<typeof insertOrderStatusHistorySchema>;
 
 export type AuthSession = typeof authSessions.$inferSelect;
 export type InsertAuthSession = z.infer<typeof insertAuthSessionSchema>;
