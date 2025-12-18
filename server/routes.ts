@@ -168,7 +168,9 @@ export async function registerRoutes(
    *     description: |
    *       Creates a new user account and returns JWT access and refresh tokens.
    *       
-   *       **Used by pages:** Register Page (/auth/register)
+   *       ## Pages / Sections Used
+   *       - **Register Page** (`/auth/register`)
+   *         - Registration Form - handles form submission and account creation
    *     requestBody:
    *       required: true
    *       content:
@@ -265,7 +267,9 @@ export async function registerRoutes(
    *     description: |
    *       Authenticates a user and returns JWT access and refresh tokens.
    *       
-   *       **Used by pages:** Login Page (/auth/login)
+   *       ## Pages / Sections Used
+   *       - **Login Page** (`/auth/login`)
+   *         - Login Form - handles email/password authentication
    *     requestBody:
    *       required: true
    *       content:
@@ -348,7 +352,11 @@ export async function registerRoutes(
    *     description: |
    *       Revokes the current session token.
    *       
-   *       **Used by pages:** Navbar (all pages)
+   *       ## Pages / Sections Used
+   *       - **Navbar** (all authenticated pages)
+   *         - User Menu Dropdown - Logout button
+   *       - **Profile Page** (`/account/profile`)
+   *         - Sessions Section - when logging out current session
    *     security:
    *       - bearerAuth: []
    *     responses:
@@ -371,7 +379,10 @@ export async function registerRoutes(
    *     description: |
    *       Uses a refresh token to get a new access token.
    *       
-   *       **Used by pages:** All authenticated pages (automatic refresh)
+   *       ## Pages / Sections Used
+   *       - **All Authenticated Pages** (automatic background refresh)
+   *         - API Client - automatically refreshes token 60 seconds before expiry
+   *         - Retry Handler - refreshes token on 401 responses
    *     requestBody:
    *       required: true
    *       content:
@@ -446,7 +457,9 @@ export async function registerRoutes(
    *     description: |
    *       Returns a list of all active sessions for the current user.
    *       
-   *       **Used by pages:** My Account Security (/account/profile)
+   *       ## Pages / Sections Used
+   *       - **Profile Page** (`/account/profile`)
+   *         - Sessions Tab - displays list of active sessions with device info, IP address, and last active time
    *     security:
    *       - bearerAuth: []
    *     responses:
@@ -486,7 +499,9 @@ export async function registerRoutes(
    *     description: |
    *       Revokes a specific session, logging out that device.
    *       
-   *       **Used by pages:** My Account Security (/account/profile)
+   *       ## Pages / Sections Used
+   *       - **Profile Page** (`/account/profile`)
+   *         - Sessions Tab - "Revoke" button for each session card
    *     security:
    *       - bearerAuth: []
    *     parameters:
@@ -532,7 +547,9 @@ export async function registerRoutes(
    *     description: |
    *       Revokes all sessions except the current one and increments token version.
    *       
-   *       **Used by pages:** My Account Security (/account/profile)
+   *       ## Pages / Sections Used
+   *       - **Profile Page** (`/account/profile`)
+   *         - Sessions Tab - "Log out all other devices" button
    *     security:
    *       - bearerAuth: []
    *     responses:
@@ -571,7 +588,12 @@ export async function registerRoutes(
    *     description: |
    *       Returns a list of products, optionally filtered by category, search term, or price range.
    *       
-   *       **Used by pages:** Products Page (/products), Home Page (/), Navbar (search suggestions), Wishlist Page (/wishlist)
+   *       ## Pages / Sections Used
+   *       - **Products Page** (`/products`)
+   *         - Product Grid - main product listing with filter/sort
+   *         - Search Suggestions - autocomplete dropdown
+   *       - **Wishlist Page** (`/account/wishlist`)
+   *         - Wishlist Grid - fetches product details for saved items
    *     parameters:
    *       - in: query
    *         name: categoryId
@@ -624,7 +646,9 @@ export async function registerRoutes(
    *     description: |
    *       Returns a curated list of featured products to display on the home page.
    *       
-   *       **Used by pages:** Home Page (/)
+   *       ## Pages / Sections Used
+   *       - **Home Page** (`/`)
+   *         - Featured Products Section - dark themed product cards carousel
    *     responses:
    *       200:
    *         description: List of featured products
@@ -647,7 +671,11 @@ export async function registerRoutes(
    *     description: |
    *       Returns a list of best-selling products.
    *       
-   *       **Used by pages:** Home Page (/), Products Page (/products)
+   *       ## Pages / Sections Used
+   *       - **Home Page** (`/`)
+   *         - Top Selling Products Section - beige themed grid carousel
+   *       - **Products Page** (`/products`)
+   *         - Sidebar - "Top Selling Products" carousel section
    *     responses:
    *       200:
    *         description: List of top selling products
@@ -670,7 +698,13 @@ export async function registerRoutes(
    *     description: |
    *       Returns detailed information about a specific product.
    *       
-   *       **Used by pages:** Product Details Page (/products/:id)
+   *       ## Pages / Sections Used
+   *       - **Product Details Page** (`/products/:id`)
+   *         - Product Image Gallery - main image and thumbnails
+   *         - Product Info Section - name, price, SKU, description
+   *         - Specifications Tab - technical specifications
+   *         - Vehicle Fitment Tab - compatible vehicles
+   *         - Warranty Info - warranty details
    *     parameters:
    *       - in: path
    *         name: id
@@ -711,7 +745,9 @@ export async function registerRoutes(
    *     description: |
    *       Returns products similar to the specified product based on category.
    *       
-   *       **Used by pages:** Product Details Page (/products/:id)
+   *       ## Pages / Sections Used
+   *       - **Product Details Page** (`/products/:id`)
+   *         - Right Sidebar - "Similar Products" list with thumbnails
    *     parameters:
    *       - in: path
    *         name: id
@@ -750,7 +786,9 @@ export async function registerRoutes(
    *     description: |
    *       Returns product recommendations for the user.
    *       
-   *       **Used by pages:** Product Details Page (/products/:id)
+   *       ## Pages / Sections Used
+   *       - **Product Details Page** (`/products/:id`)
+   *         - Right Sidebar - "Recommended Products" grid with thumbnails
    *     parameters:
    *       - in: path
    *         name: id
@@ -775,6 +813,12 @@ export async function registerRoutes(
    *   post:
    *     tags: [Products]
    *     summary: Create a new product (vendor only)
+   *     description: |
+   *       Creates a new product listing. Requires vendor authentication.
+   *       
+   *       ## Pages / Sections Used
+   *       - **Vendor Dashboard** (`/vendor/products`) - _Not yet implemented in frontend_
+   *         - Add Product Form - create new product listing
    *     security:
    *       - bearerAuth: []
    *     requestBody:
@@ -822,7 +866,13 @@ export async function registerRoutes(
    *     description: |
    *       Returns a list of all product categories for navigation.
    *       
-   *       **Used by pages:** Home Page (/), Products Page (/products), Navbar (all pages)
+   *       ## Pages / Sections Used
+   *       - **Home Page** (`/`)
+   *         - Categories Section - category cards with images
+   *       - **Products Page** (`/products`)
+   *         - Filter Sidebar - category checkboxes for filtering
+   *       - **Navbar** (all pages)
+   *         - Categories Dropdown Menu - navigation links
    *     responses:
    *       200:
    *         description: List of categories
@@ -850,6 +900,12 @@ export async function registerRoutes(
    *   get:
    *     tags: [Reviews]
    *     summary: Get reviews for a product
+   *     description: |
+   *       Returns all reviews for a specific product.
+   *       
+   *       ## Pages / Sections Used
+   *       - **Product Details Page** (`/products/:id`)
+   *         - Reviews Tab - customer reviews list with ratings
    *     parameters:
    *       - in: path
    *         name: id
@@ -875,6 +931,12 @@ export async function registerRoutes(
    *   post:
    *     tags: [Reviews]
    *     summary: Create a review (authenticated users only)
+   *     description: |
+   *       Submits a new review for a product.
+   *       
+   *       ## Pages / Sections Used
+   *       - **Product Details Page** (`/products/:id`)
+   *         - Reviews Tab - "Write a Review" form (authenticated users only)
    *     security:
    *       - bearerAuth: []
    *     parameters:
@@ -932,7 +994,14 @@ export async function registerRoutes(
    *     description: |
    *       Returns all items in the user's shopping cart with product details.
    *       
-   *       **Used by pages:** Cart Page (/cart), Checkout Page (/checkout), Navbar (cart count)
+   *       ## Pages / Sections Used
+   *       - **Cart Page** (`/cart`)
+   *         - Cart Items List - product cards with quantity controls
+   *         - Order Summary - total calculation
+   *       - **Checkout Page** (`/checkout`)
+   *         - Order Review - summary before payment
+   *       - **Navbar** (all authenticated pages)
+   *         - Cart Icon Badge - displays item count
    *     security:
    *       - bearerAuth: []
    *     responses:
@@ -963,7 +1032,11 @@ export async function registerRoutes(
    *     description: |
    *       Adds a product to the user's shopping cart.
    *       
-   *       **Used by pages:** Product Details Page (/products/:id)
+   *       ## Pages / Sections Used
+   *       - **Product Details Page** (`/products/:id`)
+   *         - Add to Cart Button - primary CTA in product info section
+   *       - **Product Card** (Products Page, Home Page)
+   *         - Quick Add to Cart icon button
    *     security:
    *       - bearerAuth: []
    *     requestBody:
@@ -1012,7 +1085,9 @@ export async function registerRoutes(
    *     description: |
    *       Updates the quantity of an item in the cart.
    *       
-   *       **Used by pages:** Cart Page (/cart)
+   *       ## Pages / Sections Used
+   *       - **Cart Page** (`/cart`)
+   *         - Cart Item Row - Plus/Minus quantity buttons
    *     security:
    *       - bearerAuth: []
    *     parameters:
@@ -1066,7 +1141,9 @@ export async function registerRoutes(
    *     description: |
    *       Removes an item from the cart.
    *       
-   *       **Used by pages:** Cart Page (/cart)
+   *       ## Pages / Sections Used
+   *       - **Cart Page** (`/cart`)
+   *         - Cart Item Row - "Remove" link button
    *     security:
    *       - bearerAuth: []
    *     parameters:
@@ -1104,7 +1181,9 @@ export async function registerRoutes(
    *       Creates a Stripe checkout session for payment processing.
    *       Returns checkout URL for Stripe-hosted checkout, or test mode indicator if Stripe is not configured.
    *       
-   *       **Used by pages:** Checkout Page (/checkout)
+   *       ## Pages / Sections Used
+   *       - **Cart Page** (`/cart`)
+   *         - "Proceed to Checkout" button - initiates Stripe checkout flow
    *     security:
    *       - bearerAuth: []
    *     responses:
@@ -1189,7 +1268,10 @@ export async function registerRoutes(
    *     description: |
    *       Returns a list of all orders placed by the authenticated user.
    *       
-   *       **Used by pages:** Profile Page (/account/profile), Order History
+   *       ## Pages / Sections Used
+   *       - **Profile Page** (`/account/profile`)
+   *         - Orders Tab - order history list with status badges
+   *         - Recent Orders Section - last 3 orders summary
    *     security:
    *       - bearerAuth: []
    *     responses:
@@ -1215,6 +1297,13 @@ export async function registerRoutes(
    *   get:
    *     tags: [Orders]
    *     summary: Get order by ID
+   *     description: |
+   *       Returns detailed information about a specific order.
+   *       
+   *       ## Pages / Sections Used
+   *       - **Order Details Page** (`/orders/:id`) - _Not yet implemented in frontend_
+   *         - Order Summary - items, totals, shipping info
+   *         - Order Status - tracking information
    *     security:
    *       - bearerAuth: []
    *     parameters:
@@ -1254,6 +1343,12 @@ export async function registerRoutes(
    *   post:
    *     tags: [Orders]
    *     summary: Create order (checkout)
+   *     description: |
+   *       Creates a new order from cart items after payment.
+   *       
+   *       ## Pages / Sections Used
+   *       - **Checkout Success Page** (`/checkout/success`)
+   *         - Order Confirmation - creates order after successful Stripe payment
    *     security:
    *       - bearerAuth: []
    *     requestBody:
@@ -1326,6 +1421,12 @@ export async function registerRoutes(
    *   get:
    *     tags: [Vendor]
    *     summary: Get vendor statistics
+   *     description: |
+   *       Returns sales statistics for the vendor dashboard.
+   *       
+   *       ## Pages / Sections Used
+   *       - **Vendor Dashboard** (`/vendor`) - _Not yet implemented in frontend_
+   *         - Stats Overview - revenue, orders, products count
    *     security:
    *       - bearerAuth: []
    *     responses:
@@ -1359,6 +1460,12 @@ export async function registerRoutes(
    *   get:
    *     tags: [Vendor]
    *     summary: Get vendor's products
+   *     description: |
+   *       Returns all products created by the authenticated vendor.
+   *       
+   *       ## Pages / Sections Used
+   *       - **Vendor Dashboard** (`/vendor/products`) - _Not yet implemented in frontend_
+   *         - Products Table - manage listings, inventory, pricing
    *     security:
    *       - bearerAuth: []
    *     responses:
@@ -1386,6 +1493,14 @@ export async function registerRoutes(
    *   get:
    *     tags: [Auth]
    *     summary: Get current user
+   *     description: |
+   *       Returns the currently authenticated user's information.
+   *       
+   *       ## Pages / Sections Used
+   *       - **Navbar** (all pages)
+   *         - User Menu - displays logged-in user info
+   *       - **Profile Page** (`/account/profile`)
+   *         - Account Details Section - user info display
    *     security:
    *       - bearerAuth: []
    *     responses:
@@ -1408,6 +1523,12 @@ export async function registerRoutes(
    *   get:
    *     tags: [Products]
    *     summary: Get filter options
+   *     description: |
+   *       Returns available filter options based on current product inventory.
+   *       
+   *       ## Pages / Sections Used
+   *       - **Products Page** (`/products`)
+   *         - Filter Sidebar - brands, departments, surface types, materials checkboxes
    *     responses:
    *       200:
    *         description: Available filter options
