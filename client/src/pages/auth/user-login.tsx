@@ -7,6 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Link, useLocation } from "wouter";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { api, storeTokens } from "@/lib/api";
 
 export default function LoginPage() {
   const [, setLocation] = useLocation();
@@ -22,21 +23,10 @@ export default function LoginPage() {
     setIsLoading(true);
     
     try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
+      const data = await api.auth.login(email, password);
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        setError(data.error || 'Login failed');
-        return;
-      }
-
-      // Store token in localStorage
-      localStorage.setItem('auth_token', data.token);
+      // Store JWT tokens
+      storeTokens(data.accessToken, data.refreshToken, data.expiresIn);
       localStorage.setItem('user', JSON.stringify(data.user));
 
       toast({
@@ -50,9 +40,9 @@ export default function LoginPage() {
       } else {
         setLocation('/account/profile');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Login failed", err);
-      setError("Failed to connect to server. Please try again.");
+      setError(err.message || "Failed to connect to server. Please try again.");
     } finally {
       setIsLoading(false);
     }

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api, getAccessToken, clearTokens } from "@/lib/api";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -67,7 +67,7 @@ export default function Navbar() {
   useEffect(() => {
     const checkAuth = () => {
       const storedUser = localStorage.getItem('user');
-      const token = localStorage.getItem('auth_token');
+      const token = getAccessToken();
       if (storedUser && token) {
         try {
           setUser(JSON.parse(storedUser));
@@ -87,19 +87,12 @@ export default function Navbar() {
   }, [location]);
 
   const handleLogout = async () => {
-    const token = localStorage.getItem('auth_token');
     try {
-      await fetch('/api/auth/logout', {
-        method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-        },
-      });
+      await api.auth.logout();
     } catch (e) {
       // Ignore errors
     }
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('user');
+    clearTokens();
     setUser(null);
     setLocation('/');
   };

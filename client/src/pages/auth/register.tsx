@@ -8,6 +8,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Link, useLocation } from "wouter";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { api, storeTokens } from "@/lib/api";
 
 export default function RegisterPage() {
   const [, setLocation] = useLocation();
@@ -40,26 +41,15 @@ export default function RegisterPage() {
 
     setIsLoading(true);
     try {
-      const response = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: formData.name,
-          email: formData.email,
-          password: formData.password,
-          userType: formData.userType,
-        }),
-      });
+      const data = await api.auth.register(
+        formData.name,
+        formData.email,
+        formData.password,
+        formData.userType
+      );
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        setError(data.error || 'Registration failed');
-        return;
-      }
-
-      // Store token in localStorage
-      localStorage.setItem('auth_token', data.token);
+      // Store JWT tokens
+      storeTokens(data.accessToken, data.refreshToken, data.expiresIn);
       localStorage.setItem('user', JSON.stringify(data.user));
 
       toast({
@@ -73,9 +63,9 @@ export default function RegisterPage() {
       } else {
         setLocation('/');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Registration failed", err);
-      setError("Failed to connect to server. Please try again.");
+      setError(err.message || "Failed to connect to server. Please try again.");
     } finally {
       setIsLoading(false);
     }

@@ -2,12 +2,96 @@ import type { Product, Category, Review, CartItem, Order } from "@shared/schema"
 
 const API_BASE = "/api";
 
+// Token storage keys
+const ACCESS_TOKEN_KEY = 'access_token';
+const REFRESH_TOKEN_KEY = 'refresh_token';
+const TOKEN_EXPIRY_KEY = 'token_expiry';
+
+// Get stored tokens
+export function getAccessToken(): string | null {
+  return localStorage.getItem(ACCESS_TOKEN_KEY);
+}
+
+export function getRefreshToken(): string | null {
+  return localStorage.getItem(REFRESH_TOKEN_KEY);
+}
+
+// Store tokens
+export function storeTokens(accessToken: string, refreshToken: string, expiresIn: number) {
+  localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+  localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+  localStorage.setItem(TOKEN_EXPIRY_KEY, String(Date.now() + (expiresIn * 1000)));
+}
+
+// Clear tokens (logout)
+export function clearTokens() {
+  localStorage.removeItem(ACCESS_TOKEN_KEY);
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
+  localStorage.removeItem(TOKEN_EXPIRY_KEY);
+  localStorage.removeItem('user');
+  // Also clear old token key for backward compatibility
+  localStorage.removeItem('auth_token');
+}
+
+// Check if token is about to expire (within 60 seconds)
+function isTokenExpiringSoon(): boolean {
+  const expiry = localStorage.getItem(TOKEN_EXPIRY_KEY);
+  if (!expiry) return true;
+  return Date.now() > (parseInt(expiry) - 60000);
+}
+
+// Refresh tokens
+let refreshPromise: Promise<boolean> | null = null;
+
+async function refreshAccessToken(): Promise<boolean> {
+  // Prevent multiple simultaneous refresh requests
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) {
+    return false;
+  }
+
+  refreshPromise = (async () => {
+    try {
+      const response = await fetch(`${API_BASE}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      });
+
+      if (!response.ok) {
+        clearTokens();
+        return false;
+      }
+
+      const data = await response.json();
+      storeTokens(data.accessToken, data.refreshToken, data.expiresIn);
+      return true;
+    } catch (error) {
+      clearTokens();
+      return false;
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
+}
+
 function getAuthHeaders(): HeadersInit {
-  const token = localStorage.getItem('auth_token');
+  const token = getAccessToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
+async function fetchJson<T>(url: string, options?: RequestInit, retry = true): Promise<T> {
+  // Check if token needs refresh before making request
+  if (isTokenExpiringSoon() && getRefreshToken()) {
+    await refreshAccessToken();
+  }
+
   const response = await fetch(`${API_BASE}${url}`, {
     ...options,
     headers: {
@@ -16,6 +100,14 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
       ...options?.headers,
     },
   });
+
+  // If unauthorized and we have a refresh token, try to refresh and retry
+  if (response.status === 401 && retry && getRefreshToken()) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      return fetchJson<T>(url, options, false);
+    }
+  }
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));
@@ -140,5 +232,62 @@ export const api = {
   user: {
     getCurrent: () => 
       fetchJson<{ id: string; email: string; name: string; userType: 'customer' | 'vendor' | 'admin' | 'super_admin' }>("/user"),
+  },
+
+  // Auth
+  auth: {
+    login: (email: string, password: string) =>
+      fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      }).then(async (res) => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Login failed');
+        return data as {
+          user: { id: string; email: string; name: string; userType: string };
+          accessToken: string;
+          refreshToken: string;
+          expiresIn: number;
+        };
+      }),
+
+    register: (name: string, email: string, password: string, userType: string) =>
+      fetch(`${API_BASE}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, password, userType }),
+      }).then(async (res) => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Registration failed');
+        return data as {
+          user: { id: string; email: string; name: string; userType: string };
+          accessToken: string;
+          refreshToken: string;
+          expiresIn: number;
+        };
+      }),
+
+    logout: () =>
+      fetch(`${API_BASE}/auth/logout`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }),
+
+    logoutAll: () =>
+      fetchJson<{ message: string }>('/auth/logout-all', { method: 'POST' }),
+
+    getSessions: () =>
+      fetchJson<Array<{
+        id: string;
+        deviceLabel: string;
+        ipAddress: string;
+        lastUsedAt: string;
+        createdAt: string;
+        isCurrent: boolean;
+      }>>('/auth/sessions'),
+
+    revokeSession: (sessionId: string) =>
+      fetchJson<{ message: string }>(`/auth/sessions/${sessionId}`, { method: 'DELETE' }),
   },
 };
