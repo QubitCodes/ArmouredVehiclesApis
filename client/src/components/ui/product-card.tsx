@@ -3,7 +3,7 @@ import { Product } from "@/lib/mockApi";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ShoppingCart, Lock } from "lucide-react";
+import { ShoppingCart, Lock, Star } from "lucide-react";
 import { Link } from "wouter";
 
 interface ProductCardProps {
@@ -11,6 +11,22 @@ interface ProductCardProps {
 }
 
 export default function ProductCard({ product }: ProductCardProps) {
+  // Mock rating rendering helper
+  const renderRating = (rating?: number) => {
+    if (!rating) return null;
+    return (
+      <div className="flex items-center gap-1 mb-2">
+        {[1, 2, 3, 4, 5].map((star) => (
+          <Star 
+            key={star} 
+            className={`h-3 w-3 ${star <= Math.round(rating) ? "fill-yellow-400 text-yellow-400" : "text-muted-foreground/30"}`} 
+          />
+        ))}
+        <span className="text-xs text-muted-foreground ml-1">({Math.floor(Math.random() * 50) + 1})</span>
+      </div>
+    );
+  };
+
   return (
     <Card className="overflow-hidden group hover:border-primary/50 transition-colors duration-300 h-full flex flex-col">
       <Link href={`/products/${product.id}`}>
@@ -37,7 +53,12 @@ export default function ProductCard({ product }: ProductCardProps) {
       </Link>
       
       <CardContent className="p-4 flex-1">
-        <div className="text-xs text-muted-foreground mb-1">{product.vendor}</div>
+        <div className="flex justify-between items-start mb-1">
+          <div className="text-xs text-muted-foreground font-medium">{product.vendor}</div>
+          {/* Random rating for mock purposes if not present in data yet */}
+          {renderRating(4.5)} 
+        </div>
+        
         <Link href={`/products/${product.id}`}>
           <h3 className="font-semibold text-lg leading-tight mb-2 line-clamp-2 hover:text-primary transition-colors cursor-pointer">
             {product.name}

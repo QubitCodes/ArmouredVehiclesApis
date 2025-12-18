@@ -8,6 +8,7 @@ export interface Product {
   price: number | null; // Price can be null if not authenticated
   image: string;
   category: string;
+  department?: string;
   description: string;
   condition: 'new' | 'used' | 'refurbished';
   stock: number;
@@ -15,6 +16,14 @@ export interface Product {
   make: string;
   model: string;
   year: number;
+  rating?: number;
+  attributes?: {
+    surfaceType?: string;
+    frictionalMaterial?: string;
+    abutmentClipsIncluded?: boolean;
+    brakeLubricantIncluded?: boolean;
+    [key: string]: any;
+  };
 }
 
 export interface User {
@@ -92,13 +101,21 @@ export const MOCK_PRODUCTS: Product[] = [
     price: 450.00,
     image: "https://images.unsplash.com/photo-1600706432502-76b1e601a746?auto=format&fit=crop&q=80&w=800",
     category: "Brakes",
+    department: "Replacement Parts",
     description: "High performance ceramic brake kit for extreme stopping power.",
     condition: 'new',
     stock: 15,
     vendor: "AutoStop Pro",
     make: "Toyota",
     model: "Camry",
-    year: 2022
+    year: 2022,
+    rating: 4.8,
+    attributes: {
+      surfaceType: "Slotted",
+      frictionalMaterial: "Ceramic",
+      abutmentClipsIncluded: true,
+      brakeLubricantIncluded: true
+    }
   },
   {
     id: 2,
@@ -107,13 +124,15 @@ export const MOCK_PRODUCTS: Product[] = [
     price: 320.50,
     image: "https://images.unsplash.com/photo-1616788494707-ec28f08d05a1?auto=format&fit=crop&q=80&w=800",
     category: "Lighting",
+    department: "Accessories",
     description: "Bright LED headlight assembly, plug and play.",
     condition: 'new',
     stock: 8,
     vendor: "Lumina Auto",
     make: "Honda",
     model: "Civic",
-    year: 2021
+    year: 2021,
+    rating: 4.5
   },
   {
     id: 3,
@@ -122,13 +141,15 @@ export const MOCK_PRODUCTS: Product[] = [
     price: 125.00,
     image: "https://images.unsplash.com/photo-1574360774620-192cb91b8606?auto=format&fit=crop&q=80&w=800",
     category: "Fluids",
+    department: "Maintenance",
     description: "Premium synthetic oil for engine longevity.",
     condition: 'new',
     stock: 50,
     vendor: "Global Lubes",
     make: "Universal",
     model: "Universal",
-    year: 2024
+    year: 2024,
+    rating: 4.9
   },
   {
     id: 4,
@@ -137,13 +158,15 @@ export const MOCK_PRODUCTS: Product[] = [
     price: 180.00,
     image: "https://images.unsplash.com/photo-1486262715619-67b85e0b08d3?auto=format&fit=crop&q=80&w=800",
     category: "Engine",
+    department: "Replacement Parts",
     description: "Quality remanufactured alternator with 1 year warranty.",
     condition: 'refurbished',
     stock: 3,
     vendor: "ReBuild Parts",
     make: "Ford",
     model: "F-150",
-    year: 2019
+    year: 2019,
+    rating: 4.2
   },
   {
     id: 5,
@@ -152,13 +175,19 @@ export const MOCK_PRODUCTS: Product[] = [
     price: 850.00,
     image: "https://images.unsplash.com/photo-1570188167980-d2d02c42345e?auto=format&fit=crop&q=80&w=800",
     category: "Suspension",
+    department: "Performance",
     description: "Adjustable coilovers for track and street use.",
     condition: 'new',
     stock: 5,
     vendor: "TrackReady",
     make: "BMW",
     model: "M3",
-    year: 2020
+    year: 2020,
+    rating: 5.0,
+    attributes: {
+      surfaceType: "Performance",
+      frictionalMaterial: "Steel"
+    }
   },
   {
     id: 6,
@@ -167,13 +196,15 @@ export const MOCK_PRODUCTS: Product[] = [
     price: 550.00,
     image: "https://images.unsplash.com/photo-1560965385-a7455d311394?auto=format&fit=crop&q=80&w=800",
     category: "Interior",
+    department: "Accessories",
     description: "Ergonomic carbon fiber steering wheel with leather grips.",
     condition: 'new',
     stock: 12,
     vendor: "Luxury Mods",
     make: "BMW",
     model: "M4",
-    year: 2023
+    year: 2023,
+    rating: 4.7
   },
   {
     id: 7,
@@ -182,13 +213,15 @@ export const MOCK_PRODUCTS: Product[] = [
     price: 1200.00,
     image: "https://images.unsplash.com/photo-1578844251758-2f71da645217?auto=format&fit=crop&q=80&w=800",
     category: "Wheels & Tires",
+    department: "Replacement Parts",
     description: "All-season high performance tires for sports cars.",
     condition: 'new',
     stock: 20,
     vendor: "TireMaster",
     make: "Porsche",
     model: "911",
-    year: 2022
+    year: 2022,
+    rating: 4.8
   },
   {
     id: 8,
@@ -197,15 +230,24 @@ export const MOCK_PRODUCTS: Product[] = [
     price: 89.99,
     image: "https://images.unsplash.com/photo-1601362840469-51e4d8d58785?auto=format&fit=crop&q=80&w=800",
     category: "Exterior",
+    department: "Maintenance",
     description: "DIY ceramic coating kit for long-lasting paint protection.",
     condition: 'new',
     stock: 100,
     vendor: "ShineOn",
     make: "Universal",
     model: "Universal",
-    year: 2024
+    year: 2024,
+    rating: 4.3
   }
 ];
+
+export const MOCK_FILTERS = {
+  brands: ["AutoStop Pro", "Lumina Auto", "Global Lubes", "ReBuild Parts", "TrackReady", "Luxury Mods", "TireMaster", "ShineOn"],
+  departments: ["Replacement Parts", "Accessories", "Maintenance", "Performance"],
+  surfaceTypes: ["Slotted", "Drilled", "Smooth", "Performance"],
+  frictionalMaterials: ["Ceramic", "Semi-Metallic", "Organic", "Steel"]
+};
 
 // Simulated API calls matching the SRS requirements
 export const api = {
@@ -243,6 +285,10 @@ export const api = {
   
   getSlides: async () => {
     return MOCK_SLIDES;
+  },
+
+  getFilters: async () => {
+    return MOCK_FILTERS;
   },
   
   // Auth
