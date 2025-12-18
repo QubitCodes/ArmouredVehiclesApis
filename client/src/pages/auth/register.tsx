@@ -7,10 +7,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Link, useLocation } from "wouter";
 import { useState } from "react";
+import { useToast } from "@/hooks/use-toast";
 
 export default function RegisterPage() {
   const [, setLocation] = useLocation();
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
+  const { toast } = useToast();
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -23,28 +26,56 @@ export default function RegisterPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError("");
     
     if (formData.password !== formData.confirmPassword) {
-      alert("Passwords do not match");
+      setError("Passwords do not match");
       return;
     }
 
     if (!formData.agreeTerms) {
-      alert("Please agree to the terms and conditions");
+      setError("Please agree to the terms and conditions");
       return;
     }
 
     setIsLoading(true);
     try {
-      // TODO: Implement actual registration API call
-      console.log("Registration data:", formData);
-      
-      // Simulate success and redirect to login
-      setTimeout(() => {
-        setLocation('/auth/login');
-      }, 1000);
-    } catch (error) {
-      console.error("Registration failed", error);
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: formData.name,
+          email: formData.email,
+          password: formData.password,
+          userType: formData.userType,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setError(data.error || 'Registration failed');
+        return;
+      }
+
+      // Store token in localStorage
+      localStorage.setItem('auth_token', data.token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+
+      toast({
+        title: "Account created!",
+        description: "Welcome to ArmoredMart. You are now logged in.",
+      });
+
+      // Redirect based on user type
+      if (data.user.userType === 'vendor') {
+        setLocation('/seller/dashboard');
+      } else {
+        setLocation('/');
+      }
+    } catch (err) {
+      console.error("Registration failed", err);
+      setError("Failed to connect to server. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -150,6 +181,12 @@ export default function RegisterPage() {
                     className="h-11"
                     data-testid="input-company-name"
                   />
+                </div>
+              )}
+
+              {error && (
+                <div className="bg-red-50 text-red-600 p-3 rounded text-sm border border-red-200">
+                  {error}
                 </div>
               )}
               

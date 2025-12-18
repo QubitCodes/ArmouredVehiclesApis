@@ -6,29 +6,53 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Link, useLocation } from "wouter";
 import { useState } from "react";
-import { api } from "@/lib/mockApi";
+import { useToast } from "@/hooks/use-toast";
 
 export default function LoginPage() {
   const [, setLocation] = useLocation();
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
+  const { toast } = useToast();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError("");
     setIsLoading(true);
+    
     try {
-      // Simulate API call
-      const user = await api.login(email);
-      // In a real app, we'd store the token/user here
-      
-      // Redirect based on role or to home
-      if (user.is_vendor) {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setError(data.error || 'Login failed');
+        return;
+      }
+
+      // Store token in localStorage
+      localStorage.setItem('auth_token', data.token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+
+      toast({
+        title: "Welcome back!",
+        description: `Logged in as ${data.user.name}`,
+      });
+
+      // Redirect based on user type
+      if (data.user.userType === 'vendor') {
         setLocation('/seller/dashboard');
       } else {
         setLocation('/account/profile');
       }
-    } catch (error) {
-      console.error("Login failed", error);
+    } catch (err) {
+      console.error("Login failed", err);
+      setError("Failed to connect to server. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -63,7 +87,15 @@ export default function LoginPage() {
                     <span className="text-xs text-primary hover:underline cursor-pointer">Forgot Password?</span>
                   </Link>
                 </div>
-                <Input id="password" type="password" required className="h-11" />
+                <Input 
+                  id="password" 
+                  type="password" 
+                  required 
+                  className="h-11"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  data-testid="input-password"
+                />
               </div>
               
               <div className="flex items-center space-x-2">
@@ -76,9 +108,11 @@ export default function LoginPage() {
                 </label>
               </div>
 
-              <div className="bg-yellow-50 p-3 rounded text-xs text-yellow-800 border border-yellow-100">
-                <strong>Tip for Demo:</strong> Use an email containing "vendor" to login as a Vendor/Supplier.
-              </div>
+              {error && (
+                <div className="bg-red-50 text-red-600 p-3 rounded text-sm border border-red-200">
+                  {error}
+                </div>
+              )}
 
               <Button type="submit" className="w-full h-12 text-base font-bold bg-orange-600 hover:bg-orange-700" disabled={isLoading}>
                 {isLoading ? "Signing In..." : "LOGIN"}
