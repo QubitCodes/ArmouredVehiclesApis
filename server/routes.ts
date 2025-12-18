@@ -4,8 +4,28 @@ import { storage } from "./storage";
 import { insertUserSchema, insertProductSchema, insertReviewSchema, insertCartItemSchema, insertOrderSchema, insertOrderItemSchema } from "@shared/schema";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+import crypto from "crypto";
 
-// Extend Express Request type to include user
+// JWT Secret - in production use a proper secret from environment
+const JWT_SECRET = process.env.JWT_SECRET || 'armoredmart-jwt-secret-key-2024';
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'armoredmart-refresh-secret-key-2024';
+
+// Token expiry times
+const ACCESS_TOKEN_EXPIRY = '15m'; // 15 minutes
+const REFRESH_TOKEN_EXPIRY_DAYS = 14; // 14 days
+
+interface JWTPayload {
+  sub: string; // user id
+  email: string;
+  name: string;
+  userType: 'customer' | 'vendor' | 'admin' | 'super_admin';
+  sessionId: string;
+  tokenVersion: number;
+  type: 'access' | 'refresh';
+}
+
+// Extend Express Request type to include user and session
 declare global {
   namespace Express {
     interface Request {
@@ -15,15 +35,75 @@ declare global {
         name: string;
         userType: 'customer' | 'vendor' | 'admin' | 'super_admin';
       };
+      sessionId?: string;
     }
   }
 }
 
-// Simple token storage (in production, use Redis or similar)
-const sessions: Map<string, { userId: string; expiresAt: Date }> = new Map();
+// Generate access token (short-lived)
+function generateAccessToken(user: { id: string; email: string; name: string; userType: string; tokenVersion?: number | null }, sessionId: string): string {
+  return jwt.sign(
+    {
+      sub: user.id,
+      email: user.email,
+      name: user.name,
+      userType: user.userType,
+      sessionId,
+      tokenVersion: user.tokenVersion || 0,
+      type: 'access',
+    } as JWTPayload,
+    JWT_SECRET,
+    { expiresIn: ACCESS_TOKEN_EXPIRY }
+  );
+}
 
-// Auth middleware
-function authMiddleware(req: Request, res: Response, next: NextFunction) {
+// Generate refresh token (long-lived)
+function generateRefreshToken(userId: string, sessionId: string, tokenVersion: number): string {
+  return jwt.sign(
+    {
+      sub: userId,
+      sessionId,
+      tokenVersion,
+      type: 'refresh',
+    },
+    JWT_REFRESH_SECRET,
+    { expiresIn: `${REFRESH_TOKEN_EXPIRY_DAYS}d` }
+  );
+}
+
+// Hash refresh token for storage
+function hashToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+// Parse user agent to extract device info
+function parseUserAgent(userAgent: string | undefined): string {
+  if (!userAgent) return 'Unknown Device';
+  
+  let device = '';
+  let browser = '';
+  
+  // Detect OS/Device
+  if (userAgent.includes('iPhone')) device = 'iPhone';
+  else if (userAgent.includes('iPad')) device = 'iPad';
+  else if (userAgent.includes('Android')) device = 'Android';
+  else if (userAgent.includes('Windows')) device = 'Windows';
+  else if (userAgent.includes('Mac')) device = 'Mac';
+  else if (userAgent.includes('Linux')) device = 'Linux';
+  else device = 'Unknown';
+  
+  // Detect Browser
+  if (userAgent.includes('Chrome') && !userAgent.includes('Edg')) browser = 'Chrome';
+  else if (userAgent.includes('Firefox')) browser = 'Firefox';
+  else if (userAgent.includes('Safari') && !userAgent.includes('Chrome')) browser = 'Safari';
+  else if (userAgent.includes('Edg')) browser = 'Edge';
+  else browser = 'Browser';
+  
+  return `${browser} on ${device}`;
+}
+
+// Auth middleware - validates JWT access tokens
+async function authMiddleware(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
   
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -31,30 +111,42 @@ function authMiddleware(req: Request, res: Response, next: NextFunction) {
   }
 
   const token = authHeader.substring(7);
-  const session = sessions.get(token);
-
-  if (!session || session.expiresAt < new Date()) {
-    sessions.delete(token);
-    return next();
-  }
-
-  // Fetch user and attach to request
-  storage.getUser(session.userId).then(user => {
-    if (user) {
-      req.user = {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        userType: user.userType as 'customer' | 'vendor' | 'admin' | 'super_admin',
-      };
+  
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as JWTPayload;
+    
+    if (decoded.type !== 'access') {
+      return next();
     }
+    
+    // Check if session is still valid
+    const session = await storage.getSessionById(decoded.sessionId);
+    if (!session || session.revokedAt || new Date(session.expiresAt) < new Date()) {
+      return next();
+    }
+    
+    // Verify token version matches user's current version
+    const user = await storage.getUser(decoded.sub);
+    if (!user || (user.tokenVersion || 0) !== decoded.tokenVersion) {
+      return next(); // Token invalidated due to version mismatch
+    }
+    
+    // Update last used timestamp (don't await to not slow down request)
+    storage.updateSessionLastUsed(decoded.sessionId).catch(() => {});
+    
+    req.user = {
+      id: decoded.sub,
+      email: decoded.email,
+      name: decoded.name,
+      userType: decoded.userType,
+    };
+    req.sessionId = decoded.sessionId;
+    
     next();
-  }).catch(() => next());
-}
-
-// Generate simple token
-function generateToken(): string {
-  return Math.random().toString(36).substring(2) + Date.now().toString(36);
+  } catch (error) {
+    // Token invalid or expired
+    next();
+  }
 }
 
 export async function registerRoutes(
@@ -74,7 +166,7 @@ export async function registerRoutes(
    *     tags: [Auth]
    *     summary: Register a new user
    *     description: |
-   *       Creates a new user account and returns an auth token.
+   *       Creates a new user account and returns JWT access and refresh tokens.
    *       
    *       **Used by pages:** Register Page (/auth/register)
    *     requestBody:
@@ -129,12 +221,23 @@ export async function registerRoutes(
         userType: userType || 'customer',
       });
 
-      // Generate session token
-      const token = generateToken();
-      sessions.set(token, {
+      // Create session in database first (with temporary hash)
+      const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+      const userAgent = req.headers['user-agent'];
+      const ipAddress = req.ip || req.headers['x-forwarded-for'] as string || 'unknown';
+      
+      const session = await storage.createSession({
         userId: user.id,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+        refreshTokenHash: 'temp', // Will be updated immediately
+        userAgent: userAgent || null,
+        ipAddress,
+        deviceLabel: parseUserAgent(userAgent),
+        expiresAt,
       });
+
+      // Generate tokens with session ID
+      const accessToken = generateAccessToken(user, session.id);
+      const refreshToken = generateRefreshToken(user.id, session.id, user.tokenVersion || 0);
 
       res.status(201).json({
         user: {
@@ -143,7 +246,9 @@ export async function registerRoutes(
           email: user.email,
           userType: user.userType,
         },
-        token,
+        accessToken,
+        refreshToken,
+        expiresIn: 900, // 15 minutes in seconds
       });
     } catch (error) {
       console.error("Registration error:", error);
@@ -158,7 +263,7 @@ export async function registerRoutes(
    *     tags: [Auth]
    *     summary: Login user
    *     description: |
-   *       Authenticates a user and returns an auth token.
+   *       Authenticates a user and returns JWT access and refresh tokens.
    *       
    *       **Used by pages:** Login Page (/auth/login)
    *     requestBody:
@@ -199,12 +304,23 @@ export async function registerRoutes(
         return res.status(401).json({ error: "Invalid email or password" });
       }
 
-      // Generate session token
-      const token = generateToken();
-      sessions.set(token, {
+      // Create session in database
+      const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+      const userAgent = req.headers['user-agent'];
+      const ipAddress = req.ip || req.headers['x-forwarded-for'] as string || 'unknown';
+      
+      const session = await storage.createSession({
         userId: user.id,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        refreshTokenHash: 'temp',
+        userAgent: userAgent || null,
+        ipAddress,
+        deviceLabel: parseUserAgent(userAgent),
+        expiresAt,
       });
+
+      // Generate tokens
+      const accessToken = generateAccessToken(user, session.id);
+      const refreshToken = generateRefreshToken(user.id, session.id, user.tokenVersion || 0);
 
       res.json({
         user: {
@@ -213,7 +329,9 @@ export async function registerRoutes(
           email: user.email,
           userType: user.userType,
         },
-        token,
+        accessToken,
+        refreshToken,
+        expiresIn: 900,
       });
     } catch (error) {
       console.error("Login error:", error);
@@ -228,7 +346,7 @@ export async function registerRoutes(
    *     tags: [Auth]
    *     summary: Logout user
    *     description: |
-   *       Invalidates the current session token.
+   *       Revokes the current session token.
    *       
    *       **Used by pages:** Navbar (all pages)
    *     security:
@@ -237,13 +355,209 @@ export async function registerRoutes(
    *       200:
    *         description: Logged out successfully
    */
-  app.post("/api/auth/logout", (req, res) => {
-    const authHeader = req.headers.authorization;
-    if (authHeader?.startsWith('Bearer ')) {
-      const token = authHeader.substring(7);
-      sessions.delete(token);
+  app.post("/api/auth/logout", async (req, res) => {
+    if (req.sessionId) {
+      await storage.revokeSession(req.sessionId);
     }
     res.json({ message: "Logged out successfully" });
+  });
+
+  /**
+   * @swagger
+   * /auth/refresh:
+   *   post:
+   *     tags: [Auth]
+   *     summary: Refresh access token
+   *     description: |
+   *       Uses a refresh token to get a new access token.
+   *       
+   *       **Used by pages:** All authenticated pages (automatic refresh)
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [refreshToken]
+   *             properties:
+   *               refreshToken: { type: string }
+   *     responses:
+   *       200:
+   *         description: New tokens generated
+   *       401:
+   *         description: Invalid or expired refresh token
+   */
+  app.post("/api/auth/refresh", async (req, res) => {
+    try {
+      const { refreshToken } = req.body;
+
+      if (!refreshToken) {
+        return res.status(400).json({ error: "Refresh token is required" });
+      }
+
+      // Verify refresh token
+      let decoded: any;
+      try {
+        decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET);
+      } catch (error) {
+        return res.status(401).json({ error: "Invalid or expired refresh token" });
+      }
+
+      if (decoded.type !== 'refresh') {
+        return res.status(401).json({ error: "Invalid token type" });
+      }
+
+      // Check if session is still valid
+      const session = await storage.getSessionById(decoded.sessionId);
+      if (!session || session.revokedAt || new Date(session.expiresAt) < new Date()) {
+        return res.status(401).json({ error: "Session expired or revoked" });
+      }
+
+      // Get user and verify token version
+      const user = await storage.getUser(decoded.sub);
+      if (!user || (user.tokenVersion || 0) !== decoded.tokenVersion) {
+        return res.status(401).json({ error: "Token has been invalidated" });
+      }
+
+      // Update session last used
+      await storage.updateSessionLastUsed(session.id);
+
+      // Generate new tokens
+      const newAccessToken = generateAccessToken(user, session.id);
+      const newRefreshToken = generateRefreshToken(user.id, session.id, user.tokenVersion || 0);
+
+      res.json({
+        accessToken: newAccessToken,
+        refreshToken: newRefreshToken,
+        expiresIn: 900,
+      });
+    } catch (error) {
+      console.error("Token refresh error:", error);
+      res.status(500).json({ error: "Failed to refresh token" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /auth/sessions:
+   *   get:
+   *     tags: [Auth]
+   *     summary: Get user's active sessions
+   *     description: |
+   *       Returns a list of all active sessions for the current user.
+   *       
+   *       **Used by pages:** My Account Security (/account/profile)
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: List of active sessions
+   *       401:
+   *         description: Not authenticated
+   */
+  app.get("/api/auth/sessions", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+
+    try {
+      const sessions = await storage.getActiveSessionsByUserId(req.user.id);
+      
+      res.json(sessions.map(session => ({
+        id: session.id,
+        deviceLabel: session.deviceLabel,
+        ipAddress: session.ipAddress,
+        lastUsedAt: session.lastUsedAt,
+        createdAt: session.createdAt,
+        isCurrent: session.id === req.sessionId,
+      })));
+    } catch (error) {
+      console.error("Error fetching sessions:", error);
+      res.status(500).json({ error: "Failed to fetch sessions" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /auth/sessions/{id}:
+   *   delete:
+   *     tags: [Auth]
+   *     summary: Revoke a specific session
+   *     description: |
+   *       Revokes a specific session, logging out that device.
+   *       
+   *       **Used by pages:** My Account Security (/account/profile)
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: string }
+   *     responses:
+   *       200:
+   *         description: Session revoked
+   *       401:
+   *         description: Not authenticated
+   *       404:
+   *         description: Session not found
+   */
+  app.delete("/api/auth/sessions/:id", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+
+    try {
+      const sessionId = req.params.id;
+      const session = await storage.getSessionById(sessionId);
+      
+      if (!session || session.userId !== req.user.id) {
+        return res.status(404).json({ error: "Session not found" });
+      }
+
+      await storage.revokeSession(sessionId);
+      res.json({ message: "Session revoked successfully" });
+    } catch (error) {
+      console.error("Error revoking session:", error);
+      res.status(500).json({ error: "Failed to revoke session" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /auth/logout-all:
+   *   post:
+   *     tags: [Auth]
+   *     summary: Logout from all devices
+   *     description: |
+   *       Revokes all sessions except the current one and increments token version.
+   *       
+   *       **Used by pages:** My Account Security (/account/profile)
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: All sessions revoked
+   *       401:
+   *         description: Not authenticated
+   */
+  app.post("/api/auth/logout-all", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+
+    try {
+      // Revoke all sessions except current
+      await storage.revokeAllUserSessions(req.user.id, req.sessionId);
+      
+      // Increment token version to invalidate all existing tokens
+      await storage.updateUserTokenVersion(req.user.id);
+
+      res.json({ message: "Logged out from all other devices" });
+    } catch (error) {
+      console.error("Error logging out all:", error);
+      res.status(500).json({ error: "Failed to logout from all devices" });
+    }
   });
 
   // ===== PRODUCTS =====
