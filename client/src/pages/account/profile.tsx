@@ -242,9 +242,9 @@ export default function ProfilePage() {
 
                   {/* In Progress Section */}
                   <div className="space-y-4 mb-8">
-                    <h3 className="text-sm font-bold uppercase text-slate-500">In Progress (1 item)</h3>
+                    <h3 className="text-sm font-bold uppercase text-slate-500">In Progress ({orders?.filter(o => ['pending', 'processing', 'shipped'].includes(o.status)).length || 0} item{(orders?.filter(o => ['pending', 'processing', 'shipped'].includes(o.status)).length || 0) !== 1 ? 's' : ''})</h3>
                     
-                    {orders?.filter(o => o.status === 'processing').map(order => (
+                    {orders?.filter(o => ['pending', 'processing', 'shipped'].includes(o.status)).map(order => (
                       <div key={order.id} className="bg-[#EFEBE4] rounded-lg p-6 border border-slate-200">
                         <div className="flex justify-between items-start mb-4">
                           <div>
