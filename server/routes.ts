@@ -12,8 +12,7 @@ declare global {
         id: string;
         email: string;
         name: string;
-        isVendor: boolean;
-        role: string;
+        userType: 'customer' | 'vendor' | 'admin' | 'super_admin';
       };
     }
   }
@@ -123,7 +122,7 @@ export async function registerRoutes(
   // Create product (vendor only)
   app.post("/api/products", async (req, res) => {
     try {
-      if (!req.user || !req.user.isVendor) {
+      if (!req.user || req.user.userType !== 'vendor') {
         return res.status(403).json({ error: "Only vendors can create products" });
       }
 
@@ -356,7 +355,7 @@ export async function registerRoutes(
   // Get vendor statistics
   app.get("/api/vendor/stats", async (req, res) => {
     try {
-      if (!req.user || !req.user.isVendor) {
+      if (!req.user || req.user.userType !== 'vendor') {
         return res.status(403).json({ error: "Vendor access required" });
       }
 
@@ -370,7 +369,7 @@ export async function registerRoutes(
   // Get vendor's products
   app.get("/api/vendor/products", async (req, res) => {
     try {
-      if (!req.user || !req.user.isVendor) {
+      if (!req.user || req.user.userType !== 'vendor') {
         return res.status(403).json({ error: "Vendor access required" });
       }
 

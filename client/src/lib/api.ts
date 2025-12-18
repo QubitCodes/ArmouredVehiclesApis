@@ -122,6 +122,6 @@ export const api = {
   // User
   user: {
     getCurrent: () => 
-      fetchJson<{ id: string; email: string; name: string; isVendor: boolean }>("/user"),
+      fetchJson<{ id: string; email: string; name: string; userType: 'customer' | 'vendor' | 'admin' | 'super_admin' }>("/user"),
   },
 };

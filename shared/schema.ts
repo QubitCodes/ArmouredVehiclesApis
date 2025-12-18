@@ -4,7 +4,7 @@ import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // Enums
-export const userRoleEnum = pgEnum('user_role', ['customer', 'admin', 'vendor_owner', 'vendor_employee']);
+export const userTypeEnum = pgEnum('user_type', ['customer', 'vendor', 'admin', 'super_admin']);
 export const productConditionEnum = pgEnum('product_condition', ['new', 'used', 'refurbished']);
 export const orderStatusEnum = pgEnum('order_status', ['pending', 'processing', 'shipped', 'delivered', 'cancelled', 'returned']);
 
@@ -14,8 +14,7 @@ export const users = pgTable("users", {
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   password: text("password").notNull(),
-  role: userRoleEnum("role").notNull().default('customer'),
-  isVendor: boolean("is_vendor").notNull().default(false),
+  userType: userTypeEnum("user_type").notNull().default('customer'),
   avatar: text("avatar"),
   completionPercentage: integer("completion_percentage").default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
