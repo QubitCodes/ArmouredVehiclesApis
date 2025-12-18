@@ -5,6 +5,14 @@ import { api } from "@/lib/mockApi";
 import { Link } from "wouter";
 import { ArrowRight, Loader2, ChevronRight, ChevronLeft } from "lucide-react";
 import { Product } from "@/lib/mockApi";
+import {
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselNext,
+  CarouselPrevious,
+} from "@/components/ui/carousel";
+import Autoplay from "embla-carousel-autoplay";
 
 export default function Home() {
   const { data: slides } = useQuery({ queryKey: ['slides'], queryFn: api.getSlides });
@@ -48,87 +56,132 @@ export default function Home() {
 
   return (
     <Layout>
-      {/* 1. Hero Section - Dark & Industrial */}
-      <section className="relative bg-black h-[500px] overflow-hidden">
-        <div className="absolute inset-0">
-          <img 
-            src="https://images.unsplash.com/photo-1595208823526-a322dc84f509?auto=format&fit=crop&q=80&w=2000" 
-            className="w-full h-full object-cover opacity-40" 
-            alt="Armored Vehicle"
-          />
-          <div className="absolute inset-0 bg-gradient-to-r from-black via-black/50 to-transparent" />
-        </div>
-        
-        <div className="container mx-auto px-4 h-full flex items-center relative z-10">
-          <div className="max-w-xl">
-            <h1 className="text-5xl lg:text-6xl font-display font-bold text-[#D97706] leading-tight mb-2 uppercase">
-              DEFENCE<br/>COMMERCE,<br/>REINVENTED.
-            </h1>
-            <p className="text-lg text-slate-300 mb-8 font-light">
-              Built for Security. Powered by Compliance.
-            </p>
-            {/* Arrows for slider nav mockup */}
-            <div className="flex gap-4 text-slate-500">
-              <ChevronLeft className="h-6 w-6 cursor-pointer hover:text-white" />
-              <ChevronRight className="h-6 w-6 cursor-pointer hover:text-white" />
-            </div>
+      {/* 1. Hero Section - Dark & Industrial Carousel */}
+      <section className="relative bg-black h-[500px] overflow-hidden group">
+        <Carousel 
+          className="w-full h-full"
+          plugins={[Autoplay({ delay: 5000 })]}
+          opts={{ loop: true }}
+        >
+          <CarouselContent className="h-full ml-0">
+            {slides.map((slide) => (
+              <CarouselItem key={slide.id} className="pl-0 relative h-[500px]">
+                <div className="absolute inset-0">
+                  <img 
+                    src={slide.image} 
+                    className="w-full h-full object-cover opacity-40" 
+                    alt="Armored Vehicle"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-r from-black via-black/50 to-transparent" />
+                </div>
+                
+                <div className="container mx-auto px-4 h-full flex items-center relative z-10">
+                  <div className="max-w-xl">
+                    <h1 className="text-5xl lg:text-6xl font-display font-bold text-[#D97706] leading-tight mb-2 uppercase">
+                      {slide.title || "DEFENCE COMMERCE, REINVENTED."}
+                    </h1>
+                    <p className="text-lg text-slate-300 mb-8 font-light">
+                      {slide.subtitle || "Built for Security. Powered by Compliance."}
+                    </p>
+                    <Link href={slide.link}>
+                      <Button className="bg-[#D97706] hover:bg-orange-700 text-white font-bold uppercase rounded-none h-12 px-8">
+                        {slide.buttonText}
+                      </Button>
+                    </Link>
+                  </div>
+                </div>
+              </CarouselItem>
+            ))}
+            {/* Fallback slide if array is empty or for demo */}
+            {slides.length === 0 && (
+               <CarouselItem className="pl-0 relative h-[500px]">
+                  {/* ... same content as above ... */}
+               </CarouselItem>
+            )}
+          </CarouselContent>
+          <div className="absolute bottom-8 right-8 flex gap-2">
+            <CarouselPrevious className="static translate-y-0 h-10 w-10 border-slate-600 bg-black/50 hover:bg-[#D97706] hover:text-white hover:border-[#D97706] rounded-none text-slate-300" />
+            <CarouselNext className="static translate-y-0 h-10 w-10 border-slate-600 bg-black/50 hover:bg-[#D97706] hover:text-white hover:border-[#D97706] rounded-none text-slate-300" />
           </div>
-        </div>
+        </Carousel>
       </section>
 
-      {/* 2. Categories Grid - Industrial Cards */}
+      {/* 2. Categories Carousel - Industrial Cards */}
       <section className="py-16 bg-[#2A2A2A]">
         <div className="container mx-auto px-4">
-          <h2 className="text-2xl font-display font-bold text-white mb-8 uppercase border-l-4 border-[#D97706] pl-4">
-            CATEGORIES
-          </h2>
-          
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-            {categories.map((cat) => (
-              <Link key={cat.id} href={`/products?cat=${cat.id}`}>
-                <div className="group cursor-pointer">
-                  <div className="aspect-square bg-slate-800 relative overflow-hidden mb-3 border border-transparent group-hover:border-[#D97706] transition-colors">
-                    <img 
-                      src={cat.image} 
-                      alt={cat.name}
-                      className="w-full h-full object-cover opacity-70 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500"
-                    />
-                  </div>
-                  <h3 className="text-slate-300 text-xs font-bold uppercase group-hover:text-white leading-tight">
-                    {cat.name}
-                  </h3>
-                </div>
-              </Link>
-            ))}
+          <div className="flex justify-between items-end mb-8 border-b border-slate-700 pb-4">
+            <h2 className="text-2xl font-display font-bold text-white uppercase border-l-4 border-[#D97706] pl-4">
+              CATEGORIES
+            </h2>
           </div>
           
-          {/* Scrollbar mockup */}
-          <div className="mt-8 h-1 bg-slate-700 w-full relative">
-            <div className="absolute left-0 top-0 h-full w-1/3 bg-[#D97706]" />
-          </div>
+          <Carousel
+            opts={{
+              align: "start",
+              loop: true,
+            }}
+            className="w-full"
+          >
+            <CarouselContent className="-ml-4">
+              {categories.map((cat) => (
+                <CarouselItem key={cat.id} className="pl-4 basis-1/2 md:basis-1/3 lg:basis-1/6">
+                  <Link href={`/products?cat=${cat.id}`}>
+                    <div className="group cursor-pointer">
+                      <div className="aspect-square bg-slate-800 relative overflow-hidden mb-3 border border-transparent group-hover:border-[#D97706] transition-colors">
+                        <img 
+                          src={cat.image} 
+                          alt={cat.name}
+                          className="w-full h-full object-cover opacity-70 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500"
+                        />
+                      </div>
+                      <h3 className="text-slate-300 text-xs font-bold uppercase group-hover:text-white leading-tight min-h-[2.5em]">
+                        {cat.name}
+                      </h3>
+                    </div>
+                  </Link>
+                </CarouselItem>
+              ))}
+            </CarouselContent>
+            <div className="flex justify-end gap-2 mt-6">
+               <CarouselPrevious className="static translate-y-0 h-8 w-8 border-slate-600 bg-transparent hover:bg-[#D97706] hover:text-white hover:border-[#D97706] rounded-none text-slate-400" />
+               <CarouselNext className="static translate-y-0 h-8 w-8 border-slate-600 bg-transparent hover:bg-[#D97706] hover:text-white hover:border-[#D97706] rounded-none text-slate-400" />
+            </div>
+          </Carousel>
         </div>
       </section>
 
-      {/* 3. Featured Products - Dark Theme */}
+      {/* 3. Featured Products Carousel - Dark Theme */}
       <section className="py-16 bg-[#1A1A1A] border-t border-slate-800">
         <div className="container mx-auto px-4">
-          <h2 className="text-2xl font-display font-bold text-white mb-8 uppercase border-l-4 border-white pl-4">
-            FEATURED PRODUCTS
-          </h2>
+          <div className="flex justify-between items-end mb-8">
+            <h2 className="text-2xl font-display font-bold text-white uppercase border-l-4 border-white pl-4">
+              FEATURED PRODUCTS
+            </h2>
+          </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {featuredProducts.map((product) => (
-              <div key={product.id} className="h-[400px]">
-                <FeaturedCard product={product} />
-              </div>
-            ))}
-          </div>
-          
-          <div className="flex justify-center mt-8 gap-2">
-             <div className="w-8 h-1 bg-[#D97706]" />
-             <div className="w-8 h-1 bg-slate-700" />
-             <div className="w-8 h-1 bg-slate-700" />
-          </div>
+          <Carousel
+            opts={{
+              align: "start",
+              loop: true,
+            }}
+            className="w-full"
+          >
+            <CarouselContent className="-ml-6">
+              {featuredProducts.map((product) => (
+                <CarouselItem key={product.id} className="pl-6 basis-full md:basis-1/2 lg:basis-1/3">
+                  <div className="h-full">
+                    <FeaturedCard product={product} />
+                  </div>
+                </CarouselItem>
+              ))}
+            </CarouselContent>
+            <div className="flex justify-center mt-8 gap-2">
+               <CarouselPrevious className="static translate-y-0 h-8 w-8 border-slate-600 bg-transparent hover:bg-white hover:text-black hover:border-white rounded-none text-slate-400" />
+               <div className="w-8 h-1 bg-[#D97706] self-center" />
+               <div className="w-8 h-1 bg-slate-700 self-center" />
+               <CarouselNext className="static translate-y-0 h-8 w-8 border-slate-600 bg-transparent hover:bg-white hover:text-black hover:border-white rounded-none text-slate-400" />
+            </div>
+          </Carousel>
         </div>
       </section>
 
@@ -137,25 +190,56 @@ export default function Home() {
         <div className="container mx-auto px-4">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
             
-            {/* Left: Product Grid */}
+            {/* Left: Product Carousel Grid */}
             <div>
-              <h2 className="text-2xl font-display font-bold text-[#1A1A1A] mb-8 uppercase border-l-4 border-[#1A1A1A] pl-4">
-                TOP SELLING PRODUCTS
-              </h2>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-8">
-                {topSellingProducts.map((product) => (
-                  <Link key={product.id} href={`/products/${product.id}`}>
-                    <div className="group cursor-pointer text-center">
-                      <div className="aspect-square bg-white border border-slate-200 mb-3 p-2 group-hover:border-[#D97706] transition-colors">
-                        <img src={product.image} className="w-full h-full object-contain" alt={product.name} />
-                      </div>
-                      <h3 className="text-[10px] font-bold text-slate-800 uppercase leading-tight line-clamp-2 h-8">
-                        {product.name}
-                      </h3>
-                    </div>
-                  </Link>
-                ))}
+              <div className="flex justify-between items-center mb-8 border-l-4 border-[#1A1A1A] pl-4">
+                <h2 className="text-2xl font-display font-bold text-[#1A1A1A] uppercase">
+                  TOP SELLING PRODUCTS
+                </h2>
               </div>
+              
+              <Carousel className="w-full">
+                <CarouselContent>
+                  {/* Slide 1 - Grid of 6 */}
+                  <CarouselItem>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-8">
+                      {topSellingProducts.slice(0, 6).map((product) => (
+                        <Link key={product.id} href={`/products/${product.id}`}>
+                          <div className="group cursor-pointer text-center">
+                            <div className="aspect-square bg-white border border-slate-200 mb-3 p-2 group-hover:border-[#D97706] transition-colors">
+                              <img src={product.image} className="w-full h-full object-contain" alt={product.name} />
+                            </div>
+                            <h3 className="text-[10px] font-bold text-slate-800 uppercase leading-tight line-clamp-2 h-8">
+                              {product.name}
+                            </h3>
+                          </div>
+                        </Link>
+                      ))}
+                    </div>
+                  </CarouselItem>
+                  {/* Slide 2 - Next set (simulated by repeating for now if not enough data) */}
+                   <CarouselItem>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-8">
+                      {topSellingProducts.slice(0, 6).map((product) => (
+                        <Link key={`dup-${product.id}`} href={`/products/${product.id}`}>
+                          <div className="group cursor-pointer text-center">
+                            <div className="aspect-square bg-white border border-slate-200 mb-3 p-2 group-hover:border-[#D97706] transition-colors">
+                              <img src={product.image} className="w-full h-full object-contain" alt={product.name} />
+                            </div>
+                            <h3 className="text-[10px] font-bold text-slate-800 uppercase leading-tight line-clamp-2 h-8">
+                              {product.name}
+                            </h3>
+                          </div>
+                        </Link>
+                      ))}
+                    </div>
+                  </CarouselItem>
+                </CarouselContent>
+                <div className="flex justify-center gap-2 mt-6">
+                  <CarouselPrevious className="static translate-y-0 h-8 w-8 border-slate-300 bg-transparent hover:bg-[#1A1A1A] hover:text-white rounded-none text-slate-500" />
+                  <CarouselNext className="static translate-y-0 h-8 w-8 border-slate-300 bg-transparent hover:bg-[#1A1A1A] hover:text-white rounded-none text-slate-500" />
+                </div>
+              </Carousel>
             </div>
 
             {/* Right: Featured Highlight */}
@@ -178,10 +262,10 @@ export default function Home() {
                </div>
                
                {/* Navigation Arrows Mockup */}
-               <div className="absolute top-1/2 -translate-y-1/2 left-4 text-white/50 hover:text-white cursor-pointer">
+               <div className="absolute top-1/2 -translate-y-1/2 left-4 text-white/50 hover:text-white cursor-pointer transition-colors hover:scale-110">
                  <ChevronLeft className="h-8 w-8" />
                </div>
-               <div className="absolute top-1/2 -translate-y-1/2 right-4 text-white/50 hover:text-white cursor-pointer">
+               <div className="absolute top-1/2 -translate-y-1/2 right-4 text-white/50 hover:text-white cursor-pointer transition-colors hover:scale-110">
                  <ChevronRight className="h-8 w-8" />
                </div>
             </div>
