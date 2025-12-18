@@ -771,7 +771,11 @@ export async function registerRoutes(
         }));
 
         // Create checkout session
-        const baseUrl = `https://${process.env.REPLIT_DOMAINS?.split(',')[0]}`;
+        const replitDomain = process.env.REPLIT_DOMAINS?.split(',')[0];
+        const baseUrl = replitDomain 
+          ? `https://${replitDomain}` 
+          : (req.headers.origin || `${req.protocol}://${req.get('host')}`);
+        
         const session = await stripe.checkout.sessions.create({
           payment_method_types: ['card'],
           line_items: lineItems,

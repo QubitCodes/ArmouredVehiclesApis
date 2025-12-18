@@ -271,45 +271,45 @@ export default function ProductsPage() {
   );
 
   const ProductGridItem = ({ product }: { product: Product }) => (
-    <div className="group relative bg-[#F5F5F5] border border-transparent hover:border-slate-300 transition-all p-4 flex flex-col h-full" data-testid={`card-product-${product.id}`}>
-      <div className="absolute top-3 right-3 text-slate-300 cursor-pointer hover:text-red-500 z-10">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
-      </div>
-      
-      <div className="aspect-square mb-4 bg-transparent flex items-center justify-center p-2">
-        <img 
-          src={product.image} 
-          alt={product.name} 
-          className="max-w-full max-h-full object-contain mix-blend-multiply"
-        />
-      </div>
-
-      <div className="mt-auto">
-        <h3 className="font-bold text-xs text-slate-800 mb-2 min-h-[2.5em] leading-tight line-clamp-2">
-          {product.name}
-        </h3>
+    <Link href={`/products/${product.id}`} data-testid={`link-product-${product.id}`}>
+      <div className="group relative bg-[#F5F5F5] border border-transparent hover:border-slate-300 transition-all p-4 flex flex-col h-full cursor-pointer" data-testid={`card-product-${product.id}`}>
+        <div className="absolute top-3 right-3 text-slate-300 cursor-pointer hover:text-red-500 z-10">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
+        </div>
         
-        <div className="mb-4">
-          {product.price ? (
-            <div className="font-bold text-sm text-black">AED {parseFloat(product.price.toString()).toLocaleString()}</div>
-          ) : (
-            <div className="text-xs text-slate-500 italic">Login for Price</div>
-          )}
-          <div className="text-[10px] text-slate-400 mt-1">
-            Sold by <span className="underline cursor-pointer hover:text-slate-600">{product.make || 'Vendor'}</span>
-          </div>
+        <div className="aspect-square mb-4 bg-transparent flex items-center justify-center p-2">
+          <img 
+            src={product.image} 
+            alt={product.name} 
+            className="max-w-full max-h-full object-contain mix-blend-multiply"
+          />
         </div>
 
-        <Link href={`/products/${product.id}`}>
-          <Button 
-            className={`w-full rounded-none font-bold text-xs uppercase h-9 bg-[#D97706] text-white hover:bg-orange-700`}
-            data-testid={`button-add-cart-${product.id}`}
+        <div className="mt-auto">
+          <h3 className="font-bold text-xs text-slate-800 mb-2 min-h-[2.5em] leading-tight line-clamp-2">
+            {product.name}
+          </h3>
+          
+          <div className="mb-4">
+            {product.price ? (
+              <div className="font-bold text-sm text-black">AED {parseFloat(product.price.toString()).toLocaleString()}</div>
+            ) : (
+              <div className="text-xs text-slate-500 italic">Login for Price</div>
+            )}
+            <div className="text-[10px] text-slate-400 mt-1">
+              Sold by <span className="underline cursor-pointer hover:text-slate-600">{product.make || 'Vendor'}</span>
+            </div>
+          </div>
+
+          <span 
+            className="w-full rounded-none font-bold text-xs uppercase h-9 bg-[#D97706] text-white hover:bg-orange-700 flex items-center justify-center transition-colors"
+            data-testid={`button-view-product-${product.id}`}
           >
-            {product.actionType === 'inquiry' ? 'SUBMIT AN INQUIRY' : 'ADD TO CART'}
-          </Button>
-        </Link>
+            {product.actionType === 'inquiry' ? 'SUBMIT AN INQUIRY' : 'VIEW DETAILS'}
+          </span>
+        </div>
       </div>
-    </div>
+    </Link>
   );
 
   return (
