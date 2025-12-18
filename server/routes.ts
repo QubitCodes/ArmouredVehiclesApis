@@ -73,6 +73,10 @@ export async function registerRoutes(
    *   post:
    *     tags: [Auth]
    *     summary: Register a new user
+   *     description: |
+   *       Creates a new user account and returns an auth token.
+   *       
+   *       **Used by pages:** Register Page (/auth/register)
    *     requestBody:
    *       required: true
    *       content:
@@ -153,6 +157,10 @@ export async function registerRoutes(
    *   post:
    *     tags: [Auth]
    *     summary: Login user
+   *     description: |
+   *       Authenticates a user and returns an auth token.
+   *       
+   *       **Used by pages:** Login Page (/auth/login)
    *     requestBody:
    *       required: true
    *       content:
@@ -219,6 +227,10 @@ export async function registerRoutes(
    *   post:
    *     tags: [Auth]
    *     summary: Logout user
+   *     description: |
+   *       Invalidates the current session token.
+   *       
+   *       **Used by pages:** Navbar (all pages)
    *     security:
    *       - bearerAuth: []
    *     responses:
@@ -242,6 +254,10 @@ export async function registerRoutes(
    *   get:
    *     tags: [Products]
    *     summary: Get all products with optional filters
+   *     description: |
+   *       Returns a list of products, optionally filtered by category, search term, or price range.
+   *       
+   *       **Used by pages:** Products Page (/products), Home Page (/), Navbar (search suggestions), Wishlist Page (/wishlist)
    *     parameters:
    *       - in: query
    *         name: categoryId
@@ -291,6 +307,10 @@ export async function registerRoutes(
    *   get:
    *     tags: [Products]
    *     summary: Get featured products for home page
+   *     description: |
+   *       Returns a curated list of featured products to display on the home page.
+   *       
+   *       **Used by pages:** Home Page (/)
    *     responses:
    *       200:
    *         description: List of featured products
@@ -310,6 +330,10 @@ export async function registerRoutes(
    *   get:
    *     tags: [Products]
    *     summary: Get top selling products
+   *     description: |
+   *       Returns a list of best-selling products.
+   *       
+   *       **Used by pages:** Home Page (/), Products Page (/products)
    *     responses:
    *       200:
    *         description: List of top selling products
@@ -329,6 +353,10 @@ export async function registerRoutes(
    *   get:
    *     tags: [Products]
    *     summary: Get product by ID
+   *     description: |
+   *       Returns detailed information about a specific product.
+   *       
+   *       **Used by pages:** Product Details Page (/products/:id)
    *     parameters:
    *       - in: path
    *         name: id
@@ -366,6 +394,10 @@ export async function registerRoutes(
    *   get:
    *     tags: [Products]
    *     summary: Get similar products
+   *     description: |
+   *       Returns products similar to the specified product based on category.
+   *       
+   *       **Used by pages:** Product Details Page (/products/:id)
    *     parameters:
    *       - in: path
    *         name: id
@@ -401,6 +433,10 @@ export async function registerRoutes(
    *   get:
    *     tags: [Products]
    *     summary: Get recommended products
+   *     description: |
+   *       Returns product recommendations for the user.
+   *       
+   *       **Used by pages:** Product Details Page (/products/:id)
    *     parameters:
    *       - in: path
    *         name: id
@@ -469,6 +505,10 @@ export async function registerRoutes(
    *   get:
    *     tags: [Categories]
    *     summary: Get all categories
+   *     description: |
+   *       Returns a list of all product categories for navigation.
+   *       
+   *       **Used by pages:** Home Page (/), Products Page (/products), Navbar (all pages)
    *     responses:
    *       200:
    *         description: List of categories
@@ -575,6 +615,10 @@ export async function registerRoutes(
    *   get:
    *     tags: [Cart]
    *     summary: Get user's cart
+   *     description: |
+   *       Returns all items in the user's shopping cart with product details.
+   *       
+   *       **Used by pages:** Cart Page (/cart), Checkout Page (/checkout), Navbar (cart count)
    *     security:
    *       - bearerAuth: []
    *     responses:
@@ -602,6 +646,10 @@ export async function registerRoutes(
    *   post:
    *     tags: [Cart]
    *     summary: Add item to cart
+   *     description: |
+   *       Adds a product to the user's shopping cart.
+   *       
+   *       **Used by pages:** Product Details Page (/products/:id)
    *     security:
    *       - bearerAuth: []
    *     requestBody:
@@ -647,6 +695,10 @@ export async function registerRoutes(
    *   patch:
    *     tags: [Cart]
    *     summary: Update cart item quantity
+   *     description: |
+   *       Updates the quantity of an item in the cart.
+   *       
+   *       **Used by pages:** Cart Page (/cart)
    *     security:
    *       - bearerAuth: []
    *     parameters:
@@ -697,6 +749,10 @@ export async function registerRoutes(
    *   delete:
    *     tags: [Cart]
    *     summary: Remove item from cart
+   *     description: |
+   *       Removes an item from the cart.
+   *       
+   *       **Used by pages:** Cart Page (/cart)
    *     security:
    *       - bearerAuth: []
    *     parameters:
@@ -730,6 +786,11 @@ export async function registerRoutes(
    *   post:
    *     tags: [Checkout]
    *     summary: Create Stripe checkout session
+   *     description: |
+   *       Creates a Stripe checkout session for payment processing.
+   *       Returns checkout URL for Stripe-hosted checkout, or test mode indicator if Stripe is not configured.
+   *       
+   *       **Used by pages:** Checkout Page (/checkout)
    *     security:
    *       - bearerAuth: []
    *     responses:
@@ -811,6 +872,10 @@ export async function registerRoutes(
    *   get:
    *     tags: [Orders]
    *     summary: Get user's orders
+   *     description: |
+   *       Returns a list of all orders placed by the authenticated user.
+   *       
+   *       **Used by pages:** Profile Page (/account/profile), Order History
    *     security:
    *       - bearerAuth: []
    *     responses:

@@ -116,13 +116,15 @@ const options: swaggerJsdoc.Options = {
       },
     },
     tags: [
-      { name: 'Auth', description: 'Authentication endpoints' },
-      { name: 'Products', description: 'Product management' },
-      { name: 'Categories', description: 'Category management' },
-      { name: 'Cart', description: 'Shopping cart operations' },
-      { name: 'Orders', description: 'Order management' },
-      { name: 'Reviews', description: 'Product reviews' },
-      { name: 'Vendor', description: 'Vendor-specific operations' },
+      { name: 'Auth', description: 'Authentication endpoints - Used by Login/Register pages' },
+      { name: 'Products', description: 'Product catalog and search - Used by Home, Products, Product Details pages' },
+      { name: 'Categories', description: 'Product categories - Used by Home page and navigation' },
+      { name: 'Cart', description: 'Shopping cart operations - Used by Cart page, Product Details, Navbar' },
+      { name: 'Checkout', description: 'Payment processing with Stripe - Used by Checkout page' },
+      { name: 'Orders', description: 'Order management - Used by Profile page' },
+      { name: 'Reviews', description: 'Product reviews - Used by Product Details page' },
+      { name: 'Vendor', description: 'Vendor dashboard operations - Used by Seller Dashboard' },
+      { name: 'Filters', description: 'Product filter options - Used by Products page' },
     ],
   },
   apis: ['./server/routes.ts'],
@@ -135,6 +137,11 @@ export function setupSwagger(app: Express) {
     customCss: '.swagger-ui .topbar { display: none }',
     customSiteTitle: 'ArmoredMart API Documentation',
   }));
+  
+  // Alias /api/doc to redirect to /api/docs
+  app.get('/api/doc', (req, res) => {
+    res.redirect('/api/docs');
+  });
   
   app.get('/api/docs.json', (req, res) => {
     res.setHeader('Content-Type', 'application/json');
