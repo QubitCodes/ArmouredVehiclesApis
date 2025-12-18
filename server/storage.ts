@@ -1,7 +1,7 @@
 // Integration: blueprint:javascript_database
 import { 
   users, products, categories, reviews, cartItems, orders, orderItems, authSessions,
-  refunds, refundItems, addresses, savedPaymentMethods,
+  refunds, refundItems, addresses, savedPaymentMethods, orderStatusHistory,
   type User, type InsertUser,
   type Product, type InsertProduct,
   type Category, type InsertCategory,
@@ -13,10 +13,11 @@ import {
   type Refund, type InsertRefund,
   type RefundItem, type InsertRefundItem,
   type Address, type InsertAddress,
-  type SavedPaymentMethod, type InsertSavedPaymentMethod
+  type SavedPaymentMethod, type InsertSavedPaymentMethod,
+  type OrderStatusHistory, type InsertOrderStatusHistory
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc, sql, or, ilike, isNull } from "drizzle-orm";
+import { eq, and, desc, sql, or, ilike, isNull, inArray } from "drizzle-orm";
 
 export interface IStorage {
   // Users
@@ -57,11 +58,26 @@ export interface IStorage {
   getOrderById(id: string): Promise<(Order & { items: OrderItem[] }) | undefined>;
   createOrder(order: InsertOrder, items: InsertOrderItem[]): Promise<Order>;
 
-  // Vendor Stats
+  // Vendor Stats & Operations
   getVendorStats(vendorId: string): Promise<{
     revenue: number;
     orders: number;
     products: number;
+  }>;
+  getVendorOrders(vendorId: string): Promise<(Order & { items: OrderItem[]; customer: User })[]>;
+  getVendorCustomers(vendorId: string): Promise<(User & { orderCount: number; totalSpent: number })[]>;
+  updateOrderStatus(orderId: string, status: string, changedBy: string, note?: string): Promise<Order | undefined>;
+  getOrderStatusHistory(orderId: string): Promise<OrderStatusHistory[]>;
+  deleteProduct(id: number, vendorId: string): Promise<boolean>;
+  getVendorAnalytics(vendorId: string): Promise<{
+    totalRevenue: number;
+    totalOrders: number;
+    totalProducts: number;
+    totalCustomers: number;
+    revenueByMonth: { month: string; revenue: number }[];
+    topProducts: { id: number; name: string; revenue: number; quantity: number }[];
+    ordersByStatus: { status: string; count: number }[];
+    recentOrders: (Order & { items: OrderItem[] })[];
   }>;
 
   // Auth Sessions
@@ -369,6 +385,260 @@ export class DatabaseStorage implements IStorage {
       revenue,
       orders: uniqueOrders.size,
       products: vendorProducts.length,
+    };
+  }
+
+  // Get orders for a vendor (orders containing their products)
+  async getVendorOrders(vendorId: string): Promise<(Order & { items: OrderItem[]; customer: User })[]> {
+    // Get vendor's products
+    const vendorProducts = await db
+      .select()
+      .from(products)
+      .where(eq(products.vendorId, vendorId));
+    
+    const productIds = vendorProducts.map(p => p.id);
+    if (productIds.length === 0) return [];
+
+    // Get order items for vendor's products
+    const vendorOrderItems = await db
+      .select()
+      .from(orderItems)
+      .where(inArray(orderItems.productId, productIds));
+
+    const uniqueOrderIds = [...new Set(vendorOrderItems.map(item => item.orderId))];
+    if (uniqueOrderIds.length === 0) return [];
+
+    // Get full orders with items and customer info
+    const ordersWithDetails = await Promise.all(
+      uniqueOrderIds.map(async (orderId) => {
+        const [order] = await db.select().from(orders).where(eq(orders.id, orderId));
+        if (!order) return null;
+
+        const items = await db.select().from(orderItems).where(eq(orderItems.orderId, orderId));
+        const [customer] = await db.select().from(users).where(eq(users.id, order.userId));
+
+        return {
+          ...order,
+          items: items.filter(item => productIds.includes(item.productId)),
+          customer: customer!,
+        };
+      })
+    );
+
+    return ordersWithDetails.filter(Boolean) as (Order & { items: OrderItem[]; customer: User })[];
+  }
+
+  // Get customers who ordered from a vendor
+  async getVendorCustomers(vendorId: string): Promise<(User & { orderCount: number; totalSpent: number })[]> {
+    // Get vendor's products
+    const vendorProducts = await db
+      .select()
+      .from(products)
+      .where(eq(products.vendorId, vendorId));
+    
+    const productIds = vendorProducts.map(p => p.id);
+    if (productIds.length === 0) return [];
+
+    // Get order items for vendor's products
+    const vendorOrderItems = await db
+      .select()
+      .from(orderItems)
+      .where(inArray(orderItems.productId, productIds));
+
+    const uniqueOrderIds = [...new Set(vendorOrderItems.map(item => item.orderId))];
+    if (uniqueOrderIds.length === 0) return [];
+
+    // Get orders
+    const vendorOrders = await db
+      .select()
+      .from(orders)
+      .where(inArray(orders.id, uniqueOrderIds));
+
+    // Group by customer
+    const customerMap = new Map<string, { orderCount: number; totalSpent: number }>();
+    vendorOrders.forEach(order => {
+      const current = customerMap.get(order.userId) || { orderCount: 0, totalSpent: 0 };
+      // Calculate vendor-specific revenue from this order
+      const orderItems = vendorOrderItems.filter(item => item.orderId === order.id);
+      const orderRevenue = orderItems.reduce((sum, item) => sum + parseFloat(item.price.toString()) * item.quantity, 0);
+      customerMap.set(order.userId, {
+        orderCount: current.orderCount + 1,
+        totalSpent: current.totalSpent + orderRevenue,
+      });
+    });
+
+    // Get customer details
+    const customerIds = [...customerMap.keys()];
+    const customers = await db
+      .select()
+      .from(users)
+      .where(inArray(users.id, customerIds));
+
+    return customers.map(customer => ({
+      ...customer,
+      ...customerMap.get(customer.id)!,
+    }));
+  }
+
+  // Update order status with history tracking
+  async updateOrderStatus(orderId: string, status: string, changedBy: string, note?: string): Promise<Order | undefined> {
+    const [updated] = await db
+      .update(orders)
+      .set({ status: status as any })
+      .where(eq(orders.id, orderId))
+      .returning();
+
+    if (updated) {
+      // Add to status history
+      await db.insert(orderStatusHistory).values({
+        orderId,
+        status: status as any,
+        changedBy,
+        note,
+      });
+    }
+
+    return updated || undefined;
+  }
+
+  // Get order status history
+  async getOrderStatusHistory(orderId: string): Promise<OrderStatusHistory[]> {
+    return await db
+      .select()
+      .from(orderStatusHistory)
+      .where(eq(orderStatusHistory.orderId, orderId))
+      .orderBy(desc(orderStatusHistory.createdAt));
+  }
+
+  // Delete a product (vendor-owned only)
+  async deleteProduct(id: number, vendorId: string): Promise<boolean> {
+    const [product] = await db
+      .select()
+      .from(products)
+      .where(and(eq(products.id, id), eq(products.vendorId, vendorId)));
+
+    if (!product) return false;
+
+    await db.delete(products).where(eq(products.id, id));
+    return true;
+  }
+
+  // Get comprehensive vendor analytics
+  async getVendorAnalytics(vendorId: string): Promise<{
+    totalRevenue: number;
+    totalOrders: number;
+    totalProducts: number;
+    totalCustomers: number;
+    revenueByMonth: { month: string; revenue: number }[];
+    topProducts: { id: number; name: string; revenue: number; quantity: number }[];
+    ordersByStatus: { status: string; count: number }[];
+    recentOrders: (Order & { items: OrderItem[] })[];
+  }> {
+    // Get vendor's products
+    const vendorProducts = await db
+      .select()
+      .from(products)
+      .where(eq(products.vendorId, vendorId));
+    
+    const productIds = vendorProducts.map(p => p.id);
+    
+    if (productIds.length === 0) {
+      return {
+        totalRevenue: 0,
+        totalOrders: 0,
+        totalProducts: 0,
+        totalCustomers: 0,
+        revenueByMonth: [],
+        topProducts: [],
+        ordersByStatus: [],
+        recentOrders: [],
+      };
+    }
+
+    // Get order items for vendor's products
+    const vendorOrderItems = await db
+      .select()
+      .from(orderItems)
+      .where(inArray(orderItems.productId, productIds));
+
+    const uniqueOrderIds = [...new Set(vendorOrderItems.map(item => item.orderId))];
+
+    // Get orders
+    const vendorOrders = uniqueOrderIds.length > 0 
+      ? await db.select().from(orders).where(inArray(orders.id, uniqueOrderIds))
+      : [];
+
+    // Calculate totals
+    const totalRevenue = vendorOrderItems.reduce((sum, item) => 
+      sum + parseFloat(item.price.toString()) * item.quantity, 0);
+    
+    const uniqueCustomers = new Set(vendorOrders.map(o => o.userId));
+
+    // Revenue by month (last 6 months)
+    const monthlyRevenue = new Map<string, number>();
+    const now = new Date();
+    for (let i = 0; i < 6; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const monthKey = d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+      monthlyRevenue.set(monthKey, 0);
+    }
+
+    vendorOrders.forEach(order => {
+      const orderDate = new Date(order.createdAt);
+      const monthKey = orderDate.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+      if (monthlyRevenue.has(monthKey)) {
+        const orderRevenue = vendorOrderItems
+          .filter(item => item.orderId === order.id)
+          .reduce((sum, item) => sum + parseFloat(item.price.toString()) * item.quantity, 0);
+        monthlyRevenue.set(monthKey, (monthlyRevenue.get(monthKey) || 0) + orderRevenue);
+      }
+    });
+
+    // Top products
+    const productRevenue = new Map<number, { revenue: number; quantity: number }>();
+    vendorOrderItems.forEach(item => {
+      const current = productRevenue.get(item.productId) || { revenue: 0, quantity: 0 };
+      productRevenue.set(item.productId, {
+        revenue: current.revenue + parseFloat(item.price.toString()) * item.quantity,
+        quantity: current.quantity + item.quantity,
+      });
+    });
+
+    const topProducts = vendorProducts
+      .map(p => ({
+        id: p.id,
+        name: p.name,
+        ...(productRevenue.get(p.id) || { revenue: 0, quantity: 0 }),
+      }))
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 5);
+
+    // Orders by status
+    const statusCounts = new Map<string, number>();
+    vendorOrders.forEach(order => {
+      statusCounts.set(order.status, (statusCounts.get(order.status) || 0) + 1);
+    });
+
+    // Recent orders
+    const recentOrders = await Promise.all(
+      vendorOrders
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, 5)
+        .map(async order => {
+          const items = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id));
+          return { ...order, items: items.filter(item => productIds.includes(item.productId)) };
+        })
+    );
+
+    return {
+      totalRevenue,
+      totalOrders: uniqueOrderIds.length,
+      totalProducts: vendorProducts.length,
+      totalCustomers: uniqueCustomers.size,
+      revenueByMonth: [...monthlyRevenue.entries()].reverse().map(([month, revenue]) => ({ month, revenue })),
+      topProducts,
+      ordersByStatus: [...statusCounts.entries()].map(([status, count]) => ({ status, count })),
+      recentOrders,
     };
   }
 
