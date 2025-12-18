@@ -1,4 +1,5 @@
 import Layout from "@/components/layout/Layout";
+import AccountSidebar from "@/components/layout/AccountSidebar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -6,10 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAccessToken, clearTokens, api } from "@/lib/api";
 import { Link, useLocation } from "wouter";
-import { 
-  User, Package, Heart, RotateCcw, Shield, Bell, Lock, 
-  LogOut, ChevronLeft, Save, Camera, CreditCard
-} from "lucide-react";
+import { User, ChevronLeft, Save, Camera } from "lucide-react";
 import { useState, useEffect } from "react";
 
 export default function UserProfilePage() {
@@ -84,24 +82,6 @@ export default function UserProfilePage() {
     return names.map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
   };
 
-  const SidebarItem = ({ icon: Icon, label, active = false, onClick, href }: { icon: any, label: string, active?: boolean, onClick?: () => void, href?: string }) => {
-    const content = (
-      <div 
-        className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors ${active ? "bg-[#3D4736] text-white" : "hover:bg-slate-100 text-slate-700"}`}
-        onClick={onClick}
-        data-testid={`sidebar-${label.toLowerCase().replace(/\s+/g, '-')}`}
-      >
-        <Icon className="h-4 w-4" />
-        <span className="text-sm font-medium">{label}</span>
-      </div>
-    );
-    
-    if (href) {
-      return <Link href={href}>{content}</Link>;
-    }
-    return content;
-  };
-
   if (isLoading) {
     return (
       <Layout>
@@ -138,45 +118,11 @@ export default function UserProfilePage() {
         <div className="container mx-auto px-4">
           <div className="flex flex-col lg:flex-row gap-8">
             
-            {/* Sidebar */}
-            <aside className="w-full lg:w-64 flex-shrink-0 space-y-6">
-              <div className="bg-[#EFEBE4] p-6 rounded-lg">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-10 h-10 bg-[#3D4736] rounded-full text-white grid place-items-center font-bold">
-                    {getUserInitials()}
-                  </div>
-                  <div>
-                    <div className="font-bold text-sm">Hello, {currentUser?.name || 'John Martin'}</div>
-                    <div className="text-xs text-muted-foreground">{currentUser?.email || 'info@johnmartin.com'}</div>
-                  </div>
-                </div>
-                <div className="text-xs font-medium text-orange-600 mb-1">Profile Completion {currentUser?.completionPercentage || 80}%</div>
-                <div className="h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
-                  <div className="h-full bg-orange-500" style={{ width: `${currentUser?.completionPercentage || 80}%` }} />
-                </div>
-              </div>
-
-              <div className="bg-white rounded-lg overflow-hidden shadow-sm">
-                <div className="px-4 py-3 bg-slate-50 text-xs font-bold text-slate-500 uppercase">Orders & Activity</div>
-                <SidebarItem icon={Package} label="Orders" href="/account/profile" />
-                <SidebarItem icon={Heart} label="Wishlist" href="/account/wishlist" />
-                <SidebarItem icon={RotateCcw} label="Returns" />
-                <SidebarItem icon={Shield} label="Warranty Claims" />
-                
-                <div className="px-4 py-3 bg-slate-50 text-xs font-bold text-slate-500 uppercase mt-2">My Account</div>
-                <SidebarItem icon={User} label="User Profile" active />
-                <SidebarItem icon={User} label="Address" />
-                <SidebarItem icon={CreditCard} label="Payments" />
-                
-                <div className="px-4 py-3 bg-slate-50 text-xs font-bold text-slate-500 uppercase mt-2">Others</div>
-                <SidebarItem icon={Bell} label="Notifications" />
-                <SidebarItem icon={Lock} label="Security Settings" href="/account/profile" />
-              </div>
-
-              <div className="bg-white rounded-lg overflow-hidden shadow-sm">
-                <SidebarItem icon={LogOut} label="Log Out" onClick={handleLogout} />
-              </div>
-            </aside>
+            <AccountSidebar 
+              currentUser={currentUser}
+              activeSection="profile"
+              onLogout={handleLogout}
+            />
 
             {/* Main Content */}
             <main className="flex-1">
