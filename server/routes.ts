@@ -372,6 +372,110 @@ export async function registerRoutes(
 
   /**
    * @swagger
+   * /auth/me:
+   *   get:
+   *     tags: [Auth]
+   *     summary: Get current user info
+   *     description: |
+   *       Returns the currently authenticated user's information.
+   *       
+   *       ## Pages / Sections Used
+   *       - **Profile Page** (`/account/profile`)
+   *         - Sidebar - displays user name, email, and profile completion
+   *       - **Wishlist Page** (`/account/wishlist`)
+   *         - Sidebar - displays user name, email, and profile completion
+   *       - **Order Tracking Page** (`/account/orders/:id/track`)
+   *         - Sidebar - displays user name and email
+   *       - **Order Details Page** (`/account/orders/:id/details`)
+   *         - Sidebar - displays user name and email
+   *       - **Edit Profile Page** (`/account/profile/edit`)
+   *         - Form pre-population with current user data
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: Current user information
+   *       401:
+   *         description: Not authenticated
+   */
+  app.get("/api/auth/me", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+
+    try {
+      const user = await storage.getUser(req.user.id);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      res.json({
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        userType: user.userType,
+        completionPercentage: user.completionPercentage || 80
+      });
+    } catch (error) {
+      console.error("Error fetching user:", error);
+      res.status(500).json({ error: "Failed to fetch user info" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /auth/profile:
+   *   put:
+   *     tags: [Auth]
+   *     summary: Update user profile
+   *     description: |
+   *       Updates the currently authenticated user's profile information.
+   *       
+   *       ## Pages / Sections Used
+   *       - **Edit Profile Page** (`/account/profile/edit`)
+   *         - Profile Form - updates user name and email
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: Profile updated successfully
+   *       401:
+   *         description: Not authenticated
+   */
+  app.put("/api/auth/profile", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+
+    try {
+      const { name, email } = req.body;
+      
+      const user = await storage.getUser(req.user.id);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      // Update user in database
+      const updatedUser = await storage.updateUserProfile(req.user.id, {
+        name: name || user.name,
+        email: email || user.email
+      });
+
+      res.json({
+        id: updatedUser?.id || user.id,
+        email: updatedUser?.email || user.email,
+        name: updatedUser?.name || user.name,
+        userType: updatedUser?.userType || user.userType,
+        message: "Profile updated successfully"
+      });
+    } catch (error) {
+      console.error("Error updating profile:", error);
+      res.status(500).json({ error: "Failed to update profile" });
+    }
+  });
+
+  /**
+   * @swagger
    * /auth/refresh:
    *   post:
    *     tags: [Auth]

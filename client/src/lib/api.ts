@@ -289,5 +289,8 @@ export const api = {
 
     revokeSession: (sessionId: string) =>
       fetchJson<{ message: string }>(`/auth/sessions/${sessionId}`, { method: 'DELETE' }),
+
+    me: () =>
+      fetchJson<{ id: string; email: string; name: string; userType: string; completionPercentage?: number }>('/auth/me'),
   },
 };

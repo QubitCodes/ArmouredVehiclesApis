@@ -4,11 +4,11 @@ import { Badge } from "@/components/ui/badge";
 import ProductImage from "@/components/ui/product-image";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api as mockApi } from "@/lib/mockApi";
-import { api, clearTokens } from "@/lib/api";
+import { api, clearTokens, getAccessToken } from "@/lib/api";
 import { 
   User, Package, Heart, RotateCcw, Shield, Bell, Lock, 
   LogOut, CheckCircle2, XCircle, Search, ChevronDown, ShoppingCart,
-  Monitor, Smartphone, Laptop, Tablet, Globe, Trash2
+  Monitor, Smartphone, Laptop, Tablet, Globe, Trash2, CreditCard
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,17 @@ export default function ProfilePage() {
     queryKey: ['orders'],
     queryFn: mockApi.getOrders
   });
+
+  const { data: currentUser } = useQuery({
+    queryKey: ['current-user'],
+    queryFn: api.auth.me
+  });
+
+  const getUserInitials = () => {
+    if (!currentUser?.name) return 'JM';
+    const names = currentUser.name.split(' ');
+    return names.map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
+  };
 
   const { data: sessions, isLoading: sessionsLoading } = useQuery({
     queryKey: ['auth-sessions'],
@@ -129,7 +140,7 @@ export default function ProfilePage() {
                </Button>
              </Link>
              <div className="flex items-center gap-2">
-               <span>John</span>
+               <span>{currentUser?.name?.split(' ')[0] || 'John'}</span>
                <div className="w-6 h-6 rounded-full border border-white grid place-items-center">
                  <User className="h-3 w-3" />
                </div>
@@ -147,15 +158,15 @@ export default function ProfilePage() {
               {/* User Profile Summary */}
               <div className="bg-[#EFEBE4] p-6 rounded-lg">
                 <div className="flex items-center gap-3 mb-2">
-                  <div className="w-10 h-10 bg-[#3D4736] rounded-full text-white grid place-items-center font-bold">JM</div>
+                  <div className="w-10 h-10 bg-[#3D4736] rounded-full text-white grid place-items-center font-bold">{getUserInitials()}</div>
                   <div>
-                    <div className="font-bold text-sm">Hello, John Martin</div>
-                    <div className="text-xs text-muted-foreground">info@johnmartin.com</div>
+                    <div className="font-bold text-sm">Hello, {currentUser?.name || 'John Martin'}</div>
+                    <div className="text-xs text-muted-foreground">{currentUser?.email || 'info@johnmartin.com'}</div>
                   </div>
                 </div>
-                <div className="text-xs font-medium text-orange-600 mb-1">Profile Completion 80%</div>
+                <div className="text-xs font-medium text-orange-600 mb-1">Profile Completion {currentUser?.completionPercentage || 80}%</div>
                 <div className="h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
-                  <div className="h-full bg-orange-500 w-[80%]" />
+                  <div className="h-full bg-orange-500" style={{ width: `${currentUser?.completionPercentage || 80}%` }} />
                 </div>
               </div>
 
@@ -168,7 +179,7 @@ export default function ProfilePage() {
                 <SidebarItem icon={Shield} label="Warranty Claims" />
                 
                 <div className="px-4 py-3 bg-slate-50 text-xs font-bold text-slate-500 uppercase mt-2">My Account</div>
-                <SidebarItem icon={User} label="User Profile" />
+                <SidebarItem icon={User} label="User Profile" href="/account/profile/edit" />
                 <SidebarItem icon={User} label="Address" />
                 <SidebarItem icon={CreditCard} label="Payments" />
 
@@ -255,11 +266,11 @@ export default function ProfilePage() {
                               </div>
                             </div>
                           </div>
-                          {order.status === 'cancelled' && (
-                            <Button variant="outline" size="sm" className="h-8 text-xs border-slate-300">
-                              TRACK REFUND
+                          <Link href={`/account/orders/${order.id}/details`}>
+                            <Button variant="outline" size="sm" className="h-8 text-xs border-slate-300" data-testid={`view-details-${order.id}`}>
+                              {order.status === 'cancelled' ? 'TRACK REFUND' : 'VIEW DETAILS'}
                             </Button>
-                          )}
+                          </Link>
                         </div>
 
                         <div className="flex gap-4 items-center bg-white p-4 rounded border border-slate-100">
@@ -377,5 +388,3 @@ export default function ProfilePage() {
     </Layout>
   );
 }
-// Adding CreditCard import since it was missing
-import { CreditCard } from "lucide-react";
