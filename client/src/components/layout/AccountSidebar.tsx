@@ -28,7 +28,7 @@ export default function AccountSidebar({ currentUser, activeSection, onSectionCh
   }) => {
     const content = (
       <div 
-        className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors ${active ? "bg-[#3D4736] text-white" : "hover:bg-slate-100 text-slate-700"}`}
+        className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors ${active ? "bg-[#646E51] text-white" : "hover:bg-slate-100 text-slate-700"}`}
         onClick={onClick}
         data-testid={`sidebar-${label.toLowerCase().replace(/\s+/g, '-')}`}
       >
@@ -62,7 +62,7 @@ export default function AccountSidebar({ currentUser, activeSection, onSectionCh
       </div>
 
       <div className="bg-white rounded-lg overflow-hidden shadow-sm">
-        <div className="px-4 py-3 bg-slate-50 text-xs font-bold text-slate-500 uppercase">Orders & Activity</div>
+        <div className="px-4 py-3 bg-[#3D4A26] text-xs font-bold text-white uppercase">Orders & Activity</div>
         <SidebarItem 
           icon={Package} 
           label="Orders" 
@@ -73,7 +73,7 @@ export default function AccountSidebar({ currentUser, activeSection, onSectionCh
         <SidebarItem icon={RotateCcw} label="Returns" />
         <SidebarItem icon={Shield} label="Warranty Claims" />
         
-        <div className="px-4 py-3 bg-slate-50 text-xs font-bold text-slate-500 uppercase mt-2">My Account</div>
+        <div className="px-4 py-3 bg-[#3D4A26] text-xs font-bold text-white uppercase mt-2">My Account</div>
         <SidebarItem 
           icon={User} 
           label="User Profile" 
@@ -93,7 +93,7 @@ export default function AccountSidebar({ currentUser, activeSection, onSectionCh
           href="/account/profile?section=payments"
         />
 
-        <div className="px-4 py-3 bg-slate-50 text-xs font-bold text-slate-500 uppercase mt-2">Security</div>
+        <div className="px-4 py-3 bg-[#3D4A26] text-xs font-bold text-white uppercase mt-2">Others</div>
         <SidebarItem 
           icon={Monitor} 
           label="Active Sessions" 
