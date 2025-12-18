@@ -3,7 +3,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import ProductImage from "@/components/ui/product-image";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api as mockApi } from "@/lib/mockApi";
 import { api, clearTokens, getAccessToken } from "@/lib/api";
 import { 
   User, Package, Heart, RotateCcw, Shield, Bell, Lock, 
@@ -21,9 +20,9 @@ export default function ProfilePage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const { data: orders } = useQuery({
+  const { data: orders, isLoading: ordersLoading } = useQuery({
     queryKey: ['orders'],
-    queryFn: mockApi.getOrders
+    queryFn: api.orders.getAll
   });
 
   const { data: currentUser } = useQuery({
@@ -262,7 +261,7 @@ export default function ProfilePage() {
                             )}
                             <div>
                               <div className="font-bold text-sm">
-                                {order.status === 'delivered' ? `Delivered on ${order.date}` : `Cancelled on ${order.date}`}
+                                {order.status === 'delivered' ? `Delivered on ${order.createdAt ? new Date(order.createdAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short' }) : 'N/A'}` : `Cancelled on ${order.createdAt ? new Date(order.createdAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short' }) : 'N/A'}`}
                               </div>
                             </div>
                           </div>

@@ -1306,6 +1306,34 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Cart is empty" });
       }
 
+      // Calculate order total
+      const total = cartItems.reduce((sum, item) => 
+        sum + (parseFloat(item.product.price) * item.quantity), 0);
+
+      // Create order items from cart
+      const orderItems = cartItems.map(item => ({
+        productId: item.product.id,
+        name: item.product.name,
+        image: item.product.image,
+        price: item.product.price,
+        quantity: item.quantity,
+      }));
+
+      // Create the order in the database
+      const order = await storage.createOrder(
+        {
+          userId: req.user.id,
+          status: 'pending',
+          total: total.toString(),
+          trackingNumber: `TRK${Date.now().toString(36).toUpperCase()}`,
+          estimatedDelivery: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        },
+        orderItems
+      );
+
+      // Clear the cart after order creation
+      await storage.clearCart(req.user.id);
+
       // Try to get Stripe client
       try {
         const { getUncachableStripeClient } = await import("./stripeClient");
@@ -1338,21 +1366,23 @@ export async function registerRoutes(
           payment_method_types: ['card'],
           line_items: lineItems,
           mode: 'payment',
-          success_url: `${baseUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+          success_url: `${baseUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}&order_id=${order.id}`,
           cancel_url: `${baseUrl}/cart`,
           customer_email: req.user.email,
           metadata: {
             userId: req.user.id,
+            orderId: order.id,
           },
         });
 
-        res.json({ url: session.url });
+        res.json({ url: session.url, orderId: order.id });
       } catch (stripeError: any) {
         console.log("Stripe not configured, using test mode:", stripeError.message);
-        // Stripe not configured - return test mode response
+        // Stripe not configured - return test mode response with order info
         res.json({ 
           testMode: true,
-          message: "Stripe is not configured. This is a sample environment - payments would work with valid Stripe credentials."
+          orderId: order.id,
+          message: "Order created successfully. Stripe is not configured - payments would work with valid Stripe credentials."
         });
       }
     } catch (error) {

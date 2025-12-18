@@ -3,7 +3,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import ProductImage from "@/components/ui/product-image";
 import { useQuery } from "@tanstack/react-query";
-import { api as mockApi } from "@/lib/mockApi";
 import { getAccessToken, clearTokens, api } from "@/lib/api";
 import { Link, useLocation, useRoute } from "wouter";
 import { 
@@ -27,7 +26,7 @@ export default function OrderDetailsPage() {
 
   const { data: orders, isLoading: ordersLoading } = useQuery({
     queryKey: ['orders'],
-    queryFn: mockApi.getOrders
+    queryFn: api.orders.getAll
   });
 
   const { data: currentUser } = useQuery({
@@ -182,7 +181,7 @@ export default function OrderDetailsPage() {
                   <span className="font-bold text-slate-900">{shipmentId}</span>
                 </div>
                 <div className="text-slate-600">
-                  Order Date: <span className="font-medium text-slate-900">{order.date}</span>
+                  Order Date: <span className="font-medium text-slate-900">{order.createdAt ? new Date(order.createdAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A'}</span>
                 </div>
               </div>
 
@@ -199,7 +198,7 @@ export default function OrderDetailsPage() {
                       <p className={`font-bold ${isCancelled ? 'text-red-600' : 'text-green-600'}`}>
                         {isCancelled ? 'Cancelled' : 'Delivered'} 
                         <span className="font-normal text-slate-600 ml-2">
-                          on {order.date}
+                          on {order.createdAt ? new Date(order.createdAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short' }) : 'N/A'}
                         </span>
                       </p>
                       {isCancelled && (

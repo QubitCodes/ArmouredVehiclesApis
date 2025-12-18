@@ -7,20 +7,22 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ArrowLeft, MapPin, CreditCard, AlertTriangle, Loader2, ShoppingBag, Lock } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api, getAccessToken } from "@/lib/api";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { useQueryClient } from "@tanstack/react-query";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 export default function CheckoutPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("card");
   const [showTestModeWarning, setShowTestModeWarning] = useState(false);
 
   useEffect(() => {
-    const token = localStorage.getItem('auth_token');
+    const token = getAccessToken();
     setIsAuthenticated(!!token);
     if (!token) {
       setLocation('/auth/login');
@@ -35,9 +37,22 @@ export default function CheckoutPage() {
 
   const checkoutMutation = useMutation({
     mutationFn: api.checkout.createSession,
-    onSuccess: (data) => {
+    onSuccess: (data: { url?: string; testMode?: boolean; orderId?: string; error?: string }) => {
+      // Invalidate cart query since checkout clears the cart
+      queryClient.invalidateQueries({ queryKey: ['cart'] });
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      
       if (data.url) {
         window.location.href = data.url;
+      } else if (data.testMode && data.orderId) {
+        // Order created successfully in test mode, redirect to orders
+        toast({
+          title: "Order Placed Successfully!",
+          description: "Your order has been created. Redirecting to your orders...",
+        });
+        setTimeout(() => {
+          setLocation('/account/profile');
+        }, 1500);
       } else if (data.testMode) {
         setShowTestModeWarning(true);
         toast({

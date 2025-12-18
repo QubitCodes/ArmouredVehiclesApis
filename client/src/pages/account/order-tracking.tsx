@@ -3,8 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import ProductImage from "@/components/ui/product-image";
 import { useQuery } from "@tanstack/react-query";
-import { api as mockApi } from "@/lib/mockApi";
-import { getAccessToken, clearTokens } from "@/lib/api";
+import { getAccessToken, clearTokens, api } from "@/lib/api";
 import { Link, useLocation, useRoute } from "wouter";
 import { 
   User, Package, Heart, RotateCcw, Shield, Bell, Lock, 
@@ -36,7 +35,12 @@ export default function OrderTrackingPage() {
 
   const { data: orders, isLoading } = useQuery({
     queryKey: ['orders'],
-    queryFn: mockApi.getOrders
+    queryFn: api.orders.getAll
+  });
+
+  const { data: currentUser } = useQuery({
+    queryKey: ['current-user'],
+    queryFn: api.auth.me
   });
 
   const order = orders?.find(o => o.id === orderId);
@@ -62,10 +66,11 @@ export default function OrderTrackingPage() {
     };
     
     const currentStep = order ? statusMap[order.status] ?? 0 : 0;
-    const orderDate = order?.date || new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+    const formatDate = (date: Date | string) => new Date(date).toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+    const orderDate = order?.createdAt ? formatDate(order.createdAt) : formatDate(new Date());
     
     const getStepDate = (stepIndex: number): string => {
-      if (!order?.date) return '';
+      if (!order?.createdAt) return '';
       const baseDate = new Date();
       const dates = [
         orderDate,
@@ -256,7 +261,7 @@ export default function OrderTrackingPage() {
                   <span className="font-bold text-slate-900">{shipmentId}</span>
                 </div>
                 <div className="text-slate-600">
-                  Order Date: <span className="font-medium text-slate-900">{order.date}</span>
+                  Order Date: <span className="font-medium text-slate-900">{order.createdAt ? new Date(order.createdAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A'}</span>
                 </div>
               </div>
 
