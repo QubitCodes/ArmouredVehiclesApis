@@ -51,7 +51,7 @@ export default function CheckoutSuccessPage() {
             </p>
 
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Link href="/orders">
+              <Link href="/account/profile?section=orders">
                 <Button variant="outline" className="w-full sm:w-auto">
                   View My Orders
                 </Button>
