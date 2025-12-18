@@ -1,16 +1,17 @@
 // Integration: blueprint:javascript_database
 import { 
-  users, products, categories, reviews, cartItems, orders, orderItems,
+  users, products, categories, reviews, cartItems, orders, orderItems, authSessions,
   type User, type InsertUser,
   type Product, type InsertProduct,
   type Category, type InsertCategory,
   type Review, type InsertReview,
   type CartItem, type InsertCartItem,
   type Order, type InsertOrder,
-  type OrderItem, type InsertOrderItem
+  type OrderItem, type InsertOrderItem,
+  type AuthSession, type InsertAuthSession
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc, sql, or, ilike } from "drizzle-orm";
+import { eq, and, desc, sql, or, ilike, isNull } from "drizzle-orm";
 
 export interface IStorage {
   // Users
@@ -56,6 +57,15 @@ export interface IStorage {
     orders: number;
     products: number;
   }>;
+
+  // Auth Sessions
+  createSession(session: InsertAuthSession): Promise<AuthSession>;
+  getSessionById(id: string): Promise<AuthSession | undefined>;
+  getActiveSessionsByUserId(userId: string): Promise<AuthSession[]>;
+  updateSessionLastUsed(id: string): Promise<void>;
+  revokeSession(id: string): Promise<void>;
+  revokeAllUserSessions(userId: string, exceptSessionId?: string): Promise<void>;
+  updateUserTokenVersion(userId: string): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -321,6 +331,82 @@ export class DatabaseStorage implements IStorage {
       orders: uniqueOrders.size,
       products: vendorProducts.length,
     };
+  }
+
+  // Auth Sessions
+  async createSession(session: InsertAuthSession): Promise<AuthSession> {
+    const [newSession] = await db.insert(authSessions).values(session as any).returning();
+    return newSession;
+  }
+
+  async getSessionById(id: string): Promise<AuthSession | undefined> {
+    const [session] = await db
+      .select()
+      .from(authSessions)
+      .where(eq(authSessions.id, id));
+    return session || undefined;
+  }
+
+  async getActiveSessionsByUserId(userId: string): Promise<AuthSession[]> {
+    return await db
+      .select()
+      .from(authSessions)
+      .where(
+        and(
+          eq(authSessions.userId, userId),
+          isNull(authSessions.revokedAt),
+          sql`${authSessions.expiresAt} > NOW()`
+        )
+      )
+      .orderBy(desc(authSessions.lastUsedAt));
+  }
+
+  async updateSessionLastUsed(id: string): Promise<void> {
+    await db
+      .update(authSessions)
+      .set({ lastUsedAt: new Date() })
+      .where(eq(authSessions.id, id));
+  }
+
+  async revokeSession(id: string): Promise<void> {
+    await db
+      .update(authSessions)
+      .set({ revokedAt: new Date() })
+      .where(eq(authSessions.id, id));
+  }
+
+  async revokeAllUserSessions(userId: string, exceptSessionId?: string): Promise<void> {
+    if (exceptSessionId) {
+      await db
+        .update(authSessions)
+        .set({ revokedAt: new Date() })
+        .where(
+          and(
+            eq(authSessions.userId, userId),
+            isNull(authSessions.revokedAt),
+            sql`${authSessions.id} != ${exceptSessionId}`
+          )
+        );
+    } else {
+      await db
+        .update(authSessions)
+        .set({ revokedAt: new Date() })
+        .where(
+          and(
+            eq(authSessions.userId, userId),
+            isNull(authSessions.revokedAt)
+          )
+        );
+    }
+  }
+
+  async updateUserTokenVersion(userId: string): Promise<number> {
+    const [updated] = await db
+      .update(users)
+      .set({ tokenVersion: sql`COALESCE(${users.tokenVersion}, 0) + 1` })
+      .where(eq(users.id, userId))
+      .returning();
+    return updated?.tokenVersion || 1;
   }
 }
 
