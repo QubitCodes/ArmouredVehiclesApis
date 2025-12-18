@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { Search, ShoppingCart, User, Menu, X, LayoutDashboard, LogOut } from "lucide-react";
+import { Search, ShoppingCart, User, Menu, X, LayoutDashboard, LogOut, MapPin, CreditCard, Package } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -219,7 +219,25 @@ export default function Navbar() {
                   <DropdownMenuItem asChild>
                     <Link href="/account/profile" className="cursor-pointer">
                       <User className="h-4 w-4 mr-2" />
-                      My Account
+                      My Profile
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/account/profile?section=orders" className="cursor-pointer">
+                      <Package className="h-4 w-4 mr-2" />
+                      Orders
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/account/profile?section=addresses" className="cursor-pointer">
+                      <MapPin className="h-4 w-4 mr-2" />
+                      Addresses
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/account/profile?section=payments" className="cursor-pointer">
+                      <CreditCard className="h-4 w-4 mr-2" />
+                      Saved Payments
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={handleLogout} className="cursor-pointer text-red-600">

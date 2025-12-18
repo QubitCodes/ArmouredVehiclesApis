@@ -10,9 +10,9 @@ import {
   Monitor, Smartphone, Laptop, Tablet, Globe, Trash2, CreditCard,
   MapPin, Plus, Home, Building2, Star, Wallet
 } from "lucide-react";
-import { Link, useLocation } from "wouter";
+import { Link, useLocation, useSearch } from "wouter";
 import { Input } from "@/components/ui/input";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
@@ -22,6 +22,7 @@ import type { Address, SavedPaymentMethod } from "@shared/schema";
 
 export default function ProfilePage() {
   const [, setLocation] = useLocation();
+  const searchString = useSearch();
   const [activeSection, setActiveSection] = useState<'orders' | 'sessions' | 'addresses' | 'payments'>('orders');
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -30,6 +31,15 @@ export default function ProfilePage() {
   const [addressType, setAddressType] = useState<'home' | 'work' | 'other'>('home');
   const [addressCountry, setAddressCountry] = useState('AE');
   const [addressIsDefault, setAddressIsDefault] = useState(false);
+
+  // Read section from URL query parameter
+  useEffect(() => {
+    const params = new URLSearchParams(searchString);
+    const section = params.get('section');
+    if (section === 'orders' || section === 'sessions' || section === 'addresses' || section === 'payments') {
+      setActiveSection(section);
+    }
+  }, [searchString]);
 
   const { data: orders, isLoading: ordersLoading } = useQuery({
     queryKey: ['orders'],
