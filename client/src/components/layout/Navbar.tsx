@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { Search, ShoppingCart, User, Menu, X } from "lucide-react";
+import { Search, ShoppingCart, User, Menu, X, LayoutDashboard } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -8,11 +8,20 @@ import { Input } from "@/components/ui/input";
 export default function Navbar() {
   const [location] = useLocation();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  
+  // Mock logged in state for demo purposes - normally would come from auth context
+  // Check if we are in dashboard or profile to assume "logged in" state for the navbar UI
+  const isLoggedIn = location.includes('/account') || location.includes('/seller');
+  const isVendor = location.includes('/seller');
 
   const navLinks = [
     { href: "/", label: "Home" },
     { href: "/products", label: "Marketplace" },
-    { href: "/seller/dashboard", label: "Sell on AutoParts" },
+    // Only show "Sell" link if not already a vendor, otherwise show Dashboard link
+    ...(isVendor 
+      ? [{ href: "/seller/dashboard", label: "Vendor Dashboard" }] 
+      : [{ href: "/auth/login", label: "Sell on AutoParts" }]
+    ),
   ];
 
   return (
@@ -55,19 +64,28 @@ export default function Navbar() {
 
         {/* Actions */}
         <div className="flex items-center gap-2">
+          {isVendor && (
+            <Link href="/seller/dashboard">
+               <Button variant="outline" size="sm" className="hidden sm:flex gap-2 bg-slate-900 text-white border-slate-900 hover:bg-slate-800 hover:text-white">
+                 <LayoutDashboard className="h-4 w-4" />
+                 <span className="text-xs font-bold">Supplier Zone</span>
+               </Button>
+            </Link>
+          )}
+
           <Link href="/cart">
             <Button variant="ghost" size="icon" className="relative">
               <ShoppingCart className="h-5 w-5" />
               <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[10px] w-4 h-4 rounded-full grid place-items-center font-bold">
-                2
+                3
               </span>
             </Button>
           </Link>
           
-          <Link href="/auth/login">
+          <Link href={isLoggedIn ? "/account/profile" : "/auth/login"}>
             <Button variant="ghost" size="sm" className="hidden sm:flex gap-2">
               <User className="h-4 w-4" />
-              <span>Login</span>
+              <span>{isLoggedIn ? "My Account" : "Login"}</span>
             </Button>
           </Link>
 
@@ -90,8 +108,8 @@ export default function Navbar() {
                       </span>
                     </Link>
                   ))}
-                  <Link href="/auth/login" onClick={() => setIsMenuOpen(false)}>
-                    <span className="text-lg font-medium">Login / Register</span>
+                  <Link href={isLoggedIn ? "/account/profile" : "/auth/login"} onClick={() => setIsMenuOpen(false)}>
+                    <span className="text-lg font-medium">{isLoggedIn ? "My Account" : "Login / Register"}</span>
                   </Link>
                 </div>
               </div>

@@ -58,14 +58,25 @@ export interface User {
   name: string;
   email: string;
   role: 'customer' | 'admin' | 'vendor_owner' | 'vendor_employee';
+  is_vendor: boolean; // Explicit flag as requested
+  avatar?: string;
+  completionPercentage?: number;
 }
 
 export interface Order {
   id: string;
   date: string;
-  status: 'pending' | 'shipped' | 'delivered' | 'cancelled';
+  status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | 'returned';
   total: number;
-  items: number;
+  items: {
+    productId: number;
+    name: string;
+    image: string;
+    price: number;
+    quantity: number;
+  }[];
+  trackingNumber?: string;
+  estimatedDelivery?: string;
 }
 
 export interface Category {
@@ -376,11 +387,14 @@ export const api = {
   // Auth
   login: async (email: string) => {
     await new Promise(resolve => setTimeout(resolve, 800));
+    const isVendor = email.includes('vendor');
     return {
       id: 123,
-      name: "John Doe",
+      name: "John Martin",
       email: email,
-      role: email.includes('vendor') ? 'vendor_owner' : 'customer'
+      role: isVendor ? 'vendor_owner' : 'customer',
+      is_vendor: isVendor,
+      completionPercentage: 80
     } as User;
   },
   
@@ -395,8 +409,35 @@ export const api = {
   // Orders
   getOrders: async () => {
     return [
-      { id: "ORD-2024-001", date: "2024-02-15", status: "delivered", total: 450.00, items: 1 },
-      { id: "ORD-2024-002", date: "2024-02-18", status: "shipped", total: 125.00, items: 2 }
+      { 
+        id: "AMZ-12345678-987654", 
+        date: "2024-02-15", 
+        status: "processing", 
+        total: 679.00, 
+        trackingNumber: "TRK123456789",
+        estimatedDelivery: "Today",
+        items: [
+          { productId: 1, name: "DFC - 4000 HybridDynamic Hybrid Rear Brake Pads", image: "https://images.unsplash.com/photo-1600706432502-76b1e601a746?auto=format&fit=crop&q=80&w=200", price: 679.00, quantity: 1 }
+        ]
+      },
+      { 
+        id: "AMZ-87654321-123456", 
+        date: "2023-11-03", 
+        status: "delivered", 
+        total: 679.00, 
+        items: [
+           { productId: 1, name: "DFC - 4000 HybridDynamic Hybrid Rear Brake Pads", image: "https://images.unsplash.com/photo-1600706432502-76b1e601a746?auto=format&fit=crop&q=80&w=200", price: 679.00, quantity: 1 }
+        ]
+      },
+      { 
+        id: "AMZ-12345678-987654", 
+        date: "2023-11-04", 
+        status: "cancelled", 
+        total: 475.00, 
+        items: [
+          { productId: 2, name: "Duralast 45084DL High-Performance Disc Brake Rotor", image: "https://images.unsplash.com/photo-1616788494707-ec28f08d05a1?auto=format&fit=crop&q=80&w=200", price: 475.00, quantity: 1 }
+        ]
+      }
     ] as Order[];
   },
   

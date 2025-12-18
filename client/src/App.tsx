@@ -9,8 +9,10 @@ import Home from "@/pages/home";
 import ProductsPage from "@/pages/products";
 import ProductDetailsPage from "@/pages/product-details";
 import CartPage from "@/pages/cart";
+import CheckoutPage from "@/pages/checkout";
 import LoginPage from "@/pages/auth/user-login";
 import SellerDashboard from "@/pages/seller/dashboard";
+import ProfilePage from "@/pages/account/profile";
 
 function Router() {
   return (
@@ -19,8 +21,10 @@ function Router() {
       <Route path="/products" component={ProductsPage} />
       <Route path="/products/:id" component={ProductDetailsPage} />
       <Route path="/cart" component={CartPage} />
+      <Route path="/checkout" component={CheckoutPage} />
       <Route path="/auth/login" component={LoginPage} />
       <Route path="/seller/dashboard" component={SellerDashboard} />
+      <Route path="/account/profile" component={ProfilePage} />
       
       {/* Fallback to 404 */}
       <Route component={NotFound} />
