@@ -5,7 +5,7 @@ export interface Product {
   id: number;
   name: string;
   sku: string;
-  price: number;
+  price: number | null; // Price can be null if not authenticated
   image: string;
   category: string;
   description: string;
@@ -31,6 +31,58 @@ export interface Order {
   total: number;
   items: number;
 }
+
+export interface Category {
+  id: number;
+  name: string;
+  image: string;
+  description: string; // Not visible in frontend
+}
+
+export interface Slide {
+  id: number;
+  title?: string;
+  subtitle?: string;
+  buttonText: string;
+  image: string;
+  link: string;
+}
+
+export const MOCK_SLIDES: Slide[] = [
+  {
+    id: 1,
+    title: "Premium Auto Parts Marketplace",
+    subtitle: "Source OEM and aftermarket parts with bulk pricing and instant quotes.",
+    buttonText: "Browse Catalog",
+    image: "https://images.unsplash.com/photo-1486262715619-67b85e0b08d3?auto=format&fit=crop&q=80&w=1600",
+    link: "/products"
+  },
+  {
+    id: 2,
+    title: "New Performance Brakes Arrival",
+    subtitle: "Upgrade your inventory with the latest ceramic brake kits.",
+    buttonText: "Shop Brakes",
+    image: "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&q=80&w=1600",
+    link: "/products?category=Brakes"
+  },
+  {
+    id: 3,
+    title: undefined, // Optional title test
+    subtitle: "Exclusive deals for verified workshops this week only.",
+    buttonText: "View Deals",
+    image: "https://images.unsplash.com/photo-1487754180451-c456f719a1fc?auto=format&fit=crop&q=80&w=1600",
+    link: "/products"
+  }
+];
+
+export const MOCK_CATEGORIES: Category[] = [
+  { id: 1, name: "Brakes", image: "https://images.unsplash.com/photo-1600706432502-76b1e601a746?auto=format&fit=crop&q=80&w=400", description: "Brake pads, rotors, and calipers" },
+  { id: 2, name: "Lighting", image: "https://images.unsplash.com/photo-1616788494707-ec28f08d05a1?auto=format&fit=crop&q=80&w=400", description: "Headlights, taillights, and bulbs" },
+  { id: 3, name: "Engine", image: "https://images.unsplash.com/photo-1574360774620-192cb91b8606?auto=format&fit=crop&q=80&w=400", description: "Engine components and oil" },
+  { id: 4, name: "Suspension", image: "https://images.unsplash.com/photo-1570188167980-d2d02c42345e?auto=format&fit=crop&q=80&w=400", description: "Shocks, struts, and coilovers" },
+  { id: 5, name: "Interior", image: "https://images.unsplash.com/photo-1560965385-a7455d311394?auto=format&fit=crop&q=80&w=400", description: "Seats, mats, and accessories" },
+  { id: 6, name: "Wheels & Tires", image: "https://images.unsplash.com/photo-1578844251758-2f71da645217?auto=format&fit=crop&q=80&w=400", description: "Rims and tires for all vehicles" }
+];
 
 export const MOCK_PRODUCTS: Product[] = [
   {
@@ -107,11 +159,52 @@ export const MOCK_PRODUCTS: Product[] = [
     make: "BMW",
     model: "M3",
     year: 2020
+  },
+  {
+    id: 6,
+    name: "Carbon Fiber Steering Wheel",
+    sku: "INT-CF-006",
+    price: 550.00,
+    image: "https://images.unsplash.com/photo-1560965385-a7455d311394?auto=format&fit=crop&q=80&w=800",
+    category: "Interior",
+    description: "Ergonomic carbon fiber steering wheel with leather grips.",
+    condition: 'new',
+    stock: 12,
+    vendor: "Luxury Mods",
+    make: "BMW",
+    model: "M4",
+    year: 2023
+  },
+  {
+    id: 7,
+    name: "High Performance Tires (Set of 4)",
+    sku: "WHL-TR-007",
+    price: 1200.00,
+    image: "https://images.unsplash.com/photo-1578844251758-2f71da645217?auto=format&fit=crop&q=80&w=800",
+    category: "Wheels & Tires",
+    description: "All-season high performance tires for sports cars.",
+    condition: 'new',
+    stock: 20,
+    vendor: "TireMaster",
+    make: "Porsche",
+    model: "911",
+    year: 2022
+  },
+  {
+    id: 8,
+    name: "Ceramic Coating Kit",
+    sku: "EXT-CC-008",
+    price: 89.99,
+    image: "https://images.unsplash.com/photo-1601362840469-51e4d8d58785?auto=format&fit=crop&q=80&w=800",
+    category: "Exterior",
+    description: "DIY ceramic coating kit for long-lasting paint protection.",
+    condition: 'new',
+    stock: 100,
+    vendor: "ShineOn",
+    make: "Universal",
+    model: "Universal",
+    year: 2024
   }
-];
-
-export const MOCK_CATEGORIES = [
-  "Brakes", "Lighting", "Engine", "Suspension", "Fluids", "Interior", "Exterior", "Wheels & Tires"
 ];
 
 // Simulated API calls matching the SRS requirements
@@ -119,14 +212,37 @@ export const api = {
   // Public / Common
   getProducts: async (filters?: any) => {
     await new Promise(resolve => setTimeout(resolve, 500)); // Simulate latency
+    
+    // Simulate unauthenticated user getting null prices randomly for demo purposes
+    // In real app, this would be based on actual auth state
+    // For now, we return as is, but specific page logic might mask it if needed
+    // Or we can assume the user is "guest" by default for this mock if we wanted
     return MOCK_PRODUCTS;
   },
+  
+  getTopSellingProducts: async () => {
+    await new Promise(resolve => setTimeout(resolve, 400));
+    // Just return a subset for demo
+    return [MOCK_PRODUCTS[0], MOCK_PRODUCTS[2], MOCK_PRODUCTS[6], MOCK_PRODUCTS[7]];
+  },
+
+  getFeaturedProducts: async () => {
+    await new Promise(resolve => setTimeout(resolve, 400));
+    // Return a different subset
+    return [MOCK_PRODUCTS[1], MOCK_PRODUCTS[4], MOCK_PRODUCTS[3], MOCK_PRODUCTS[5]];
+  },
+
   getProductById: async (id: number) => {
     await new Promise(resolve => setTimeout(resolve, 300));
     return MOCK_PRODUCTS.find(p => p.id === id);
   },
+  
   getCategories: async () => {
     return MOCK_CATEGORIES;
+  },
+  
+  getSlides: async () => {
+    return MOCK_SLIDES;
   },
   
   // Auth

@@ -1,6 +1,5 @@
 import Layout from "@/components/layout/Layout";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
@@ -27,10 +26,10 @@ export default function ProductsPage() {
         <h3 className="font-display font-bold mb-4">Categories</h3>
         <div className="space-y-2">
           {categories?.map((cat) => (
-            <div key={cat} className="flex items-center space-x-2">
-              <Checkbox id={`cat-${cat}`} />
-              <label htmlFor={`cat-${cat}`} className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                {cat}
+            <div key={cat.id} className="flex items-center space-x-2">
+              <Checkbox id={`cat-${cat.id}`} />
+              <label htmlFor={`cat-${cat.id}`} className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                {cat.name}
               </label>
             </div>
           ))}
@@ -121,3 +120,5 @@ export default function ProductsPage() {
     </Layout>
   );
 }
+// Adding Input import since it was missing in the original file I'm replacing and I used it in FilterSidebar
+import { Input } from "@/components/ui/input";

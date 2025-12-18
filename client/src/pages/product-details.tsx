@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/mockApi";
-import { useRoute } from "wouter";
+import { useRoute, Link } from "wouter";
 import { ShoppingCart, Heart, Truck, Shield, RotateCcw } from "lucide-react";
 
 export default function ProductDetailsPage() {
@@ -63,14 +63,25 @@ export default function ProductDetailsPage() {
             </div>
 
             <div className="flex items-end gap-4 mb-8">
-              <span className="text-4xl font-bold text-primary">${product.price.toFixed(2)}</span>
-              {/* <span className="text-xl text-muted-foreground line-through mb-1">$599.00</span> */}
+              {product.price !== null ? (
+                <span className="text-4xl font-bold text-primary">${product.price.toFixed(2)}</span>
+              ) : (
+                <span className="text-xl font-medium text-muted-foreground">Login to view price</span>
+              )}
             </div>
 
             <div className="flex flex-col sm:flex-row gap-4 mb-8">
-              <Button size="lg" className="flex-1 gap-2 h-12 text-lg">
-                <ShoppingCart className="h-5 w-5" /> Add to Cart
-              </Button>
+              {product.price !== null ? (
+                <Button size="lg" className="flex-1 gap-2 h-12 text-lg">
+                  <ShoppingCart className="h-5 w-5" /> Add to Cart
+                </Button>
+              ) : (
+                <Link href="/auth/login">
+                  <Button size="lg" className="flex-1 gap-2 h-12 text-lg">
+                    Login to Purchase
+                  </Button>
+                </Link>
+              )}
               <Button size="lg" variant="outline" className="h-12 w-12 px-0">
                 <Heart className="h-5 w-5" />
               </Button>
