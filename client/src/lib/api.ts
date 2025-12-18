@@ -2,11 +2,17 @@ import type { Product, Category, Review, CartItem, Order } from "@shared/schema"
 
 const API_BASE = "/api";
 
+function getAuthHeaders(): HeadersInit {
+  const token = localStorage.getItem('auth_token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${url}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
+      ...getAuthHeaders(),
       ...options?.headers,
     },
   });
@@ -83,7 +89,18 @@ export const api = {
       }),
     
     remove: (id: number) =>
-      fetch(`${API_BASE}/cart/${id}`, { method: "DELETE" }),
+      fetch(`${API_BASE}/cart/${id}`, { 
+        method: "DELETE",
+        headers: getAuthHeaders(),
+      }),
+  },
+  
+  // Checkout
+  checkout: {
+    createSession: () => 
+      fetchJson<{ url?: string; testMode?: boolean; error?: string }>("/checkout/create-session", {
+        method: "POST",
+      }),
   },
 
   // Orders

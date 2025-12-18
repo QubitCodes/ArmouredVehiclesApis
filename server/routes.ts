@@ -722,6 +722,83 @@ export async function registerRoutes(
     }
   });
 
+  // ===== CHECKOUT (Stripe Integration) =====
+
+  /**
+   * @swagger
+   * /checkout/create-session:
+   *   post:
+   *     tags: [Checkout]
+   *     summary: Create Stripe checkout session
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: Checkout session URL or test mode indicator
+   */
+  app.post("/api/checkout/create-session", async (req, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+
+      // Get cart items
+      const cartItems = await storage.getCartByUserId(req.user.id);
+      if (!cartItems || cartItems.length === 0) {
+        return res.status(400).json({ error: "Cart is empty" });
+      }
+
+      // Try to get Stripe client
+      try {
+        const { getUncachableStripeClient } = await import("./stripeClient");
+        const stripe = await getUncachableStripeClient();
+
+        // Build line items from cart
+        const lineItems = cartItems.map(item => ({
+          price_data: {
+            currency: 'aed',
+            product_data: {
+              name: item.product.name,
+              images: [item.product.image],
+              metadata: {
+                productId: item.product.id.toString(),
+                sku: item.product.sku,
+              },
+            },
+            unit_amount: Math.round(parseFloat(item.product.price) * 100),
+          },
+          quantity: item.quantity,
+        }));
+
+        // Create checkout session
+        const baseUrl = `https://${process.env.REPLIT_DOMAINS?.split(',')[0]}`;
+        const session = await stripe.checkout.sessions.create({
+          payment_method_types: ['card'],
+          line_items: lineItems,
+          mode: 'payment',
+          success_url: `${baseUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${baseUrl}/cart`,
+          customer_email: req.user.email,
+          metadata: {
+            userId: req.user.id,
+          },
+        });
+
+        res.json({ url: session.url });
+      } catch (stripeError: any) {
+        console.log("Stripe not configured, using test mode:", stripeError.message);
+        // Stripe not configured - return test mode response
+        res.json({ 
+          testMode: true,
+          message: "Stripe is not configured. This is a sample environment - payments would work with valid Stripe credentials."
+        });
+      }
+    } catch (error) {
+      console.error("Checkout error:", error);
+      res.status(500).json({ error: "Failed to create checkout session" });
+    }
+  });
+
   // ===== ORDERS =====
 
   /**

@@ -10,6 +10,7 @@ import ProductsPage from "@/pages/products";
 import ProductDetailsPage from "@/pages/product-details";
 import CartPage from "@/pages/cart";
 import CheckoutPage from "@/pages/checkout";
+import CheckoutSuccessPage from "@/pages/checkout-success";
 import LoginPage from "@/pages/auth/user-login";
 import RegisterPage from "@/pages/auth/register";
 import SellerDashboard from "@/pages/seller/dashboard";
@@ -23,6 +24,7 @@ function Router() {
       <Route path="/products/:id" component={ProductDetailsPage} />
       <Route path="/cart" component={CartPage} />
       <Route path="/checkout" component={CheckoutPage} />
+      <Route path="/checkout/success" component={CheckoutSuccessPage} />
       <Route path="/auth/login" component={LoginPage} />
       <Route path="/auth/register" component={RegisterPage} />
       <Route path="/seller/dashboard" component={SellerDashboard} />
