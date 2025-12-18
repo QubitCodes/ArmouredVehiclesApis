@@ -327,7 +327,7 @@ export default function OrderTrackingPage() {
                     <div className="flex-1">
                       <h4 className="font-medium text-slate-900 text-sm">{order.items[0]?.name || 'Product Name'}</h4>
                       <p className="font-bold text-slate-900 mt-1">
-                        <span className="text-orange-600">৳</span> {order.items[0]?.price?.toFixed(2) || '679.00'}
+                        <span className="text-orange-600">AED</span> {parseFloat(order.items[0]?.price?.toString() || '0').toFixed(2)}
                       </p>
                     </div>
                   </div>
