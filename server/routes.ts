@@ -1630,6 +1630,263 @@ export async function registerRoutes(
     }
   });
 
+  // ===== ADDRESSES =====
+
+  /**
+   * @swagger
+   * /addresses:
+   *   get:
+   *     tags: [Addresses]
+   *     summary: Get user addresses
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: List of user addresses
+   */
+  app.get("/api/addresses", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+    try {
+      const userAddresses = await storage.getAddressesByUserId(req.user.id);
+      res.json(userAddresses);
+    } catch (error) {
+      console.error("Error fetching addresses:", error);
+      res.status(500).json({ error: "Failed to fetch addresses" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /addresses:
+   *   post:
+   *     tags: [Addresses]
+   *     summary: Create new address
+   *     security:
+   *       - bearerAuth: []
+   */
+  app.post("/api/addresses", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+    try {
+      const address = await storage.createAddress({
+        ...req.body,
+        userId: req.user.id
+      });
+      res.status(201).json(address);
+    } catch (error) {
+      console.error("Error creating address:", error);
+      res.status(500).json({ error: "Failed to create address" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /addresses/{id}:
+   *   put:
+   *     tags: [Addresses]
+   *     summary: Update address
+   *     security:
+   *       - bearerAuth: []
+   */
+  app.put("/api/addresses/:id", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+    try {
+      const id = parseInt(req.params.id);
+      const existing = await storage.getAddressById(id);
+      if (!existing || existing.userId !== req.user.id) {
+        return res.status(404).json({ error: "Address not found" });
+      }
+      const updated = await storage.updateAddress(id, req.body);
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating address:", error);
+      res.status(500).json({ error: "Failed to update address" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /addresses/{id}:
+   *   delete:
+   *     tags: [Addresses]
+   *     summary: Delete address
+   *     security:
+   *       - bearerAuth: []
+   */
+  app.delete("/api/addresses/:id", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+    try {
+      const id = parseInt(req.params.id);
+      const existing = await storage.getAddressById(id);
+      if (!existing || existing.userId !== req.user.id) {
+        return res.status(404).json({ error: "Address not found" });
+      }
+      await storage.deleteAddress(id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting address:", error);
+      res.status(500).json({ error: "Failed to delete address" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /addresses/{id}/default:
+   *   post:
+   *     tags: [Addresses]
+   *     summary: Set default address
+   *     security:
+   *       - bearerAuth: []
+   */
+  app.post("/api/addresses/:id/default", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+    try {
+      const id = parseInt(req.params.id);
+      const existing = await storage.getAddressById(id);
+      if (!existing || existing.userId !== req.user.id) {
+        return res.status(404).json({ error: "Address not found" });
+      }
+      await storage.setDefaultAddress(req.user.id, id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error setting default address:", error);
+      res.status(500).json({ error: "Failed to set default address" });
+    }
+  });
+
+  // ===== SAVED PAYMENT METHODS =====
+
+  /**
+   * @swagger
+   * /payments:
+   *   get:
+   *     tags: [Payments]
+   *     summary: Get saved payment methods
+   *     description: Returns tokenized payment methods (PCI-DSS compliant - no raw card data)
+   *     security:
+   *       - bearerAuth: []
+   */
+  app.get("/api/payments", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+    try {
+      const payments = await storage.getSavedPaymentsByUserId(req.user.id);
+      res.json(payments);
+    } catch (error) {
+      console.error("Error fetching payments:", error);
+      res.status(500).json({ error: "Failed to fetch payment methods" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /payments:
+   *   post:
+   *     tags: [Payments]
+   *     summary: Save a payment method (from Stripe token)
+   *     description: |
+   *       Stores tokenized payment method reference. 
+   *       Compliant with PCI-DSS, RBI (India), and UAE Central Bank regulations.
+   *       Only stores last 4 digits, card brand, and processor token.
+   *     security:
+   *       - bearerAuth: []
+   */
+  app.post("/api/payments", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+    try {
+      // Validate required fields for regulatory compliance
+      const { country, processorToken, paymentMethodType } = req.body;
+      if (!country || !processorToken || !paymentMethodType) {
+        return res.status(400).json({ error: "Missing required fields: country, processorToken, paymentMethodType" });
+      }
+      
+      // For India (RBI regulations), require explicit consent
+      if (country === 'IN' && !req.body.hasRbiConsent) {
+        return res.status(400).json({ 
+          error: "RBI regulations require explicit consent for card-on-file storage in India",
+          requiresConsent: true
+        });
+      }
+      
+      const payment = await storage.createSavedPayment({
+        ...req.body,
+        userId: req.user.id,
+        consentTimestamp: req.body.hasRbiConsent ? new Date() : null
+      });
+      res.status(201).json(payment);
+    } catch (error) {
+      console.error("Error creating payment method:", error);
+      res.status(500).json({ error: "Failed to save payment method" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /payments/{id}:
+   *   delete:
+   *     tags: [Payments]
+   *     summary: Delete saved payment method
+   *     description: Soft deletes the payment method (regulatory compliance requires record keeping)
+   *     security:
+   *       - bearerAuth: []
+   */
+  app.delete("/api/payments/:id", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+    try {
+      const id = parseInt(req.params.id);
+      const existing = await storage.getSavedPaymentById(id);
+      if (!existing || existing.userId !== req.user.id) {
+        return res.status(404).json({ error: "Payment method not found" });
+      }
+      await storage.deleteSavedPayment(id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting payment method:", error);
+      res.status(500).json({ error: "Failed to delete payment method" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /payments/{id}/default:
+   *   post:
+   *     tags: [Payments]
+   *     summary: Set default payment method
+   *     security:
+   *       - bearerAuth: []
+   */
+  app.post("/api/payments/:id/default", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+    try {
+      const id = parseInt(req.params.id);
+      const existing = await storage.getSavedPaymentById(id);
+      if (!existing || existing.userId !== req.user.id) {
+        return res.status(404).json({ error: "Payment method not found" });
+      }
+      await storage.setDefaultPayment(req.user.id, id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error setting default payment:", error);
+      res.status(500).json({ error: "Failed to set default payment method" });
+    }
+  });
+
   // ===== VENDOR =====
 
   /**

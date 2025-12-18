@@ -1,7 +1,7 @@
 // Integration: blueprint:javascript_database
 import { 
   users, products, categories, reviews, cartItems, orders, orderItems, authSessions,
-  refunds, refundItems,
+  refunds, refundItems, addresses, savedPaymentMethods,
   type User, type InsertUser,
   type Product, type InsertProduct,
   type Category, type InsertCategory,
@@ -11,7 +11,9 @@ import {
   type OrderItem, type InsertOrderItem,
   type AuthSession, type InsertAuthSession,
   type Refund, type InsertRefund,
-  type RefundItem, type InsertRefundItem
+  type RefundItem, type InsertRefundItem,
+  type Address, type InsertAddress,
+  type SavedPaymentMethod, type InsertSavedPaymentMethod
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, sql, or, ilike, isNull } from "drizzle-orm";
@@ -75,6 +77,22 @@ export interface IStorage {
   getRefundsByUserId(userId: string): Promise<(Refund & { items: RefundItem[] })[]>;
   getRefundById(id: string): Promise<(Refund & { items: RefundItem[] }) | undefined>;
   createRefund(refund: InsertRefund, items: InsertRefundItem[]): Promise<Refund>;
+
+  // Addresses
+  getAddressesByUserId(userId: string): Promise<Address[]>;
+  getAddressById(id: number): Promise<Address | undefined>;
+  createAddress(address: InsertAddress): Promise<Address>;
+  updateAddress(id: number, address: Partial<InsertAddress>): Promise<Address | undefined>;
+  deleteAddress(id: number): Promise<void>;
+  setDefaultAddress(userId: string, addressId: number): Promise<void>;
+
+  // Saved Payment Methods
+  getSavedPaymentsByUserId(userId: string): Promise<SavedPaymentMethod[]>;
+  getSavedPaymentById(id: number): Promise<SavedPaymentMethod | undefined>;
+  createSavedPayment(payment: InsertSavedPaymentMethod): Promise<SavedPaymentMethod>;
+  updateSavedPayment(id: number, payment: Partial<InsertSavedPaymentMethod>): Promise<SavedPaymentMethod | undefined>;
+  deleteSavedPayment(id: number): Promise<void>;
+  setDefaultPayment(userId: string, paymentId: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -477,6 +495,117 @@ export class DatabaseStorage implements IStorage {
     }
     
     return newRefund;
+  }
+
+  // Addresses
+  async getAddressesByUserId(userId: string): Promise<Address[]> {
+    return await db
+      .select()
+      .from(addresses)
+      .where(eq(addresses.userId, userId))
+      .orderBy(desc(addresses.isDefault), desc(addresses.createdAt));
+  }
+
+  async getAddressById(id: number): Promise<Address | undefined> {
+    const [address] = await db.select().from(addresses).where(eq(addresses.id, id));
+    return address || undefined;
+  }
+
+  async createAddress(address: InsertAddress): Promise<Address> {
+    // If this is the first address or marked as default, reset other defaults
+    if (address.isDefault) {
+      await db
+        .update(addresses)
+        .set({ isDefault: false })
+        .where(eq(addresses.userId, address.userId));
+    }
+    const [newAddress] = await db.insert(addresses).values(address as any).returning();
+    return newAddress;
+  }
+
+  async updateAddress(id: number, address: Partial<InsertAddress>): Promise<Address | undefined> {
+    const [updatedAddress] = await db
+      .update(addresses)
+      .set(address as any)
+      .where(eq(addresses.id, id))
+      .returning();
+    return updatedAddress || undefined;
+  }
+
+  async deleteAddress(id: number): Promise<void> {
+    await db.delete(addresses).where(eq(addresses.id, id));
+  }
+
+  async setDefaultAddress(userId: string, addressId: number): Promise<void> {
+    // Reset all defaults for user
+    await db
+      .update(addresses)
+      .set({ isDefault: false })
+      .where(eq(addresses.userId, userId));
+    // Set the new default
+    await db
+      .update(addresses)
+      .set({ isDefault: true })
+      .where(eq(addresses.id, addressId));
+  }
+
+  // Saved Payment Methods
+  async getSavedPaymentsByUserId(userId: string): Promise<SavedPaymentMethod[]> {
+    return await db
+      .select()
+      .from(savedPaymentMethods)
+      .where(and(
+        eq(savedPaymentMethods.userId, userId),
+        eq(savedPaymentMethods.isActive, true)
+      ))
+      .orderBy(desc(savedPaymentMethods.isDefault), desc(savedPaymentMethods.createdAt));
+  }
+
+  async getSavedPaymentById(id: number): Promise<SavedPaymentMethod | undefined> {
+    const [payment] = await db.select().from(savedPaymentMethods).where(eq(savedPaymentMethods.id, id));
+    return payment || undefined;
+  }
+
+  async createSavedPayment(payment: InsertSavedPaymentMethod): Promise<SavedPaymentMethod> {
+    // If this is the first payment or marked as default, reset other defaults
+    if (payment.isDefault) {
+      await db
+        .update(savedPaymentMethods)
+        .set({ isDefault: false })
+        .where(eq(savedPaymentMethods.userId, payment.userId));
+    }
+    const [newPayment] = await db.insert(savedPaymentMethods).values(payment as any).returning();
+    return newPayment;
+  }
+
+  async updateSavedPayment(id: number, payment: Partial<InsertSavedPaymentMethod>): Promise<SavedPaymentMethod | undefined> {
+    const [updatedPayment] = await db
+      .update(savedPaymentMethods)
+      .set({ ...payment as any, updatedAt: new Date() })
+      .where(eq(savedPaymentMethods.id, id))
+      .returning();
+    return updatedPayment || undefined;
+  }
+
+  async deleteSavedPayment(id: number): Promise<void> {
+    // Soft delete - mark as inactive (regulatory compliance requires keeping records)
+    await db
+      .update(savedPaymentMethods)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(eq(savedPaymentMethods.id, id));
+  }
+
+  async setDefaultPayment(userId: string, paymentId: number): Promise<void> {
+    // Reset all defaults for user
+    await db
+      .update(savedPaymentMethods)
+      .set({ isDefault: false, updatedAt: new Date() })
+      .where(eq(savedPaymentMethods.userId, userId));
+    // Set the new default
+    await db
+      .update(savedPaymentMethods)
+      .set({ isDefault: true, updatedAt: new Date() })
+      .where(eq(savedPaymentMethods.id, paymentId));
   }
 }
 

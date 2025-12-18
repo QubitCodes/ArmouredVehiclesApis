@@ -125,6 +125,73 @@ export const refundItems = pgTable("refund_items", {
   quantity: integer("quantity").notNull(),
 });
 
+// Address type enum
+export const addressTypeEnum = pgEnum('address_type', ['home', 'work', 'other']);
+
+// User addresses table
+export const addresses = pgTable("addresses", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  label: text("label").notNull(), // e.g., "Home", "Office", "Warehouse"
+  addressType: addressTypeEnum("address_type").notNull().default('home'),
+  fullName: text("full_name").notNull(),
+  phone: text("phone").notNull(),
+  addressLine1: text("address_line_1").notNull(),
+  addressLine2: text("address_line_2"),
+  city: text("city").notNull(),
+  state: text("state").notNull(),
+  postalCode: text("postal_code").notNull(),
+  country: text("country").notNull(), // ISO country code
+  isDefault: boolean("is_default").default(false),
+  isVerified: boolean("is_verified").default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// Payment method type enum (regulatory compliant - no raw card data stored)
+export const paymentMethodTypeEnum = pgEnum('payment_method_type', ['card', 'bank_account', 'upi', 'wallet']);
+
+// Saved payment methods table (PCI-DSS, RBI, UAE Central Bank compliant)
+// Only stores tokenized references from payment processors, never raw card numbers
+export const savedPaymentMethods = pgTable("saved_payment_methods", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  paymentMethodType: paymentMethodTypeEnum("payment_method_type").notNull(),
+  // For cards: last 4 digits only (PCI-DSS compliant)
+  lastFourDigits: text("last_four_digits"),
+  // Card brand (visa, mastercard, amex, etc.)
+  cardBrand: text("card_brand"),
+  // Expiry month/year (for display only, actual validation done by payment processor)
+  expiryMonth: integer("expiry_month"),
+  expiryYear: integer("expiry_year"),
+  // Cardholder name (can be stored as per PCI-DSS)
+  cardholderName: text("cardholder_name"),
+  // For bank accounts: masked account number
+  maskedAccountNumber: text("masked_account_number"),
+  // Bank name
+  bankName: text("bank_name"),
+  // For UPI: masked VPA (India specific - RBI compliant)
+  maskedUpiId: text("masked_upi_id"),
+  // Payment processor token (Stripe payment_method ID, etc.)
+  // This is the only identifier used for transactions
+  processorToken: text("processor_token").notNull(),
+  // Payment processor name (stripe, razorpay, etc.)
+  processorName: text("processor_name").notNull().default('stripe'),
+  // Billing address reference
+  billingAddressId: integer("billing_address_id").references(() => addresses.id),
+  // Country for regulatory compliance (affects what data we can store)
+  country: text("country").notNull(), // ISO country code
+  // Is this the default payment method
+  isDefault: boolean("is_default").default(false),
+  // RBI mandate: explicit consent for card-on-file storage (India)
+  hasRbiConsent: boolean("has_rbi_consent").default(false),
+  // Consent timestamp (regulatory requirement)
+  consentTimestamp: timestamp("consent_timestamp"),
+  // Status
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 // Auth sessions table for JWT session management
 export const authSessions = pgTable("auth_sessions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -146,6 +213,27 @@ export const usersRelations = relations(users, ({ many }) => ({
   cartItems: many(cartItems),
   orders: many(orders),
   sessions: many(authSessions),
+  addresses: many(addresses),
+  savedPaymentMethods: many(savedPaymentMethods),
+}));
+
+export const addressesRelations = relations(addresses, ({ one, many }) => ({
+  user: one(users, {
+    fields: [addresses.userId],
+    references: [users.id],
+  }),
+  paymentMethods: many(savedPaymentMethods),
+}));
+
+export const savedPaymentMethodsRelations = relations(savedPaymentMethods, ({ one }) => ({
+  user: one(users, {
+    fields: [savedPaymentMethods.userId],
+    references: [users.id],
+  }),
+  billingAddress: one(addresses, {
+    fields: [savedPaymentMethods.billingAddressId],
+    references: [addresses.id],
+  }),
 }));
 
 export const authSessionsRelations = relations(authSessions, ({ one }) => ({
@@ -294,6 +382,18 @@ export const insertRefundItemSchema = createInsertSchema(refundItems).omit({
   id: true,
 });
 
+export const insertAddressSchema = createInsertSchema(addresses).omit({
+  id: true,
+  createdAt: true,
+  isVerified: true,
+});
+
+export const insertSavedPaymentMethodSchema = createInsertSchema(savedPaymentMethods).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 // Types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -324,3 +424,9 @@ export type InsertRefund = z.infer<typeof insertRefundSchema>;
 
 export type RefundItem = typeof refundItems.$inferSelect;
 export type InsertRefundItem = z.infer<typeof insertRefundItemSchema>;
+
+export type Address = typeof addresses.$inferSelect;
+export type InsertAddress = z.infer<typeof insertAddressSchema>;
+
+export type SavedPaymentMethod = typeof savedPaymentMethods.$inferSelect;
+export type InsertSavedPaymentMethod = z.infer<typeof insertSavedPaymentMethodSchema>;

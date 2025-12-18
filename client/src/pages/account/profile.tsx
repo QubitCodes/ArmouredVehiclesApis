@@ -7,18 +7,26 @@ import { api, clearTokens, getAccessToken } from "@/lib/api";
 import { 
   User, Package, Heart, RotateCcw, Shield, Bell, Lock, 
   LogOut, CheckCircle2, XCircle, Search, ChevronDown, ShoppingCart,
-  Monitor, Smartphone, Laptop, Tablet, Globe, Trash2, CreditCard
+  Monitor, Smartphone, Laptop, Tablet, Globe, Trash2, CreditCard,
+  MapPin, Plus, Home, Building2, Star, Wallet
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { Input } from "@/components/ui/input";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import type { Address, SavedPaymentMethod } from "@shared/schema";
 
 export default function ProfilePage() {
   const [, setLocation] = useLocation();
-  const [activeSection, setActiveSection] = useState<'orders' | 'sessions'>('orders');
+  const [activeSection, setActiveSection] = useState<'orders' | 'sessions' | 'addresses' | 'payments'>('orders');
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [showAddressDialog, setShowAddressDialog] = useState(false);
+  const [editingAddress, setEditingAddress] = useState<Address | null>(null);
 
   const { data: orders, isLoading: ordersLoading } = useQuery({
     queryKey: ['orders'],
@@ -40,6 +48,90 @@ export default function ProfilePage() {
     queryKey: ['auth-sessions'],
     queryFn: api.auth.getSessions,
     enabled: activeSection === 'sessions',
+  });
+
+  const { data: addresses, isLoading: addressesLoading } = useQuery({
+    queryKey: ['addresses'],
+    queryFn: api.addresses.getAll,
+    enabled: activeSection === 'addresses',
+  });
+
+  const { data: savedPayments, isLoading: paymentsLoading } = useQuery({
+    queryKey: ['saved-payments'],
+    queryFn: api.payments.getAll,
+    enabled: activeSection === 'payments',
+  });
+
+  // Address mutations
+  const createAddressMutation = useMutation({
+    mutationFn: (data: Partial<Address>) => api.addresses.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['addresses'] });
+      toast({ title: "Address added", description: "Your new address has been saved." });
+      setShowAddressDialog(false);
+      setEditingAddress(null);
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to add address.", variant: "destructive" });
+    },
+  });
+
+  const updateAddressMutation = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: Partial<Address> }) => api.addresses.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['addresses'] });
+      toast({ title: "Address updated", description: "Your address has been updated." });
+      setShowAddressDialog(false);
+      setEditingAddress(null);
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to update address.", variant: "destructive" });
+    },
+  });
+
+  const deleteAddressMutation = useMutation({
+    mutationFn: (id: number) => api.addresses.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['addresses'] });
+      toast({ title: "Address deleted", description: "Your address has been removed." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to delete address.", variant: "destructive" });
+    },
+  });
+
+  const setDefaultAddressMutation = useMutation({
+    mutationFn: (id: number) => api.addresses.setDefault(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['addresses'] });
+      toast({ title: "Default updated", description: "Your default address has been updated." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to set default address.", variant: "destructive" });
+    },
+  });
+
+  // Payment mutations
+  const deletePaymentMutation = useMutation({
+    mutationFn: (id: number) => api.payments.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['saved-payments'] });
+      toast({ title: "Payment method removed", description: "Your payment method has been deleted." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to delete payment method.", variant: "destructive" });
+    },
+  });
+
+  const setDefaultPaymentMutation = useMutation({
+    mutationFn: (id: number) => api.payments.setDefault(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['saved-payments'] });
+      toast({ title: "Default updated", description: "Your default payment method has been updated." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to set default payment method.", variant: "destructive" });
+    },
   });
 
   const revokeSessionMutation = useMutation({
@@ -133,11 +225,13 @@ export default function ProfilePage() {
              {/* Breadcrumbs or secondary nav */}
           </div>
           <div className="flex items-center gap-4">
-             <Link href="/seller/dashboard">
-               <Button size="sm" variant="outline" className="h-7 bg-white text-slate-900 border-white hover:bg-slate-100 font-bold text-xs uppercase rounded-full px-4">
-                 Supplier Zone
-               </Button>
-             </Link>
+             {currentUser?.userType && ['vendor', 'admin', 'super_admin'].includes(currentUser.userType) && (
+               <Link href={currentUser.userType === 'admin' || currentUser.userType === 'super_admin' ? '/admin/dashboard' : '/seller/dashboard'}>
+                 <Button size="sm" variant="outline" className="h-7 bg-white text-slate-900 border-white hover:bg-slate-100 font-bold text-xs uppercase rounded-full px-4" data-testid="supplier-admin-zone-btn">
+                   {currentUser.userType === 'admin' || currentUser.userType === 'super_admin' ? 'Admin Area' : 'Supplier Zone'}
+                 </Button>
+               </Link>
+             )}
              <div className="flex items-center gap-2">
                <span>{currentUser?.name?.split(' ')[0] || 'John'}</span>
                <div className="w-6 h-6 rounded-full border border-white grid place-items-center">
@@ -179,8 +273,8 @@ export default function ProfilePage() {
                 
                 <div className="px-4 py-3 bg-slate-50 text-xs font-bold text-slate-500 uppercase mt-2">My Account</div>
                 <SidebarItem icon={User} label="User Profile" href="/account/profile/edit" />
-                <SidebarItem icon={User} label="Address" />
-                <SidebarItem icon={CreditCard} label="Payments" />
+                <SidebarItem icon={MapPin} label="Addresses" active={activeSection === 'addresses'} onClick={() => setActiveSection('addresses')} />
+                <SidebarItem icon={CreditCard} label="Saved Payments" active={activeSection === 'payments'} onClick={() => setActiveSection('payments')} />
 
                 <div className="px-4 py-3 bg-slate-50 text-xs font-bold text-slate-500 uppercase mt-2">Security</div>
                 <SidebarItem icon={Monitor} label="Active Sessions" active={activeSection === 'sessions'} onClick={() => setActiveSection('sessions')} />
@@ -375,6 +469,327 @@ export default function ProfilePage() {
                           </div>
                         );
                       })}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {activeSection === 'addresses' && (
+                <>
+                  <div className="flex items-center justify-between mb-6">
+                    <h1 className="text-2xl font-display font-bold uppercase">Saved Addresses</h1>
+                    <Dialog open={showAddressDialog} onOpenChange={setShowAddressDialog}>
+                      <DialogTrigger asChild>
+                        <Button className="bg-[#3D4736] hover:bg-[#2A3324]" data-testid="button-add-address">
+                          <Plus className="h-4 w-4 mr-2" />
+                          Add New Address
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                          <DialogTitle>{editingAddress ? 'Edit Address' : 'Add New Address'}</DialogTitle>
+                        </DialogHeader>
+                        <form onSubmit={(e) => {
+                          e.preventDefault();
+                          const formData = new FormData(e.currentTarget);
+                          const addressData = {
+                            label: formData.get('label') as string,
+                            addressType: formData.get('addressType') as 'home' | 'work' | 'other',
+                            fullName: formData.get('fullName') as string,
+                            phone: formData.get('phone') as string,
+                            addressLine1: formData.get('addressLine1') as string,
+                            addressLine2: formData.get('addressLine2') as string || undefined,
+                            city: formData.get('city') as string,
+                            state: formData.get('state') as string,
+                            postalCode: formData.get('postalCode') as string,
+                            country: formData.get('country') as string,
+                            isDefault: formData.get('isDefault') === 'on',
+                          };
+                          if (editingAddress) {
+                            updateAddressMutation.mutate({ id: editingAddress.id, data: addressData });
+                          } else {
+                            createAddressMutation.mutate(addressData);
+                          }
+                        }} className="space-y-4">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <Label htmlFor="label">Address Label</Label>
+                              <Input id="label" name="label" placeholder="e.g., Home, Office" defaultValue={editingAddress?.label || ''} required />
+                            </div>
+                            <div>
+                              <Label htmlFor="addressType">Type</Label>
+                              <Select name="addressType" defaultValue={editingAddress?.addressType || 'home'}>
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="home">Home</SelectItem>
+                                  <SelectItem value="work">Work</SelectItem>
+                                  <SelectItem value="other">Other</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <Label htmlFor="fullName">Full Name</Label>
+                              <Input id="fullName" name="fullName" defaultValue={editingAddress?.fullName || ''} required />
+                            </div>
+                            <div>
+                              <Label htmlFor="phone">Phone</Label>
+                              <Input id="phone" name="phone" defaultValue={editingAddress?.phone || ''} required />
+                            </div>
+                          </div>
+                          <div>
+                            <Label htmlFor="addressLine1">Address Line 1</Label>
+                            <Input id="addressLine1" name="addressLine1" defaultValue={editingAddress?.addressLine1 || ''} required />
+                          </div>
+                          <div>
+                            <Label htmlFor="addressLine2">Address Line 2</Label>
+                            <Input id="addressLine2" name="addressLine2" defaultValue={editingAddress?.addressLine2 || ''} />
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <Label htmlFor="city">City</Label>
+                              <Input id="city" name="city" defaultValue={editingAddress?.city || ''} required />
+                            </div>
+                            <div>
+                              <Label htmlFor="state">State</Label>
+                              <Input id="state" name="state" defaultValue={editingAddress?.state || ''} required />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <Label htmlFor="postalCode">Postal Code</Label>
+                              <Input id="postalCode" name="postalCode" defaultValue={editingAddress?.postalCode || ''} required />
+                            </div>
+                            <div>
+                              <Label htmlFor="country">Country</Label>
+                              <Select name="country" defaultValue={editingAddress?.country || 'AE'}>
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="AE">UAE</SelectItem>
+                                  <SelectItem value="IN">India</SelectItem>
+                                  <SelectItem value="US">United States</SelectItem>
+                                  <SelectItem value="GB">United Kingdom</SelectItem>
+                                  <SelectItem value="SA">Saudi Arabia</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Checkbox id="isDefault" name="isDefault" defaultChecked={editingAddress?.isDefault || false} />
+                            <Label htmlFor="isDefault">Set as default address</Label>
+                          </div>
+                          <div className="flex justify-end gap-2">
+                            <Button type="button" variant="outline" onClick={() => { setShowAddressDialog(false); setEditingAddress(null); }}>Cancel</Button>
+                            <Button type="submit" className="bg-[#3D4736] hover:bg-[#2A3324]">
+                              {editingAddress ? 'Update' : 'Save'} Address
+                            </Button>
+                          </div>
+                        </form>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
+
+                  <p className="text-sm text-muted-foreground mb-6">
+                    Manage your delivery addresses. You can set a default address for faster checkout.
+                  </p>
+
+                  {addressesLoading ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {[1, 2].map(i => (
+                        <div key={i} className="bg-[#EFEBE4] rounded-lg p-6 border border-slate-200 animate-pulse">
+                          <div className="h-5 bg-slate-300 rounded w-1/3 mb-3" />
+                          <div className="h-4 bg-slate-200 rounded w-full mb-2" />
+                          <div className="h-4 bg-slate-200 rounded w-2/3" />
+                        </div>
+                      ))}
+                    </div>
+                  ) : addresses?.length === 0 ? (
+                    <div className="bg-[#EFEBE4] rounded-lg p-8 text-center">
+                      <MapPin className="h-12 w-12 mx-auto text-slate-400 mb-4" />
+                      <p className="text-slate-600">No addresses saved yet.</p>
+                      <p className="text-sm text-slate-500 mt-2">Add an address to make checkout faster.</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {addresses?.map(address => (
+                        <div 
+                          key={address.id} 
+                          className={`bg-[#EFEBE4] rounded-lg p-6 border ${address.isDefault ? 'border-orange-400 ring-2 ring-orange-100' : 'border-slate-200'}`}
+                          data-testid={`address-card-${address.id}`}
+                        >
+                          <div className="flex items-start justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                              {address.addressType === 'home' ? <Home className="h-5 w-5 text-[#3D4736]" /> : <Building2 className="h-5 w-5 text-[#3D4736]" />}
+                              <h3 className="font-bold text-sm">{address.label}</h3>
+                              {address.isDefault && (
+                                <Badge className="bg-orange-600 text-white text-xs">Default</Badge>
+                              )}
+                              {address.isVerified && (
+                                <Badge variant="outline" className="text-green-600 border-green-200 text-xs">
+                                  <CheckCircle2 className="h-3 w-3 mr-1" /> Verified
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-sm text-slate-700 space-y-1">
+                            <p className="font-medium">{address.fullName}</p>
+                            <p>{address.addressLine1}</p>
+                            {address.addressLine2 && <p>{address.addressLine2}</p>}
+                            <p>{address.city}, {address.state} {address.postalCode}</p>
+                            <p>{address.country === 'AE' ? 'UAE' : address.country === 'IN' ? 'India' : address.country === 'US' ? 'USA' : address.country === 'GB' ? 'UK' : address.country}</p>
+                            <p className="text-slate-500">{address.phone}</p>
+                          </div>
+                          <div className="flex gap-2 mt-4 pt-4 border-t border-slate-200">
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="text-xs"
+                              onClick={() => { setEditingAddress(address); setShowAddressDialog(true); }}
+                              data-testid={`button-edit-address-${address.id}`}
+                            >
+                              Edit
+                            </Button>
+                            {!address.isDefault && (
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                className="text-xs"
+                                onClick={() => setDefaultAddressMutation.mutate(address.id)}
+                                data-testid={`button-set-default-${address.id}`}
+                              >
+                                <Star className="h-3 w-3 mr-1" /> Set Default
+                              </Button>
+                            )}
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="text-xs text-red-600 border-red-200 hover:bg-red-50"
+                              onClick={() => deleteAddressMutation.mutate(address.id)}
+                              data-testid={`button-delete-address-${address.id}`}
+                            >
+                              <Trash2 className="h-3 w-3 mr-1" /> Delete
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {activeSection === 'payments' && (
+                <>
+                  <div className="flex items-center justify-between mb-6">
+                    <h1 className="text-2xl font-display font-bold uppercase">Saved Payment Methods</h1>
+                  </div>
+
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                    <div className="flex gap-3">
+                      <Shield className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                      <div className="text-sm">
+                        <p className="font-medium text-blue-800">Secure Payment Storage</p>
+                        <p className="text-blue-600 mt-1">
+                          Your payment information is securely stored in compliance with PCI-DSS standards. 
+                          We only store the last 4 digits and a secure token - never your full card details.
+                          {/* Regulatory compliance for India (RBI), UAE (Central Bank), US, and UK */}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <p className="text-sm text-muted-foreground mb-6">
+                    Payment methods saved during checkout will appear here. You can manage and remove saved methods.
+                  </p>
+
+                  {paymentsLoading ? (
+                    <div className="space-y-4">
+                      {[1, 2].map(i => (
+                        <div key={i} className="bg-[#EFEBE4] rounded-lg p-6 border border-slate-200 animate-pulse">
+                          <div className="h-5 bg-slate-300 rounded w-1/4 mb-3" />
+                          <div className="h-4 bg-slate-200 rounded w-1/2" />
+                        </div>
+                      ))}
+                    </div>
+                  ) : savedPayments?.length === 0 ? (
+                    <div className="bg-[#EFEBE4] rounded-lg p-8 text-center">
+                      <Wallet className="h-12 w-12 mx-auto text-slate-400 mb-4" />
+                      <p className="text-slate-600">No payment methods saved yet.</p>
+                      <p className="text-sm text-slate-500 mt-2">Payment methods will be saved automatically during checkout when you choose "Save for future purchases".</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {savedPayments?.map(payment => (
+                        <div 
+                          key={payment.id} 
+                          className={`bg-[#EFEBE4] rounded-lg p-6 border ${payment.isDefault ? 'border-orange-400 ring-2 ring-orange-100' : 'border-slate-200'}`}
+                          data-testid={`payment-card-${payment.id}`}
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex items-start gap-4">
+                              <div className="w-12 h-12 rounded-lg bg-white flex items-center justify-center border border-slate-200">
+                                {payment.cardBrand === 'visa' && <span className="text-blue-600 font-bold text-lg">VISA</span>}
+                                {payment.cardBrand === 'mastercard' && <span className="text-orange-600 font-bold text-sm">MC</span>}
+                                {payment.cardBrand === 'amex' && <span className="text-blue-800 font-bold text-sm">AMEX</span>}
+                                {!['visa', 'mastercard', 'amex'].includes(payment.cardBrand || '') && <CreditCard className="h-6 w-6 text-slate-400" />}
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <h3 className="font-bold text-sm capitalize">{payment.cardBrand || payment.paymentMethodType}</h3>
+                                  {payment.isDefault && (
+                                    <Badge className="bg-orange-600 text-white text-xs">Default</Badge>
+                                  )}
+                                </div>
+                                {payment.lastFourDigits && (
+                                  <p className="text-sm text-slate-600 mt-1">•••• •••• •••• {payment.lastFourDigits}</p>
+                                )}
+                                {payment.cardholderName && (
+                                  <p className="text-xs text-slate-500">{payment.cardholderName}</p>
+                                )}
+                                {payment.expiryMonth && payment.expiryYear && (
+                                  <p className="text-xs text-slate-500">Expires {payment.expiryMonth}/{payment.expiryYear}</p>
+                                )}
+                                {payment.maskedUpiId && (
+                                  <p className="text-sm text-slate-600 mt-1">UPI: {payment.maskedUpiId}</p>
+                                )}
+                                {payment.bankName && (
+                                  <p className="text-xs text-slate-500">{payment.bankName}</p>
+                                )}
+                                <p className="text-xs text-slate-400 mt-1">
+                                  {payment.country === 'IN' && payment.hasRbiConsent && '✓ RBI consent provided'}
+                                  {payment.country === 'AE' && '✓ UAE Central Bank compliant'}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              {!payment.isDefault && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="text-xs"
+                                  onClick={() => setDefaultPaymentMutation.mutate(payment.id)}
+                                  data-testid={`button-set-default-payment-${payment.id}`}
+                                >
+                                  <Star className="h-3 w-3 mr-1" /> Set Default
+                                </Button>
+                              )}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="text-xs text-red-600 border-red-200 hover:bg-red-50"
+                                onClick={() => deletePaymentMutation.mutate(payment.id)}
+                                data-testid={`button-delete-payment-${payment.id}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </>

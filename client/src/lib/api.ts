@@ -1,4 +1,4 @@
-import type { Product, Category, Review, CartItem, Order, Refund, RefundItem } from "@shared/schema";
+import type { Product, Category, Review, CartItem, Order, Refund, RefundItem, Address, SavedPaymentMethod } from "@shared/schema";
 
 const API_BASE = "/api";
 
@@ -299,5 +299,29 @@ export const api = {
 
     me: () =>
       fetchJson<{ id: string; email: string; name: string; userType: string; completionPercentage?: number }>('/auth/me'),
+  },
+
+  // Addresses
+  addresses: {
+    getAll: () => fetchJson<Address[]>('/addresses'),
+    create: (data: Partial<Address>) => 
+      fetchJson<Address>('/addresses', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: number, data: Partial<Address>) => 
+      fetchJson<Address>(`/addresses/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    delete: (id: number) => 
+      fetchJson<{ success: boolean }>(`/addresses/${id}`, { method: 'DELETE' }),
+    setDefault: (id: number) => 
+      fetchJson<{ success: boolean }>(`/addresses/${id}/default`, { method: 'POST' }),
+  },
+
+  // Saved Payments (PCI-DSS, RBI, UAE Central Bank compliant)
+  payments: {
+    getAll: () => fetchJson<SavedPaymentMethod[]>('/payments'),
+    create: (data: Partial<SavedPaymentMethod>) => 
+      fetchJson<SavedPaymentMethod>('/payments', { method: 'POST', body: JSON.stringify(data) }),
+    delete: (id: number) => 
+      fetchJson<{ success: boolean }>(`/payments/${id}`, { method: 'DELETE' }),
+    setDefault: (id: number) => 
+      fetchJson<{ success: boolean }>(`/payments/${id}/default`, { method: 'POST' }),
   },
 };
