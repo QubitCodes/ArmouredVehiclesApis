@@ -14,6 +14,7 @@ import CheckoutSuccessPage from "@/pages/checkout-success";
 import WishlistPage from "@/pages/account/wishlist";
 import OrderTrackingPage from "@/pages/account/order-tracking";
 import OrderDetailsPage from "@/pages/account/order-details";
+import RefundDetailsPage from "@/pages/account/refund-details";
 import UserProfilePage from "@/pages/account/user-profile";
 import LoginPage from "@/pages/auth/user-login";
 import RegisterPage from "@/pages/auth/register";
@@ -32,6 +33,7 @@ function Router() {
       <Route path="/account/wishlist" component={WishlistPage} />
       <Route path="/account/orders/:id/track" component={OrderTrackingPage} />
       <Route path="/account/orders/:id/details" component={OrderDetailsPage} />
+      <Route path="/account/refunds/:id" component={RefundDetailsPage} />
       <Route path="/account/profile/edit" component={UserProfilePage} />
       <Route path="/auth/login" component={LoginPage} />
       <Route path="/auth/register" component={RegisterPage} />
