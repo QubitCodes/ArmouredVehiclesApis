@@ -17,6 +17,7 @@ export const users = pgTable("users", {
   userType: userTypeEnum("user_type").notNull().default('customer'),
   avatar: text("avatar"),
   completionPercentage: integer("completion_percentage").default(0),
+  tokenVersion: integer("token_version").default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -98,12 +99,34 @@ export const orderItems = pgTable("order_items", {
   quantity: integer("quantity").notNull(),
 });
 
+// Auth sessions table for JWT session management
+export const authSessions = pgTable("auth_sessions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  refreshTokenHash: text("refresh_token_hash").notNull(),
+  userAgent: text("user_agent"),
+  ipAddress: text("ip_address"),
+  deviceLabel: text("device_label"),
+  expiresAt: timestamp("expires_at").notNull(),
+  lastUsedAt: timestamp("last_used_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  revokedAt: timestamp("revoked_at"),
+});
+
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
   products: many(products),
   reviews: many(reviews),
   cartItems: many(cartItems),
   orders: many(orders),
+  sessions: many(authSessions),
+}));
+
+export const authSessionsRelations = relations(authSessions, ({ one }) => ({
+  user: one(users, {
+    fields: [authSessions.userId],
+    references: [users.id],
+  }),
 }));
 
 export const categoriesRelations = relations(categories, ({ many }) => ({
@@ -205,6 +228,13 @@ export const insertOrderItemSchema = createInsertSchema(orderItems).omit({
   id: true,
 });
 
+export const insertAuthSessionSchema = createInsertSchema(authSessions).omit({
+  id: true,
+  lastUsedAt: true,
+  createdAt: true,
+  revokedAt: true,
+});
+
 // Types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -226,3 +256,6 @@ export type InsertOrder = z.infer<typeof insertOrderSchema>;
 
 export type OrderItem = typeof orderItems.$inferSelect;
 export type InsertOrderItem = z.infer<typeof insertOrderItemSchema>;
+
+export type AuthSession = typeof authSessions.$inferSelect;
+export type InsertAuthSession = z.infer<typeof insertAuthSessionSchema>;
