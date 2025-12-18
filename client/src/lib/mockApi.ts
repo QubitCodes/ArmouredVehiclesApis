@@ -119,7 +119,7 @@ export const MOCK_CATEGORIES: Category[] = [
 export const MOCK_PRODUCTS: Product[] = [
   {
     id: 1,
-    name: "Tubeless Runflat Solutions",
+    name: "DFC - 4000 HybridDynamic Hybrid Rear Brake Pads",
     sku: "WHL-RF-001",
     price: 3450.00,
     image: "https://images.unsplash.com/photo-1611417866503-424626569738?auto=format&fit=crop&q=80&w=800",
@@ -137,7 +137,7 @@ export const MOCK_PRODUCTS: Product[] = [
   },
   {
     id: 2,
-    name: "Headlights (LED, HID, Halogen)",
+    name: "DFC - 4000 HybridDynamic Hybrid Rear Brake Pads",
     sku: "LGT-TAC-002",
     price: 1450.00,
     image: "https://images.unsplash.com/photo-1552975662-72cb78d7e75b?auto=format&fit=crop&q=80&w=800", // Tactical light placeholder
@@ -155,7 +155,7 @@ export const MOCK_PRODUCTS: Product[] = [
   },
   {
     id: 3,
-    name: "Reinforced Suspension Kits",
+    name: "DFC - 4000 HybridDynamic Hybrid Rear Brake Pads",
     sku: "SUS-HD-003",
     price: 14890.00,
     image: "https://images.unsplash.com/photo-1486262715619-67b85e0b08d3?auto=format&fit=crop&q=80&w=800",
@@ -173,7 +173,7 @@ export const MOCK_PRODUCTS: Product[] = [
   },
   {
     id: 4,
-    name: "Turbochargers & Superchargers",
+    name: "DFC - 4000 HybridDynamic Hybrid Rear Brake Pads",
     sku: "ENG-TRB-004",
     price: 4500.00,
     image: "https://images.unsplash.com/photo-1619642751034-765dfdf7c58e?auto=format&fit=crop&q=80&w=800",
@@ -186,11 +186,12 @@ export const MOCK_PRODUCTS: Product[] = [
     make: "Nissan",
     model: "Patrol Y62",
     year: 2023,
-    rating: 4.7
+    rating: 4.7,
+    actionType: 'buy_now'
   },
   {
     id: 5,
-    name: "Ballistic Glass Panel B6",
+    name: "DFC - 4000 HybridDynamic Hybrid Rear Brake Pads",
     sku: "ARM-GLS-005",
     price: 2200.00,
     image: "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&q=80&w=800",
@@ -203,11 +204,12 @@ export const MOCK_PRODUCTS: Product[] = [
     make: "Toyota",
     model: "Hilux",
     year: 2022,
-    rating: 5.0
+    rating: 5.0,
+    actionType: 'inquiry'
   },
   {
     id: 6,
-    name: "Fuel Pumps, Injectors & Rails",
+    name: "DFC - 4000 HybridDynamic Hybrid Rear Brake Pads",
     sku: "ENG-FUL-006",
     price: 850.00,
     image: "https://images.unsplash.com/photo-1606577924004-79d2a2971e38?auto=format&fit=crop&q=80&w=800",
@@ -220,13 +222,92 @@ export const MOCK_PRODUCTS: Product[] = [
     make: "Universal",
     model: "Universal",
     year: 2024,
-    rating: 4.6
+    rating: 4.6,
+    actionType: 'buy_now'
+  },
+  {
+    id: 7,
+    name: "DFC - 4000 HybridDynamic Hybrid Rear Brake Pads",
+    sku: "ENG-FUL-007",
+    price: 850.00,
+    image: "https://images.unsplash.com/photo-1606577924004-79d2a2971e38?auto=format&fit=crop&q=80&w=800",
+    category: "Core Vehicle Systems",
+    department: "Fuel System",
+    description: "High-flow fuel delivery components.",
+    condition: 'new',
+    stock: 40,
+    vendor: "FuelFlow",
+    make: "Universal",
+    model: "Universal",
+    year: 2024,
+    rating: 4.6,
+    actionType: 'buy_now'
+  },
+  {
+    id: 8,
+    name: "DFC - 4000 HybridDynamic Hybrid Rear Brake Pads",
+    sku: "ENG-FUL-008",
+    price: 850.00,
+    image: "https://images.unsplash.com/photo-1606577924004-79d2a2971e38?auto=format&fit=crop&q=80&w=800",
+    category: "Core Vehicle Systems",
+    department: "Fuel System",
+    description: "High-flow fuel delivery components.",
+    condition: 'new',
+    stock: 40,
+    vendor: "FuelFlow",
+    make: "Universal",
+    model: "Universal",
+    year: 2024,
+    rating: 4.6,
+    actionType: 'inquiry'
+  },
+  {
+    id: 9,
+    name: "DFC - 4000 HybridDynamic Hybrid Rear Brake Pads",
+    sku: "ENG-FUL-009",
+    price: 850.00,
+    image: "https://images.unsplash.com/photo-1606577924004-79d2a2971e38?auto=format&fit=crop&q=80&w=800",
+    category: "Core Vehicle Systems",
+    department: "Fuel System",
+    description: "High-flow fuel delivery components.",
+    condition: 'new',
+    stock: 40,
+    vendor: "FuelFlow",
+    make: "Universal",
+    model: "Universal",
+    year: 2024,
+    rating: 4.6,
+    actionType: 'buy_now'
+  },
+  {
+    id: 10,
+    name: "DFC - 4000 HybridDynamic Hybrid Rear Brake Pads",
+    sku: "ENG-FUL-010",
+    price: 850.00,
+    image: "https://images.unsplash.com/photo-1606577924004-79d2a2971e38?auto=format&fit=crop&q=80&w=800",
+    category: "Core Vehicle Systems",
+    department: "Fuel System",
+    description: "High-flow fuel delivery components.",
+    condition: 'new',
+    stock: 40,
+    vendor: "FuelFlow",
+    make: "Universal",
+    model: "Universal",
+    year: 2024,
+    rating: 4.6,
+    actionType: 'buy_now'
   }
 ];
 
 export const MOCK_FILTERS = {
   brands: ["ArmoredMart Direct", "Lumina Defense", "TrackReady Defense", "PowerTrain Systems", "ShieldGlass", "FuelFlow"],
   departments: ["Wheels", "Lighting", "Suspension", "Engine", "Glass", "Fuel System"],
+  productTypes: [
+    { name: "Brake Pads", image: "https://images.unsplash.com/photo-1600706432502-76b1e601a746?auto=format&fit=crop&q=80&w=200" },
+    { name: "Disc Brake Pad", image: "https://images.unsplash.com/photo-1616788494707-ec28f08d05a1?auto=format&fit=crop&q=80&w=200" },
+    { name: "Brake Rotors", image: "https://images.unsplash.com/photo-1619642751034-765dfdf7c58e?auto=format&fit=crop&q=80&w=200" },
+    { name: "Parking Brake Shoe", image: "https://images.unsplash.com/photo-1486262715619-67b85e0b08d3?auto=format&fit=crop&q=80&w=200" }
+  ],
   surfaceTypes: ["Heavy Duty", "Tactical", "Standard", "Performance"],
   frictionalMaterials: ["Ceramic", "Semi-Metallic", "Organic", "Steel"]
 };
