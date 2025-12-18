@@ -34,58 +34,88 @@ export default function OrderTrackingPage() {
     }
   }, [setLocation]);
 
-  const { data: orders } = useQuery({
+  const { data: orders, isLoading } = useQuery({
     queryKey: ['orders'],
     queryFn: mockApi.getOrders
   });
 
   const order = orders?.find(o => o.id === orderId);
 
+  if (isLoading) {
+    return (
+      <Layout>
+        <div className="bg-slate-50 min-h-screen py-20 text-center">
+          <div className="animate-spin h-10 w-10 border-4 border-[#3D4736] border-t-transparent rounded-full mx-auto mb-4" />
+          <p className="text-slate-500">Loading order details...</p>
+        </div>
+      </Layout>
+    );
+  }
+
   const getTrackingSteps = (): TrackingStep[] => {
     const statusMap: Record<string, number> = {
       'pending': 0,
-      'processing': 1,
-      'shipped': 2,
-      'delivered': 4
+      'processing': 2,
+      'shipped': 3,
+      'delivered': 4,
+      'cancelled': -1
     };
     
-    const currentStep = order ? statusMap[order.status] || 0 : 0;
-    const orderDate = order?.date || new Date().toLocaleDateString();
+    const currentStep = order ? statusMap[order.status] ?? 0 : 0;
+    const orderDate = order?.date || new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+    
+    const getStepDate = (stepIndex: number): string => {
+      if (!order?.date) return '';
+      const baseDate = new Date();
+      const dates = [
+        orderDate,
+        orderDate,
+        orderDate,
+        '',
+        ''
+      ];
+      if (stepIndex < currentStep) {
+        return dates[stepIndex] || orderDate;
+      }
+      return stepIndex <= currentStep ? orderDate : '';
+    };
     
     return [
       {
         status: 'confirmed',
         label: 'Confirmed',
-        date: orderDate,
+        date: getStepDate(0),
         completed: currentStep >= 0,
         current: currentStep === 0
       },
       {
         status: 'packed',
         label: 'Packed',
-        date: orderDate,
+        date: getStepDate(1),
         completed: currentStep >= 1,
         current: currentStep === 1
       },
       {
         status: 'dispatched',
         label: 'Dispatched',
-        date: orderDate,
-        description: 'Your shipment has been dispatched to the final hub. We\'ll notify you once it\'s out for delivery. When your order is almost there, we\'ll display the courier\'s contact number.',
+        date: getStepDate(2),
+        description: currentStep === 2 ? 'Your shipment has been dispatched to the final hub. We\'ll notify you once it\'s out for delivery. When your order is almost there, we\'ll display the courier\'s contact number.' : undefined,
         completed: currentStep >= 2,
         current: currentStep === 2
       },
       {
         status: 'out_for_delivery',
         label: 'Out for delivery',
-        date: '',
+        date: getStepDate(3),
+        description: currentStep === 3 ? 'Your package is on its way! The courier will deliver it shortly.' : undefined,
         completed: currentStep >= 3,
         current: currentStep === 3
       },
       {
         status: 'delivered',
-        label: 'Delivery by Today',
-        date: '',
+        label: currentStep >= 4 ? 'Delivered' : 'Delivery by Today',
+        date: currentStep >= 4 ? orderDate : '',
+        description: currentStep === 4 ? 'Your order has been delivered successfully!' : undefined,
         completed: currentStep >= 4,
         current: currentStep === 4
       }
