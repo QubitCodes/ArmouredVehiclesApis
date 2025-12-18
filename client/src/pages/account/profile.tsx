@@ -96,16 +96,23 @@ export default function ProfilePage() {
     return date.toLocaleDateString();
   };
 
-  const SidebarItem = ({ icon: Icon, label, active = false, onClick }: { icon: any, label: string, active?: boolean, onClick?: () => void }) => (
-    <div 
-      className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors ${active ? "bg-[#3D4736] text-white" : "hover:bg-slate-100 text-slate-700"}`}
-      onClick={onClick}
-      data-testid={`sidebar-${label.toLowerCase().replace(/\s+/g, '-')}`}
-    >
-      <Icon className="h-4 w-4" />
-      <span className="text-sm font-medium">{label}</span>
-    </div>
-  );
+  const SidebarItem = ({ icon: Icon, label, active = false, onClick, href }: { icon: any, label: string, active?: boolean, onClick?: () => void, href?: string }) => {
+    const content = (
+      <div 
+        className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors ${active ? "bg-[#3D4736] text-white" : "hover:bg-slate-100 text-slate-700"}`}
+        onClick={onClick}
+        data-testid={`sidebar-${label.toLowerCase().replace(/\s+/g, '-')}`}
+      >
+        <Icon className="h-4 w-4" />
+        <span className="text-sm font-medium">{label}</span>
+      </div>
+    );
+    
+    if (href) {
+      return <Link href={href}>{content}</Link>;
+    }
+    return content;
+  };
 
   return (
     <Layout>
@@ -155,7 +162,7 @@ export default function ProfilePage() {
               <div className="bg-white rounded-lg overflow-hidden shadow-sm">
                 <div className="px-4 py-3 bg-slate-50 text-xs font-bold text-slate-500 uppercase">Orders & Activity</div>
                 <SidebarItem icon={Package} label="Orders" active={activeSection === 'orders'} onClick={() => setActiveSection('orders')} />
-                <SidebarItem icon={Heart} label="Wishlist" />
+                <SidebarItem icon={Heart} label="Wishlist" href="/account/wishlist" />
                 <SidebarItem icon={RotateCcw} label="Returns" />
                 <SidebarItem icon={Shield} label="Warranty Claims" />
                 
