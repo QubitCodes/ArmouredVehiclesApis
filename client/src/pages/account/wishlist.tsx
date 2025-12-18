@@ -1,5 +1,6 @@
 import Layout from "@/components/layout/Layout";
 import { Button } from "@/components/ui/button";
+import ProductImage from "@/components/ui/product-image";
 import { useQuery } from "@tanstack/react-query";
 import { api, getAccessToken, clearTokens } from "@/lib/api";
 import { Link, useLocation } from "wouter";
@@ -188,10 +189,11 @@ export default function WishlistPage() {
                       <div className="flex gap-4 items-center">
                         <Link href={`/products/${product.id}`}>
                           <div className="w-20 h-20 bg-white rounded p-2 flex-shrink-0 cursor-pointer hover:ring-2 ring-orange-300 transition-all">
-                            <img 
+                            <ProductImage 
                               src={product.image} 
                               alt={product.name}
-                              className="w-full h-full object-contain" 
+                              className="w-full h-full object-contain"
+                              placeholderClassName="w-full h-full" 
                             />
                           </div>
                         </Link>

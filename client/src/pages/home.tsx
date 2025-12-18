@@ -1,5 +1,6 @@
 import Layout from "@/components/layout/Layout";
 import { Button } from "@/components/ui/button";
+import ProductImage from "@/components/ui/product-image";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Link } from "wouter";
@@ -51,10 +52,11 @@ export default function Home() {
       <Link href={`/products/${product.id}`} data-testid={`link-product-${product.id}`}>
         <div className="group relative border border-slate-700 bg-[#1A1A1A] p-4 flex flex-col h-full hover:border-[#D97706] transition-colors cursor-pointer">
           <div className="aspect-[4/3] w-full overflow-hidden mb-4 bg-black/20 flex items-center justify-center">
-            <img 
+            <ProductImage 
               src={product.image} 
               alt={product.name} 
               className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
+              placeholderClassName="w-full h-full"
             />
           </div>
           <div className="mt-auto">
@@ -221,7 +223,7 @@ export default function Home() {
                         <Link key={product.id} href={`/products/${product.id}`}>
                           <div className="group cursor-pointer text-center">
                             <div className="aspect-square bg-white border border-slate-200 mb-3 p-2 group-hover:border-[#D97706] transition-colors">
-                              <img src={product.image} className="w-full h-full object-contain" alt={product.name} />
+                              <ProductImage src={product.image} className="w-full h-full object-contain" alt={product.name} placeholderClassName="w-full h-full" />
                             </div>
                             <h3 className="text-[10px] font-bold text-slate-800 uppercase leading-tight line-clamp-2 h-8">
                               {product.name}
@@ -238,7 +240,7 @@ export default function Home() {
                         <Link key={`dup-${product.id}`} href={`/products/${product.id}`}>
                           <div className="group cursor-pointer text-center">
                             <div className="aspect-square bg-white border border-slate-200 mb-3 p-2 group-hover:border-[#D97706] transition-colors">
-                              <img src={product.image} className="w-full h-full object-contain" alt={product.name} />
+                              <ProductImage src={product.image} className="w-full h-full object-contain" alt={product.name} placeholderClassName="w-full h-full" />
                             </div>
                             <h3 className="text-[10px] font-bold text-slate-800 uppercase leading-tight line-clamp-2 h-8">
                               {product.name}

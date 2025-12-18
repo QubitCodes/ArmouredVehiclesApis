@@ -3,6 +3,7 @@ import { Product } from "@/lib/mockApi";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import ProductImage from "@/components/ui/product-image";
 import { ShoppingCart, Lock, Star } from "lucide-react";
 import { Link } from "wouter";
 
@@ -31,10 +32,11 @@ export default function ProductCard({ product }: ProductCardProps) {
     <Card className="overflow-hidden group hover:border-primary/50 transition-colors duration-300 h-full flex flex-col">
       <Link href={`/products/${product.id}`}>
         <div className="aspect-[4/3] overflow-hidden bg-secondary relative cursor-pointer">
-          <img 
+          <ProductImage 
             src={product.image} 
             alt={product.name}
             className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+            placeholderClassName="w-full h-full"
           />
           {product.stock < 10 && product.stock > 0 && (
             <Badge variant="destructive" className="absolute top-2 right-2 shadow-sm">

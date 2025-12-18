@@ -2,6 +2,7 @@ import Layout from "@/components/layout/Layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import ProductImage from "@/components/ui/product-image";
 import { Trash2, ArrowRight, RotateCcw, Heart, Plus, Minus, ShoppingBag, Loader2 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -125,7 +126,7 @@ export default function CartPage() {
                   <div className="flex gap-6">
                     <Link href={`/products/${item.product.id}`}>
                       <div className="w-24 h-24 bg-slate-50 rounded-md overflow-hidden border flex-shrink-0 cursor-pointer">
-                        <img src={item.product.image} alt={item.product.name} className="w-full h-full object-contain p-2" />
+                        <ProductImage src={item.product.image} alt={item.product.name} className="w-full h-full object-contain p-2" placeholderClassName="w-full h-full" />
                       </div>
                     </Link>
                     

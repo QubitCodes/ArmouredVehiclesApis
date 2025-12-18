@@ -1,6 +1,7 @@
 import Layout from "@/components/layout/Layout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import ProductImage from "@/components/ui/product-image";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api as mockApi } from "@/lib/mockApi";
 import { api, clearTokens } from "@/lib/api";
@@ -218,7 +219,7 @@ export default function ProfilePage() {
 
                         <div className="flex gap-4 items-center bg-white p-4 rounded border border-slate-100">
                           <div className="w-16 h-16 bg-slate-50 rounded p-2 flex-shrink-0">
-                            <img src={order.items[0].image} className="w-full h-full object-contain" />
+                            <ProductImage src={order.items[0].image} className="w-full h-full object-contain" alt="Order item" placeholderClassName="w-full h-full" />
                           </div>
                           <div className="flex-1">
                             <h4 className="font-bold text-sm text-slate-900">{order.items[0].name}</h4>
@@ -261,7 +262,7 @@ export default function ProfilePage() {
 
                         <div className="flex gap-4 items-center bg-white p-4 rounded border border-slate-100">
                           <div className="w-16 h-16 bg-slate-50 rounded p-2 flex-shrink-0">
-                            <img src={order.items[0].image} className="w-full h-full object-contain" />
+                            <ProductImage src={order.items[0].image} className="w-full h-full object-contain" alt="Order item" placeholderClassName="w-full h-full" />
                           </div>
                           <div className="flex-1">
                             <h4 className="font-bold text-sm text-slate-900">{order.items[0].name}</h4>

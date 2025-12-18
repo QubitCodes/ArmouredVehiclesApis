@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import ProductImage from "@/components/ui/product-image";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { Product } from "@shared/schema";
@@ -284,10 +285,11 @@ export default function ProductsPage() {
         </div>
         
         <div className="aspect-square mb-4 bg-transparent flex items-center justify-center p-2">
-          <img 
+          <ProductImage 
             src={product.image} 
             alt={product.name} 
-            className="max-w-full max-h-full object-contain mix-blend-multiply"
+            className="max-w-full max-h-full object-contain"
+            placeholderClassName="w-full h-full"
           />
         </div>
 
@@ -362,7 +364,7 @@ export default function ProductsPage() {
                           className="flex items-center gap-3 p-2 hover:bg-slate-50 cursor-pointer border-b border-slate-100"
                           data-testid={`suggestion-${product.id}`}
                         >
-                          <img src={product.image} alt="" className="w-10 h-10 object-contain" />
+                          <ProductImage src={product.image} alt={product.name} className="w-10 h-10 object-contain" placeholderClassName="w-10 h-10" />
                           <div className="flex-1 min-w-0">
                             <div className="text-xs font-medium text-slate-800 truncate">{product.name}</div>
                             <div className="text-[10px] text-slate-500">SKU: {product.sku}</div>
@@ -435,7 +437,7 @@ export default function ProductsPage() {
                           <Link href={`/products/${product.id}`}>
                             <div className="group cursor-pointer text-center bg-[#F5F5F5] p-4 border border-transparent hover:border-slate-300 transition-colors h-full">
                               <div className="aspect-square mb-3 flex items-center justify-center p-2 bg-white">
-                                <img src={product.image} className="max-w-full max-h-full object-contain" alt={product.name} />
+                                <ProductImage src={product.image} className="max-w-full max-h-full object-contain" alt={product.name} placeholderClassName="w-full h-full" />
                               </div>
                               <h3 className="text-[10px] font-bold text-slate-800 uppercase leading-tight line-clamp-2 min-h-[2.5em]">
                                 {product.name}

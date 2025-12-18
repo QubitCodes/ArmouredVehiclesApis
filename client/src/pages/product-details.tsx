@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import ProductImage from "@/components/ui/product-image";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useRoute, Link, useLocation } from "wouter";
@@ -136,10 +137,11 @@ export default function ProductDetailsPage() {
             
             <div className="lg:col-span-5 space-y-4">
               <div className="aspect-[4/3] bg-white rounded-lg overflow-hidden border shadow-sm relative group">
-                <img 
+                <ProductImage 
                   src={currentImage} 
                   alt={product.name} 
                   className="w-full h-full object-contain p-4"
+                  placeholderClassName="w-full h-full"
                 />
                 <Button size="icon" variant="secondary" className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
                   <Share2 className="h-4 w-4" />
@@ -151,7 +153,7 @@ export default function ProductDetailsPage() {
                   className={`aspect-square bg-white rounded-md cursor-pointer border-2 overflow-hidden ${currentImage === product.image ? "border-primary" : "border-transparent"}`}
                   onClick={() => setActiveImage(product.image)}
                 >
-                  <img src={product.image} className="w-full h-full object-cover" alt="Main" />
+                  <ProductImage src={product.image} className="w-full h-full object-cover" alt="Main" placeholderClassName="w-full h-full" />
                 </div>
                 {product.gallery?.map((img, idx) => (
                   <div 
@@ -159,7 +161,7 @@ export default function ProductDetailsPage() {
                     className={`aspect-square bg-white rounded-md cursor-pointer border-2 overflow-hidden ${currentImage === img ? "border-primary" : "border-transparent"}`}
                     onClick={() => setActiveImage(img)}
                   >
-                    <img src={img} className="w-full h-full object-cover" alt={`Gallery ${idx}`} />
+                    <ProductImage src={img} className="w-full h-full object-cover" alt={`Gallery ${idx}`} placeholderClassName="w-full h-full" />
                   </div>
                 ))}
               </div>
@@ -421,7 +423,7 @@ export default function ProductDetailsPage() {
                     <Link key={item.id} href={`/products/${item.id}`}>
                       <div className="group flex gap-3 cursor-pointer">
                         <div className="w-16 h-16 bg-white border rounded-md overflow-hidden flex-shrink-0">
-                          <img src={item.image} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                          <ProductImage src={item.image} className="w-full h-full object-cover group-hover:scale-105 transition-transform" alt={item.name} placeholderClassName="w-full h-full" />
                         </div>
                         <div>
                           <h4 className="text-sm font-medium line-clamp-2 group-hover:text-primary transition-colors">{item.name}</h4>
@@ -445,7 +447,7 @@ export default function ProductDetailsPage() {
                     <Link key={item.id} href={`/products/${item.id}`}>
                       <div className="group cursor-pointer">
                         <div className="aspect-square bg-white border rounded-md overflow-hidden mb-2">
-                          <img src={item.image} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                          <ProductImage src={item.image} className="w-full h-full object-cover group-hover:scale-105 transition-transform" alt={item.name} placeholderClassName="w-full h-full" />
                         </div>
                         <h4 className="text-xs font-medium line-clamp-2 group-hover:text-primary transition-colors">{item.name}</h4>
                       </div>
