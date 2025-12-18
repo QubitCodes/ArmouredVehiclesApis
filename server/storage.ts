@@ -1,6 +1,7 @@
 // Integration: blueprint:javascript_database
 import { 
   users, products, categories, reviews, cartItems, orders, orderItems, authSessions,
+  refunds, refundItems,
   type User, type InsertUser,
   type Product, type InsertProduct,
   type Category, type InsertCategory,
@@ -8,7 +9,9 @@ import {
   type CartItem, type InsertCartItem,
   type Order, type InsertOrder,
   type OrderItem, type InsertOrderItem,
-  type AuthSession, type InsertAuthSession
+  type AuthSession, type InsertAuthSession,
+  type Refund, type InsertRefund,
+  type RefundItem, type InsertRefundItem
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, sql, or, ilike, isNull } from "drizzle-orm";
@@ -67,6 +70,11 @@ export interface IStorage {
   revokeSession(id: string): Promise<void>;
   revokeAllUserSessions(userId: string, exceptSessionId?: string): Promise<void>;
   updateUserTokenVersion(userId: string): Promise<number>;
+
+  // Refunds
+  getRefundsByUserId(userId: string): Promise<(Refund & { items: RefundItem[] })[]>;
+  getRefundById(id: string): Promise<(Refund & { items: RefundItem[] }) | undefined>;
+  createRefund(refund: InsertRefund, items: InsertRefundItem[]): Promise<Refund>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -420,6 +428,55 @@ export class DatabaseStorage implements IStorage {
       .where(eq(users.id, userId))
       .returning();
     return updated?.tokenVersion || 1;
+  }
+
+  // Refunds
+  async getRefundsByUserId(userId: string): Promise<(Refund & { items: RefundItem[] })[]> {
+    const userRefunds = await db
+      .select()
+      .from(refunds)
+      .where(eq(refunds.userId, userId))
+      .orderBy(desc(refunds.createdAt));
+    
+    const result = await Promise.all(
+      userRefunds.map(async (refund) => {
+        const items = await db
+          .select()
+          .from(refundItems)
+          .where(eq(refundItems.refundId, refund.id));
+        return { ...refund, items };
+      })
+    );
+    
+    return result;
+  }
+
+  async getRefundById(id: string): Promise<(Refund & { items: RefundItem[] }) | undefined> {
+    const [refund] = await db
+      .select()
+      .from(refunds)
+      .where(eq(refunds.id, id));
+    
+    if (!refund) return undefined;
+    
+    const items = await db
+      .select()
+      .from(refundItems)
+      .where(eq(refundItems.refundId, refund.id));
+    
+    return { ...refund, items };
+  }
+
+  async createRefund(refund: InsertRefund, items: InsertRefundItem[]): Promise<Refund> {
+    const [newRefund] = await db.insert(refunds).values(refund as any).returning();
+    
+    if (items.length > 0) {
+      await db.insert(refundItems).values(
+        items.map(item => ({ ...item, refundId: newRefund.id })) as any
+      );
+    }
+    
+    return newRefund;
   }
 }
 

@@ -7,6 +7,7 @@ import { z } from "zod";
 export const userTypeEnum = pgEnum('user_type', ['customer', 'vendor', 'admin', 'super_admin']);
 export const productConditionEnum = pgEnum('product_condition', ['new', 'used', 'refurbished']);
 export const orderStatusEnum = pgEnum('order_status', ['pending', 'processing', 'shipped', 'delivered', 'cancelled', 'returned']);
+export const refundStatusEnum = pgEnum('refund_status', ['processing', 'completed', 'failed']);
 
 // Users table
 export const users = pgTable("users", {
@@ -92,6 +93,31 @@ export const orders = pgTable("orders", {
 export const orderItems = pgTable("order_items", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   orderId: varchar("order_id").notNull().references(() => orders.id),
+  productId: integer("product_id").notNull().references(() => products.id),
+  name: text("name").notNull(),
+  image: text("image").notNull(),
+  price: decimal("price", { precision: 10, scale: 2 }).notNull(),
+  quantity: integer("quantity").notNull(),
+});
+
+// Refunds table
+export const refunds = pgTable("refunds", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orderId: varchar("order_id").notNull().references(() => orders.id),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  status: refundStatusEnum("status").notNull().default('processing'),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  paymentMethod: text("payment_method").notNull().default('Tamara'),
+  triggerDate: timestamp("trigger_date").notNull().defaultNow(),
+  estimatedCreditDate: timestamp("estimated_credit_date"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// Refund items table
+export const refundItems = pgTable("refund_items", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  refundId: varchar("refund_id").notNull().references(() => refunds.id),
   productId: integer("product_id").notNull().references(() => products.id),
   name: text("name").notNull(),
   image: text("image").notNull(),
@@ -188,6 +214,29 @@ export const orderItemsRelations = relations(orderItems, ({ one }) => ({
   }),
 }));
 
+export const refundsRelations = relations(refunds, ({ one, many }) => ({
+  order: one(orders, {
+    fields: [refunds.orderId],
+    references: [orders.id],
+  }),
+  user: one(users, {
+    fields: [refunds.userId],
+    references: [users.id],
+  }),
+  items: many(refundItems),
+}));
+
+export const refundItemsRelations = relations(refundItems, ({ one }) => ({
+  refund: one(refunds, {
+    fields: [refundItems.refundId],
+    references: [refunds.id],
+  }),
+  product: one(products, {
+    fields: [refundItems.productId],
+    references: [products.id],
+  }),
+}));
+
 // Insert Schemas
 export const insertUserSchema = createInsertSchema(users, {
   email: z.string().email(),
@@ -235,6 +284,16 @@ export const insertAuthSessionSchema = createInsertSchema(authSessions).omit({
   revokedAt: true,
 });
 
+export const insertRefundSchema = createInsertSchema(refunds).omit({
+  id: true,
+  createdAt: true,
+  completedAt: true,
+});
+
+export const insertRefundItemSchema = createInsertSchema(refundItems).omit({
+  id: true,
+});
+
 // Types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -259,3 +318,9 @@ export type InsertOrderItem = z.infer<typeof insertOrderItemSchema>;
 
 export type AuthSession = typeof authSessions.$inferSelect;
 export type InsertAuthSession = z.infer<typeof insertAuthSessionSchema>;
+
+export type Refund = typeof refunds.$inferSelect;
+export type InsertRefund = z.infer<typeof insertRefundSchema>;
+
+export type RefundItem = typeof refundItems.$inferSelect;
+export type InsertRefundItem = z.infer<typeof insertRefundItemSchema>;

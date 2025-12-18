@@ -1517,6 +1517,89 @@ export async function registerRoutes(
     }
   });
 
+  // ===== REFUNDS =====
+
+  /**
+   * @swagger
+   * /refunds:
+   *   get:
+   *     tags: [Refunds]
+   *     summary: Get user's refunds
+   *     description: |
+   *       Returns all refunds for the authenticated user.
+   *       
+   *       ## Pages / Sections Used
+   *       - **Returns Page** (`/account/returns`)
+   *         - Returns List - displays all refund requests
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: List of refunds
+   *       401:
+   *         description: Not authenticated
+   */
+  app.get("/api/refunds", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+
+    try {
+      const refunds = await storage.getRefundsByUserId(req.user.id);
+      res.json(refunds);
+    } catch (error) {
+      console.error("Error fetching refunds:", error);
+      res.status(500).json({ error: "Failed to fetch refunds" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /refunds/{id}:
+   *   get:
+   *     tags: [Refunds]
+   *     summary: Get refund details
+   *     description: |
+   *       Returns details for a specific refund including items.
+   *       
+   *       ## Pages / Sections Used
+   *       - **Refund Details Page** (`/account/refunds/:id`)
+   *         - Triggered Refunds - status, amount, payment method, dates
+   *         - Triggered Items - products being refunded
+   *         - Refund Breakup - popup showing per-item amounts
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema:
+   *           type: string
+   *     responses:
+   *       200:
+   *         description: Refund details
+   *       404:
+   *         description: Refund not found
+   */
+  app.get("/api/refunds/:id", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+
+    try {
+      const refund = await storage.getRefundById(req.params.id);
+      
+      if (!refund || refund.userId !== req.user.id) {
+        return res.status(404).json({ error: "Refund not found" });
+      }
+
+      res.json(refund);
+    } catch (error) {
+      console.error("Error fetching refund:", error);
+      res.status(500).json({ error: "Failed to fetch refund" });
+    }
+  });
+
   // ===== VENDOR =====
 
   /**

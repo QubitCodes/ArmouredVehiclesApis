@@ -1,4 +1,4 @@
-import type { Product, Category, Review, CartItem, Order } from "@shared/schema";
+import type { Product, Category, Review, CartItem, Order, Refund, RefundItem } from "@shared/schema";
 
 const API_BASE = "/api";
 
@@ -206,6 +206,13 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ items }),
       }),
+  },
+
+  // Refunds
+  refunds: {
+    getAll: () => fetchJson<(Refund & { items: RefundItem[] })[]>("/refunds"),
+    
+    getById: (id: string) => fetchJson<Refund & { items: RefundItem[] }>(`/refunds/${id}`),
   },
 
   // Vendor
