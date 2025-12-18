@@ -1,9 +1,11 @@
 import { Link, useLocation } from "wouter";
 import { Search, ShoppingCart, User, Menu, X, LayoutDashboard, LogOut } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,6 +24,34 @@ export default function Navbar() {
   const [location, setLocation] = useLocation();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  const { data: products } = useQuery({
+    queryKey: ['products'],
+    queryFn: () => api.products.getAll(),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const searchSuggestions = useMemo(() => {
+    if (!products || !searchTerm.trim() || searchTerm.length < 2) return [];
+    const term = searchTerm.toLowerCase();
+    return products
+      .filter(p => 
+        p.name.toLowerCase().includes(term) ||
+        p.sku?.toLowerCase().includes(term) ||
+        p.make?.toLowerCase().includes(term)
+      )
+      .slice(0, 5);
+  }, [products, searchTerm]);
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (searchTerm.trim()) {
+      setLocation(`/products?search=${encodeURIComponent(searchTerm)}`);
+      setShowSuggestions(false);
+    }
+  };
   
   // Check localStorage for auth state on mount and when location changes
   useEffect(() => {
@@ -102,16 +132,59 @@ export default function Navbar() {
           </Link>
 
           {/* Search Bar */}
-          <div className="hidden lg:flex flex-1 max-w-xl mx-8 relative">
+          <form onSubmit={handleSearch} className="hidden lg:flex flex-1 max-w-xl mx-8 relative">
             <Input
               type="search"
               placeholder="Search Products"
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setShowSuggestions(true);
+              }}
+              onFocus={() => setShowSuggestions(true)}
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
               className="w-full h-10 border-slate-300 rounded-none focus-visible:ring-0 focus-visible:border-[#D97706]"
+              data-testid="input-navbar-search"
             />
-            <Button className={`${BUTTON_ORANGE} hover:bg-orange-700 text-white rounded-none h-10 px-4`}>
+            <Button type="submit" className={`${BUTTON_ORANGE} hover:bg-orange-700 text-white rounded-none h-10 px-4`}>
               <Search className="h-4 w-4" />
             </Button>
-          </div>
+            
+            {showSuggestions && searchSuggestions.length > 0 && (
+              <div className="absolute top-full left-0 right-0 bg-white border border-slate-200 shadow-lg z-50 max-h-80 overflow-y-auto">
+                {searchSuggestions.map((product) => (
+                  <Link 
+                    key={product.id} 
+                    href={`/products/${product.id}`}
+                    onClick={() => {
+                      setShowSuggestions(false);
+                      setSearchTerm("");
+                    }}
+                  >
+                    <div 
+                      className="flex items-center gap-3 p-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100"
+                      data-testid={`navbar-suggestion-${product.id}`}
+                    >
+                      <img src={product.image} alt="" className="w-12 h-12 object-contain bg-slate-100 p-1" />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-slate-800 truncate">{product.name}</div>
+                        <div className="text-xs text-slate-500">{product.make} • {product.model}</div>
+                      </div>
+                      <div className="text-sm font-bold text-[#D97706]">AED {parseFloat(product.price).toLocaleString()}</div>
+                    </div>
+                  </Link>
+                ))}
+                <Link 
+                  href={`/products?search=${encodeURIComponent(searchTerm)}`}
+                  onClick={() => setShowSuggestions(false)}
+                >
+                  <div className="p-3 text-center text-sm text-[#D97706] font-medium hover:bg-slate-50 cursor-pointer">
+                    View all results for "{searchTerm}"
+                  </div>
+                </Link>
+              </div>
+            )}
+          </form>
 
           {/* Right Actions */}
           <div className="flex items-center gap-3">
