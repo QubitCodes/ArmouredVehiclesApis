@@ -12,6 +12,7 @@ import CartPage from "@/pages/cart";
 import CheckoutPage from "@/pages/checkout";
 import CheckoutSuccessPage from "@/pages/checkout-success";
 import WishlistPage from "@/pages/account/wishlist";
+import OrderTrackingPage from "@/pages/account/order-tracking";
 import LoginPage from "@/pages/auth/user-login";
 import RegisterPage from "@/pages/auth/register";
 import SellerDashboard from "@/pages/seller/dashboard";
@@ -27,6 +28,7 @@ function Router() {
       <Route path="/checkout" component={CheckoutPage} />
       <Route path="/checkout/success" component={CheckoutSuccessPage} />
       <Route path="/account/wishlist" component={WishlistPage} />
+      <Route path="/account/orders/:id/track" component={OrderTrackingPage} />
       <Route path="/auth/login" component={LoginPage} />
       <Route path="/auth/register" component={RegisterPage} />
       <Route path="/seller/dashboard" component={SellerDashboard} />

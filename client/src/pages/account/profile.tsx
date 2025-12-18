@@ -212,9 +212,11 @@ export default function ProfilePage() {
                             <div className="font-bold text-green-700 text-sm mb-1">Delivery by today</div>
                             <div className="text-xs text-muted-foreground">Dispatched - on time</div>
                           </div>
-                          <Button className="bg-[#3D4736] hover:bg-[#2A3324] text-xs h-8">
-                            TRACK YOUR ORDER
-                          </Button>
+                          <Link href={`/account/orders/${order.id}/track`}>
+                            <Button className="bg-[#3D4736] hover:bg-[#2A3324] text-xs h-8" data-testid={`track-order-${order.id}`}>
+                              TRACK YOUR ORDER
+                            </Button>
+                          </Link>
                         </div>
 
                         <div className="flex gap-4 items-center bg-white p-4 rounded border border-slate-100">
