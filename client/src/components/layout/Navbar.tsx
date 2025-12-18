@@ -9,114 +9,127 @@ export default function Navbar() {
   const [location] = useLocation();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   
-  // Mock logged in state for demo purposes - normally would come from auth context
-  // Check if we are in dashboard or profile to assume "logged in" state for the navbar UI
   const isLoggedIn = location.includes('/account') || location.includes('/seller');
   const isVendor = location.includes('/seller');
 
+  // New darker Green theme matching Figma
+  const NAV_BG = "bg-white"; 
+  const TOP_BAR_BG = "bg-[#3D4736]"; // Dark Green
+  const BUTTON_ORANGE = "bg-[#D97706]"; // Orange
+
   const navLinks = [
-    { href: "/", label: "Home" },
-    { href: "/products", label: "Marketplace" },
-    // Only show "Sell" link if not already a vendor, otherwise show Dashboard link
-    ...(isVendor 
-      ? [{ href: "/seller/dashboard", label: "Vendor Dashboard" }] 
-      : [{ href: "/auth/login", label: "Sell on AutoParts" }]
-    ),
+    { href: "/products?cat=core", label: "Core Systems" },
+    { href: "/products?cat=armor", label: "Armor Systems" },
+    { href: "/products?cat=comms", label: "Comms & Control" },
+    { href: "/products?cat=climate", label: "Climate & Interior" },
+    { href: "/products?cat=exterior", label: "Exterior & Utility" },
+    { href: "/products?cat=oem", label: "OEM / Custom Support" },
+    { href: "/products?cat=chassis", label: "Chassis & Platforms" },
+    { href: "/products?cat=sourcing", label: "OEM Sourcing" },
+    { href: "/products?cat=tactical", label: "Tactical Hardware" },
   ];
 
   return (
-    <nav className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="container mx-auto px-4 h-16 flex items-center justify-between gap-4">
-        {/* Logo */}
-        <Link href="/" className="flex items-center gap-2">
-          <div className="bg-primary text-primary-foreground p-1 rounded-sm">
-            <div className="w-6 h-6 border-2 border-current rounded-sm grid place-items-center">
-              <span className="text-xs font-bold font-display">AP</span>
+    <div className="flex flex-col sticky top-0 z-50">
+      {/* Top Header - White */}
+      <div className="bg-white border-b py-3">
+        <div className="container mx-auto px-4 flex items-center justify-between gap-4">
+          {/* Logo */}
+          <Link href="/" className="flex items-center gap-2">
+            <div className="flex flex-col leading-none">
+              <span className="text-2xl font-display font-bold text-[#3D4736] tracking-tighter">
+                ARMOREDMART
+              </span>
+              <span className="text-[0.5rem] tracking-wide text-slate-500 uppercase">
+                The World's First Compliance Integrated Defence E-Store
+              </span>
             </div>
+          </Link>
+
+          {/* Search Bar */}
+          <div className="hidden lg:flex flex-1 max-w-xl mx-8 relative">
+            <Input
+              type="search"
+              placeholder="Search Products"
+              className="w-full h-10 border-slate-300 rounded-none focus-visible:ring-0 focus-visible:border-[#D97706]"
+            />
+            <Button className={`${BUTTON_ORANGE} hover:bg-orange-700 text-white rounded-none h-10 px-4`}>
+              <Search className="h-4 w-4" />
+            </Button>
           </div>
-          <span className="text-xl font-bold font-display tracking-tight hidden sm:inline-block">
-            AutoParts<span className="text-primary">.B2B</span>
-          </span>
-        </Link>
 
-        {/* Desktop Nav */}
-        <div className="hidden md:flex items-center gap-6">
-          {navLinks.map((link) => (
-            <Link key={link.href} href={link.href}>
-              <span className={`text-sm font-medium transition-colors hover:text-primary ${
-                location === link.href ? "text-primary" : "text-muted-foreground"
-              }`}>
-                {link.label}
-              </span>
-            </Link>
-          ))}
-        </div>
+          {/* Right Actions */}
+          <div className="flex items-center gap-3">
+            <div className="hidden md:flex items-center gap-2 border border-slate-300 px-2 py-1 rounded-sm text-xs font-bold text-slate-700">
+              <img src="https://flagcdn.com/w20/ae.png" className="w-5 h-3" alt="UAE" />
+              <span>EN</span>
+            </div>
 
-        {/* Search Bar */}
-        <div className="hidden lg:flex items-center flex-1 max-w-md mx-4 relative">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            type="search"
-            placeholder="Search by Part Number, VIN, or Keyword..."
-            className="w-full pl-9 bg-secondary/50 border-secondary focus-visible:bg-background transition-colors"
-          />
-        </div>
-
-        {/* Actions */}
-        <div className="flex items-center gap-2">
-          {isVendor && (
-            <Link href="/seller/dashboard">
-               <Button variant="outline" size="sm" className="hidden sm:flex gap-2 bg-slate-900 text-white border-slate-900 hover:bg-slate-800 hover:text-white">
-                 <LayoutDashboard className="h-4 w-4" />
-                 <span className="text-xs font-bold">Supplier Zone</span>
-               </Button>
-            </Link>
-          )}
-
-          <Link href="/cart">
-            <Button variant="ghost" size="icon" className="relative">
-              <ShoppingCart className="h-5 w-5" />
-              <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[10px] w-4 h-4 rounded-full grid place-items-center font-bold">
-                3
-              </span>
-            </Button>
-          </Link>
-          
-          <Link href={isLoggedIn ? "/account/profile" : "/auth/login"}>
-            <Button variant="ghost" size="sm" className="hidden sm:flex gap-2">
-              <User className="h-4 w-4" />
-              <span>{isLoggedIn ? "My Account" : "Login"}</span>
-            </Button>
-          </Link>
-
-          {/* Mobile Menu */}
-          <Sheet open={isMenuOpen} onOpenChange={setIsMenuOpen}>
-            <SheetTrigger asChild>
-              <Button variant="ghost" size="icon" className="md:hidden">
-                <Menu className="h-5 w-5" />
+            {isVendor && (
+              <Link href="/seller/dashboard">
+                <Button className={`${TOP_BAR_BG} text-white hover:bg-[#2A3324] font-bold text-xs uppercase h-9 rounded-full px-6`}>
+                  Supplier Zone
+                </Button>
+              </Link>
+            )}
+            
+            <Link href={isLoggedIn ? "/account/profile" : "/auth/login"}>
+              <Button className={`${BUTTON_ORANGE} text-white hover:bg-orange-700 font-bold text-xs uppercase h-9 rounded-full px-6`}>
+                {isLoggedIn ? "My Account" : "Login"}
               </Button>
-            </SheetTrigger>
-            <SheetContent side="right">
-              <div className="flex flex-col gap-6 mt-6">
-                <div className="flex flex-col gap-4">
-                  {navLinks.map((link) => (
-                    <Link key={link.href} href={link.href} onClick={() => setIsMenuOpen(false)}>
-                      <span className={`text-lg font-medium ${
-                        location === link.href ? "text-primary" : "text-foreground"
-                      }`}>
-                        {link.label}
-                      </span>
-                    </Link>
-                  ))}
-                  <Link href={isLoggedIn ? "/account/profile" : "/auth/login"} onClick={() => setIsMenuOpen(false)}>
-                    <span className="text-lg font-medium">{isLoggedIn ? "My Account" : "Login / Register"}</span>
-                  </Link>
+            </Link>
+
+            <Link href="/cart">
+              <Button variant="ghost" size="icon" className="relative text-slate-600 hover:text-[#D97706]">
+                <ShoppingCart className="h-5 w-5" />
+                <span className="absolute -top-1 -right-1 bg-[#D97706] text-white text-[10px] w-4 h-4 rounded-full grid place-items-center font-bold">
+                  3
+                </span>
+              </Button>
+            </Link>
+
+            {/* Mobile Menu Trigger */}
+            <Sheet open={isMenuOpen} onOpenChange={setIsMenuOpen}>
+              <SheetTrigger asChild>
+                <Button variant="ghost" size="icon" className="lg:hidden text-slate-600">
+                  <Menu className="h-6 w-6" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="left" className="w-[300px] sm:w-[400px]">
+                <div className="flex flex-col gap-6 mt-6">
+                  <div className="flex flex-col gap-2">
+                    {navLinks.map((link) => (
+                      <Link key={link.href} href={link.href} onClick={() => setIsMenuOpen(false)}>
+                        <span className="text-sm font-medium py-2 block border-b border-slate-100 text-slate-700">
+                          {link.label}
+                        </span>
+                      </Link>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            </SheetContent>
-          </Sheet>
+              </SheetContent>
+            </Sheet>
+          </div>
         </div>
       </div>
-    </nav>
+
+      {/* Bottom Nav - Dark Green */}
+      <div className={`${TOP_BAR_BG} text-white hidden lg:block`}>
+        <div className="container mx-auto px-4">
+          <div className="flex items-center justify-between text-[10px] font-medium tracking-wide">
+            <div className="py-2.5 px-3 bg-[#D97706] cursor-pointer">
+              <Menu className="h-3 w-3" />
+            </div>
+            {navLinks.map((link) => (
+              <Link key={link.href} href={link.href}>
+                <span className="hover:text-[#D97706] transition-colors py-2.5 cursor-pointer uppercase truncate px-2">
+                  {link.label}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

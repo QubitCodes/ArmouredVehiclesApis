@@ -51,6 +51,7 @@ export interface Product {
     responseRate: string;
   };
   reviews?: Review[];
+  actionType?: 'buy_now' | 'inquiry'; // For different button types
 }
 
 export interface User {
@@ -98,240 +99,135 @@ export interface Slide {
 export const MOCK_SLIDES: Slide[] = [
   {
     id: 1,
-    title: "Premium Auto Parts Marketplace",
-    subtitle: "Source OEM and aftermarket parts with bulk pricing and instant quotes.",
-    buttonText: "Browse Catalog",
-    image: "https://images.unsplash.com/photo-1486262715619-67b85e0b08d3?auto=format&fit=crop&q=80&w=1600",
-    link: "/products"
-  },
-  {
-    id: 2,
-    title: "New Performance Brakes Arrival",
-    subtitle: "Upgrade your inventory with the latest ceramic brake kits.",
-    buttonText: "Shop Brakes",
-    image: "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&q=80&w=1600",
-    link: "/products?category=Brakes"
-  },
-  {
-    id: 3,
-    title: undefined, // Optional title test
-    subtitle: "Exclusive deals for verified workshops this week only.",
-    buttonText: "View Deals",
-    image: "https://images.unsplash.com/photo-1487754180451-c456f719a1fc?auto=format&fit=crop&q=80&w=1600",
+    title: "DEFENCE COMMERCE, REINVENTED.",
+    subtitle: "Built for Security. Powered by Compliance.",
+    buttonText: "LEARN MORE",
+    image: "https://images.unsplash.com/photo-1595208823526-a322dc84f509?auto=format&fit=crop&q=80&w=1600", // Placeholder for armored vehicle
     link: "/products"
   }
 ];
 
 export const MOCK_CATEGORIES: Category[] = [
-  { id: 1, name: "Brakes", image: "https://images.unsplash.com/photo-1600706432502-76b1e601a746?auto=format&fit=crop&q=80&w=400", description: "Brake pads, rotors, and calipers" },
-  { id: 2, name: "Lighting", image: "https://images.unsplash.com/photo-1616788494707-ec28f08d05a1?auto=format&fit=crop&q=80&w=400", description: "Headlights, taillights, and bulbs" },
-  { id: 3, name: "Engine", image: "https://images.unsplash.com/photo-1574360774620-192cb91b8606?auto=format&fit=crop&q=80&w=400", description: "Engine components and oil" },
-  { id: 4, name: "Suspension", image: "https://images.unsplash.com/photo-1570188167980-d2d02c42345e?auto=format&fit=crop&q=80&w=400", description: "Shocks, struts, and coilovers" },
-  { id: 5, name: "Interior", image: "https://images.unsplash.com/photo-1560965385-a7455d311394?auto=format&fit=crop&q=80&w=400", description: "Seats, mats, and accessories" },
-  { id: 6, name: "Wheels & Tires", image: "https://images.unsplash.com/photo-1578844251758-2f71da645217?auto=format&fit=crop&q=80&w=400", description: "Rims and tires for all vehicles" }
+  { id: 1, name: "Core Vehicle Systems", image: "https://images.unsplash.com/photo-1486262715619-67b85e0b08d3?auto=format&fit=crop&q=80&w=400", description: "Engines, Transmission, Chassis" },
+  { id: 2, name: "Armor Specific Systems", image: "https://images.unsplash.com/photo-1599369262337-ee47696c4266?auto=format&fit=crop&q=80&w=400", description: "Ballistic Glass, Steel, Kevlar" },
+  { id: 3, name: "Communication & Control", image: "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&q=80&w=400", description: "Radios, GPS, ECMs" },
+  { id: 4, name: "Climate & Interior", image: "https://images.unsplash.com/photo-1560965385-a7455d311394?auto=format&fit=crop&q=80&w=400", description: "HVAC, Seats, Dashboards" },
+  { id: 5, name: "Exterior & Utility", image: "https://images.unsplash.com/photo-1616788494707-ec28f08d05a1?auto=format&fit=crop&q=80&w=400", description: "Lighting, Winches, Bumpers" },
+  { id: 6, name: "OEM Sourcing", image: "https://images.unsplash.com/photo-1619642751034-765dfdf7c58e?auto=format&fit=crop&q=80&w=400", description: "Direct from Manufacturer" }
 ];
 
 export const MOCK_PRODUCTS: Product[] = [
   {
     id: 1,
-    name: "Performance Brake Kit - Ceramic",
-    sku: "BRK-001-CER",
-    price: 450.00,
-    originalPrice: 520.00,
-    image: "https://images.unsplash.com/photo-1600706432502-76b1e601a746?auto=format&fit=crop&q=80&w=800",
-    gallery: [
-      "https://images.unsplash.com/photo-1600706432502-76b1e601a746?auto=format&fit=crop&q=80&w=800",
-      "https://images.unsplash.com/photo-1486262715619-67b85e0b08d3?auto=format&fit=crop&q=80&w=800",
-      "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&q=80&w=800"
-    ],
-    category: "Brakes",
-    department: "Replacement Parts",
-    description: "High performance ceramic brake kit for extreme stopping power. Designed for daily driving and track use, providing superior heat dissipation and reduced brake fade.",
+    name: "Tubeless Runflat Solutions",
+    sku: "WHL-RF-001",
+    price: 3450.00,
+    image: "https://images.unsplash.com/photo-1611417866503-424626569738?auto=format&fit=crop&q=80&w=800",
+    category: "Core Vehicle Systems",
+    department: "Wheels",
+    description: "Military-grade runflat inserts for combat wheels.",
     condition: 'new',
-    stock: 15,
-    vendor: "AutoStop Pro",
+    stock: 50,
+    vendor: "ArmoredMart Direct",
     make: "Toyota",
-    model: "Camry",
-    year: 2022,
-    rating: 4.8,
-    reviewCount: 124,
-    attributes: {
-      surfaceType: "Slotted",
-      frictionalMaterial: "Ceramic",
-      abutmentClipsIncluded: true,
-      brakeLubricantIncluded: true
-    },
-    features: [
-      "Low dust ceramic formula",
-      "Noise-free braking performance",
-      "Extended rotor life",
-      "Easy installation with included hardware",
-      "Thermal scorched for fast break-in"
-    ],
-    specifications: {
-      "Position": "Front & Rear",
-      "Pad Material": "Ceramic",
-      "Rotor Design": "Drilled & Slotted",
-      "Included Hardware": "Yes",
-      "Weight": "45 lbs"
-    },
-    vehicleFitment: {
-      "Toyota": ["Camry (2018-2023)", "Avalon (2019-2022)", "RAV4 (2019-2023)"],
-      "Lexus": ["ES350 (2019-2023)", "NX300 (2018-2021)"]
-    },
-    warranty: {
-      period: "3 Years / 36,000 Miles",
-      details: {
-        "Coverage": "Defects in material and workmanship",
-        "Exclusions": "Normal wear and tear, improper installation",
-        "Claim Process": "Contact vendor support with proof of purchase"
-      }
-    },
-    sellerInfo: {
-      name: "AutoStop Pro",
-      rating: 4.9,
-      joinedDate: "2020",
-      responseRate: "98%"
-    },
-    reviews: [
-      { id: 1, user: "Mike T.", rating: 5, date: "2024-01-15", comment: "Excellent stopping power compared to OEM.", verifiedPurchase: true },
-      { id: 2, user: "Sarah L.", rating: 4, date: "2023-12-20", comment: "Great pads, but installation instructions were vague.", verifiedPurchase: true }
-    ]
+    model: "Land Cruiser 200",
+    year: 2023,
+    rating: 5.0,
+    actionType: 'buy_now'
   },
   {
     id: 2,
-    name: "LED Headlight Assembly (Pair)",
-    sku: "LGT-LED-002",
-    price: 320.50,
-    image: "https://images.unsplash.com/photo-1616788494707-ec28f08d05a1?auto=format&fit=crop&q=80&w=800",
-    category: "Lighting",
-    department: "Accessories",
-    description: "Bright LED headlight assembly, plug and play.",
+    name: "Headlights (LED, HID, Halogen)",
+    sku: "LGT-TAC-002",
+    price: 1450.00,
+    image: "https://images.unsplash.com/photo-1552975662-72cb78d7e75b?auto=format&fit=crop&q=80&w=800", // Tactical light placeholder
+    category: "Exterior & Utility",
+    department: "Lighting",
+    description: "High-intensity tactical lighting for armored vehicles.",
     condition: 'new',
-    stock: 8,
-    vendor: "Lumina Auto",
-    make: "Honda",
-    model: "Civic",
-    year: 2021,
-    rating: 4.5,
-    reviewCount: 56,
-    features: ["Plug & Play", "6000K Color Temp", "50,000 Hour Life"],
-    specifications: { "Bulb Type": "LED", "Voltage": "12V", "Color": "Cool White" },
-    vehicleFitment: { "Honda": ["Civic (2016-2021)", "Accord (2018-2022)"] }
-  },
-  {
-    id: 3,
-    name: "Synthetic Motor Oil 5W-30 (5 Gallon)",
-    sku: "OIL-SYN-003",
-    price: 125.00,
-    image: "https://images.unsplash.com/photo-1574360774620-192cb91b8606?auto=format&fit=crop&q=80&w=800",
-    category: "Fluids",
-    department: "Maintenance",
-    description: "Premium synthetic oil for engine longevity.",
-    condition: 'new',
-    stock: 50,
-    vendor: "Global Lubes",
+    stock: 100,
+    vendor: "Lumina Defense",
     make: "Universal",
     model: "Universal",
     year: 2024,
+    rating: 4.8,
+    actionType: 'buy_now'
+  },
+  {
+    id: 3,
+    name: "Reinforced Suspension Kits",
+    sku: "SUS-HD-003",
+    price: 14890.00,
+    image: "https://images.unsplash.com/photo-1486262715619-67b85e0b08d3?auto=format&fit=crop&q=80&w=800",
+    category: "Core Vehicle Systems",
+    department: "Suspension",
+    description: "Heavy-duty suspension upgrades for up-armored chassis loads.",
+    condition: 'new',
+    stock: 15,
+    vendor: "TrackReady Defense",
+    make: "Toyota",
+    model: "LC300",
+    year: 2024,
     rating: 4.9,
-    reviewCount: 203
+    actionType: 'inquiry'
   },
   {
     id: 4,
-    name: "Alternator - Remanufactured",
-    sku: "ALT-REM-004",
-    price: 180.00,
-    image: "https://images.unsplash.com/photo-1486262715619-67b85e0b08d3?auto=format&fit=crop&q=80&w=800",
-    category: "Engine",
-    department: "Replacement Parts",
-    description: "Quality remanufactured alternator with 1 year warranty.",
-    condition: 'refurbished',
-    stock: 3,
-    vendor: "ReBuild Parts",
-    make: "Ford",
-    model: "F-150",
-    year: 2019,
-    rating: 4.2
-  },
-  {
-    id: 5,
-    name: "Sport Suspension Coilover Kit",
-    sku: "SUS-SPT-005",
-    price: 850.00,
-    image: "https://images.unsplash.com/photo-1570188167980-d2d02c42345e?auto=format&fit=crop&q=80&w=800",
-    category: "Suspension",
-    department: "Performance",
-    description: "Adjustable coilovers for track and street use.",
+    name: "Turbochargers & Superchargers",
+    sku: "ENG-TRB-004",
+    price: 4500.00,
+    image: "https://images.unsplash.com/photo-1619642751034-765dfdf7c58e?auto=format&fit=crop&q=80&w=800",
+    category: "Core Vehicle Systems",
+    department: "Engine",
+    description: "Performance forced induction for heavy payloads.",
     condition: 'new',
-    stock: 5,
-    vendor: "TrackReady",
-    make: "BMW",
-    model: "M3",
-    year: 2020,
-    rating: 5.0,
-    attributes: {
-      surfaceType: "Performance",
-      frictionalMaterial: "Steel"
-    }
-  },
-  {
-    id: 6,
-    name: "Carbon Fiber Steering Wheel",
-    sku: "INT-CF-006",
-    price: 550.00,
-    image: "https://images.unsplash.com/photo-1560965385-a7455d311394?auto=format&fit=crop&q=80&w=800",
-    category: "Interior",
-    department: "Accessories",
-    description: "Ergonomic carbon fiber steering wheel with leather grips.",
-    condition: 'new',
-    stock: 12,
-    vendor: "Luxury Mods",
-    make: "BMW",
-    model: "M4",
+    stock: 20,
+    vendor: "PowerTrain Systems",
+    make: "Nissan",
+    model: "Patrol Y62",
     year: 2023,
     rating: 4.7
   },
   {
-    id: 7,
-    name: "High Performance Tires (Set of 4)",
-    sku: "WHL-TR-007",
-    price: 1200.00,
-    image: "https://images.unsplash.com/photo-1578844251758-2f71da645217?auto=format&fit=crop&q=80&w=800",
-    category: "Wheels & Tires",
-    department: "Replacement Parts",
-    description: "All-season high performance tires for sports cars.",
+    id: 5,
+    name: "Ballistic Glass Panel B6",
+    sku: "ARM-GLS-005",
+    price: 2200.00,
+    image: "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&q=80&w=800",
+    category: "Armor Specific Systems",
+    department: "Glass",
+    description: "Certified B6 level ballistic protection glass replacement.",
     condition: 'new',
-    stock: 20,
-    vendor: "TireMaster",
-    make: "Porsche",
-    model: "911",
+    stock: 10,
+    vendor: "ShieldGlass",
+    make: "Toyota",
+    model: "Hilux",
     year: 2022,
-    rating: 4.8
+    rating: 5.0
   },
   {
-    id: 8,
-    name: "Ceramic Coating Kit",
-    sku: "EXT-CC-008",
-    price: 89.99,
-    image: "https://images.unsplash.com/photo-1601362840469-51e4d8d58785?auto=format&fit=crop&q=80&w=800",
-    category: "Exterior",
-    department: "Maintenance",
-    description: "DIY ceramic coating kit for long-lasting paint protection.",
+    id: 6,
+    name: "Fuel Pumps, Injectors & Rails",
+    sku: "ENG-FUL-006",
+    price: 850.00,
+    image: "https://images.unsplash.com/photo-1606577924004-79d2a2971e38?auto=format&fit=crop&q=80&w=800",
+    category: "Core Vehicle Systems",
+    department: "Fuel System",
+    description: "High-flow fuel delivery components.",
     condition: 'new',
-    stock: 100,
-    vendor: "ShineOn",
+    stock: 40,
+    vendor: "FuelFlow",
     make: "Universal",
     model: "Universal",
     year: 2024,
-    rating: 4.3
+    rating: 4.6
   }
 ];
 
 export const MOCK_FILTERS = {
-  brands: ["AutoStop Pro", "Lumina Auto", "Global Lubes", "ReBuild Parts", "TrackReady", "Luxury Mods", "TireMaster", "ShineOn"],
-  departments: ["Replacement Parts", "Accessories", "Maintenance", "Performance"],
-  surfaceTypes: ["Slotted", "Drilled", "Smooth", "Performance"],
+  brands: ["ArmoredMart Direct", "Lumina Defense", "TrackReady Defense", "PowerTrain Systems", "ShieldGlass", "FuelFlow"],
+  departments: ["Wheels", "Lighting", "Suspension", "Engine", "Glass", "Fuel System"],
+  surfaceTypes: ["Heavy Duty", "Tactical", "Standard", "Performance"],
   frictionalMaterials: ["Ceramic", "Semi-Metallic", "Organic", "Steel"]
 };
 
@@ -345,14 +241,14 @@ export const api = {
   
   getTopSellingProducts: async () => {
     await new Promise(resolve => setTimeout(resolve, 400));
-    // Just return a subset for demo
-    return [MOCK_PRODUCTS[0], MOCK_PRODUCTS[2], MOCK_PRODUCTS[6], MOCK_PRODUCTS[7]];
+    // Return items for the grid part of Top Selling
+    return [MOCK_PRODUCTS[3], MOCK_PRODUCTS[5], MOCK_PRODUCTS[0], MOCK_PRODUCTS[1]];
   },
 
   getFeaturedProducts: async () => {
     await new Promise(resolve => setTimeout(resolve, 400));
-    // Return a different subset
-    return [MOCK_PRODUCTS[1], MOCK_PRODUCTS[4], MOCK_PRODUCTS[3], MOCK_PRODUCTS[5]];
+    // Return items for the dark cards section
+    return [MOCK_PRODUCTS[0], MOCK_PRODUCTS[1], MOCK_PRODUCTS[2]];
   },
 
   getProductById: async (id: number) => {
@@ -362,13 +258,11 @@ export const api = {
   
   getSimilarProducts: async (productId: number) => {
     await new Promise(resolve => setTimeout(resolve, 300));
-    // Return random 3 products excluding current
     return MOCK_PRODUCTS.filter(p => p.id !== productId).slice(0, 3);
   },
 
   getRecommendedProducts: async (productId: number) => {
     await new Promise(resolve => setTimeout(resolve, 300));
-    // Return random 3 products
     return MOCK_PRODUCTS.slice(3, 6);
   },
 
