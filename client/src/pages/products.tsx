@@ -24,6 +24,7 @@ export default function ProductsPage() {
   const initialSearch = searchParams.get("search") || "";
   const initialCategory = searchParams.get("category") || "";
 
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [searchTerm, setSearchTerm] = useState(initialSearch);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedBrands, setSelectedBrands] = useState<string[]>([]);
@@ -33,6 +34,11 @@ export default function ProductsPage() {
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
   const [sortBy, setSortBy] = useState("best");
+
+  useEffect(() => {
+    const token = localStorage.getItem('auth_token');
+    setIsAuthenticated(!!token);
+  }, []);
 
   const { data: products } = useQuery({
     queryKey: ['products'],
@@ -291,7 +297,7 @@ export default function ProductsPage() {
           </h3>
           
           <div className="mb-4">
-            {product.price ? (
+            {isAuthenticated && product.price ? (
               <div className="font-bold text-sm text-black">AED {parseFloat(product.price.toString()).toLocaleString()}</div>
             ) : (
               <div className="text-xs text-slate-500 italic">Login for Price</div>

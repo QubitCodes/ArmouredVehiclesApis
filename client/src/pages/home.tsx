@@ -13,6 +13,7 @@ import {
   CarouselPrevious,
 } from "@/components/ui/carousel";
 import Autoplay from "embla-carousel-autoplay";
+import { useState, useEffect } from "react";
 
 // Mock slides for hero carousel (until we implement slides API)
 const heroSlides = [
@@ -21,6 +22,13 @@ const heroSlides = [
 ];
 
 export default function Home() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  useEffect(() => {
+    const token = localStorage.getItem('auth_token');
+    setIsAuthenticated(!!token);
+  }, []);
+
   const { data: categories } = useQuery({ queryKey: ['categories'], queryFn: api.categories.getAll });
   const { data: featuredProducts } = useQuery({ queryKey: ['featuredProducts'], queryFn: api.products.getFeatured });
   const { data: topSellingProducts } = useQuery({ queryKey: ['topSellingProducts'], queryFn: api.products.getTopSelling });
@@ -40,29 +48,29 @@ export default function Home() {
     const price = product.price ? parseFloat(product.price.toString()) : null;
     
     return (
-      <div className="group relative border border-slate-700 bg-[#1A1A1A] p-4 flex flex-col h-full hover:border-[#D97706] transition-colors">
-        <div className="aspect-[4/3] w-full overflow-hidden mb-4 bg-black/20 flex items-center justify-center">
-          <img 
-            src={product.image} 
-            alt={product.name} 
-            className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
-          />
-        </div>
-        <div className="mt-auto">
-          <h3 className="text-white font-bold text-sm mb-1 line-clamp-2">{product.name}</h3>
-          <div className="text-slate-400 text-xs mb-4">
-            {price ? `AED ${price.toLocaleString()}` : 'Login for Price'}
+      <Link href={`/products/${product.id}`} data-testid={`link-product-${product.id}`}>
+        <div className="group relative border border-slate-700 bg-[#1A1A1A] p-4 flex flex-col h-full hover:border-[#D97706] transition-colors cursor-pointer">
+          <div className="aspect-[4/3] w-full overflow-hidden mb-4 bg-black/20 flex items-center justify-center">
+            <img 
+              src={product.image} 
+              alt={product.name} 
+              className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
+            />
           </div>
-          <Link href={`/products/${product.id}`} data-testid={`link-product-${product.id}`}>
-            <Button 
-              data-testid={`button-${product.actionType === 'inquiry' ? 'inquiry' : 'buy'}-${product.id}`}
-              className={`w-full h-9 text-xs font-bold uppercase rounded-none ${product.actionType === 'inquiry' ? 'bg-white text-black hover:bg-slate-200' : 'bg-white text-black hover:bg-[#D97706] hover:text-white'}`}
+          <div className="mt-auto">
+            <h3 className="text-white font-bold text-sm mb-1 line-clamp-2">{product.name}</h3>
+            <div className="text-slate-400 text-xs mb-4">
+              {isAuthenticated && price ? `AED ${price.toLocaleString()}` : 'Login for Price'}
+            </div>
+            <span 
+              data-testid={`button-view-${product.id}`}
+              className="w-full h-9 text-xs font-bold uppercase rounded-none bg-white text-black hover:bg-[#D97706] hover:text-white flex items-center justify-center transition-colors"
             >
-              {product.actionType === 'inquiry' ? 'SUBMIT INQUIRY' : 'BUY NOW'}
-            </Button>
-          </Link>
+              VIEW DETAILS
+            </span>
+          </div>
         </div>
-      </div>
+      </Link>
     );
   };
 

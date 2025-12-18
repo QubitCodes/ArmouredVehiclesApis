@@ -33,6 +33,16 @@ export default function Navbar() {
     staleTime: 5 * 60 * 1000,
   });
 
+  const isLoggedIn = !!user;
+
+  const { data: cartItems } = useQuery({
+    queryKey: ['cart'],
+    queryFn: api.cart.get,
+    enabled: isLoggedIn,
+  });
+
+  const cartCount = cartItems?.reduce((sum, item) => sum + item.quantity, 0) || 0;
+
   const searchSuggestions = useMemo(() => {
     if (!products || !searchTerm.trim() || searchTerm.length < 2) return [];
     const term = searchTerm.toLowerCase();
@@ -94,7 +104,6 @@ export default function Navbar() {
     setLocation('/');
   };
   
-  const isLoggedIn = !!user;
   const isVendor = user?.userType === 'vendor';
 
   // New darker Green theme matching Figma
@@ -170,7 +179,11 @@ export default function Navbar() {
                         <div className="text-sm font-medium text-slate-800 truncate">{product.name}</div>
                         <div className="text-xs text-slate-500">{product.make} • {product.model}</div>
                       </div>
-                      <div className="text-sm font-bold text-[#D97706]">AED {parseFloat(product.price).toLocaleString()}</div>
+                      {isLoggedIn ? (
+                        <div className="text-sm font-bold text-[#D97706]">AED {parseFloat(product.price).toLocaleString()}</div>
+                      ) : (
+                        <div className="text-xs text-slate-400 italic">Login for price</div>
+                      )}
                     </div>
                   </Link>
                 ))}
@@ -233,9 +246,11 @@ export default function Navbar() {
             <Link href="/cart">
               <Button variant="ghost" size="icon" className="relative text-slate-600 hover:text-[#D97706]">
                 <ShoppingCart className="h-5 w-5" />
-                <span className="absolute -top-1 -right-1 bg-[#D97706] text-white text-[10px] w-4 h-4 rounded-full grid place-items-center font-bold">
-                  3
-                </span>
+                {cartCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-[#D97706] text-white text-[10px] w-4 h-4 rounded-full grid place-items-center font-bold">
+                    {cartCount > 99 ? '99+' : cartCount}
+                  </span>
+                )}
               </Button>
             </Link>
 

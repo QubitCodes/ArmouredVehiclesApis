@@ -76,6 +76,23 @@ export default function ProductDetailsPage() {
     addToCartMutation.mutate(id);
   };
 
+  const handleAddToWishlist = () => {
+    const wishlist = JSON.parse(localStorage.getItem('wishlist') || '[]');
+    if (wishlist.includes(id)) {
+      toast({
+        title: "Already in wishlist",
+        description: "This product is already in your wishlist.",
+      });
+      return;
+    }
+    wishlist.push(id);
+    localStorage.setItem('wishlist', JSON.stringify(wishlist));
+    toast({
+      title: "Added to wishlist!",
+      description: "Product has been added to your wishlist.",
+    });
+  };
+
   if (isLoading || !product) {
     return (
       <Layout>
@@ -169,12 +186,19 @@ export default function ProductDetailsPage() {
               </div>
 
               <div className="p-4 bg-white rounded-lg border space-y-4">
-                <div className="flex items-baseline gap-3">
-                  <span className="text-3xl font-bold text-slate-900">AED {parseFloat(product.price).toLocaleString()}</span>
-                  {product.originalPrice && (
-                    <span className="text-lg text-muted-foreground line-through">AED {parseFloat(product.originalPrice).toLocaleString()}</span>
-                  )}
-                </div>
+                {isAuthenticated ? (
+                  <div className="flex items-baseline gap-3">
+                    <span className="text-3xl font-bold text-slate-900">AED {parseFloat(product.price).toLocaleString()}</span>
+                    {product.originalPrice && (
+                      <span className="text-lg text-muted-foreground line-through">AED {parseFloat(product.originalPrice).toLocaleString()}</span>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 text-slate-500">
+                    <Lock className="h-4 w-4" />
+                    <span className="text-lg font-medium">Login to see price</span>
+                  </div>
+                )}
 
                 <Separator />
                 
@@ -195,10 +219,10 @@ export default function ProductDetailsPage() {
               </div>
 
               <div className="flex flex-col gap-3">
-                <div className="flex gap-3">
+                {isAuthenticated ? (
                   <Button 
                     size="lg" 
-                    className="flex-1 font-bold h-12 text-base shadow-lg shadow-primary/20 bg-orange-600 hover:bg-orange-700"
+                    className="w-full font-bold h-12 text-base shadow-lg shadow-primary/20 bg-orange-600 hover:bg-orange-700"
                     onClick={handleAddToCart}
                     disabled={addToCartMutation.isPending || product.stock === 0}
                     data-testid="button-add-to-cart"
@@ -210,13 +234,19 @@ export default function ProductDetailsPage() {
                     )}
                     Add to Cart
                   </Button>
-                  <Link href="/cart">
-                    <Button size="lg" variant="secondary" className="font-bold h-12 text-base">
-                      Buy Now
+                ) : (
+                  <Link href="/auth/login">
+                    <Button 
+                      size="lg" 
+                      className="w-full font-bold h-12 text-base shadow-lg shadow-primary/20 bg-orange-600 hover:bg-orange-700"
+                      data-testid="button-login-to-buy"
+                    >
+                      <Lock className="h-5 w-5 mr-2" />
+                      Login to Purchase
                     </Button>
                   </Link>
-                </div>
-                <Button variant="ghost" size="sm" className="w-full text-muted-foreground">
+                )}
+                <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={handleAddToWishlist}>
                   <Heart className="h-4 w-4 mr-2" /> Add to Wishlist
                 </Button>
               </div>
