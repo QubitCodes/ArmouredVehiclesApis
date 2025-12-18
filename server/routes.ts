@@ -1959,6 +1959,164 @@ export async function registerRoutes(
     }
   });
 
+  // Create a new product (vendor)
+  app.post("/api/vendor/products", async (req, res) => {
+    try {
+      if (!req.user || req.user.userType !== 'vendor') {
+        return res.status(403).json({ error: "Vendor access required" });
+      }
+
+      const productData = {
+        ...req.body,
+        vendorId: req.user.id,
+      };
+      
+      const validated = insertProductSchema.parse(productData);
+      const product = await storage.createProduct(validated);
+      res.status(201).json(product);
+    } catch (error) {
+      console.error("Error creating product:", error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid product data", details: error.errors });
+      }
+      res.status(500).json({ error: "Failed to create product" });
+    }
+  });
+
+  // Update a product (vendor)
+  app.put("/api/vendor/products/:id", async (req, res) => {
+    try {
+      if (!req.user || req.user.userType !== 'vendor') {
+        return res.status(403).json({ error: "Vendor access required" });
+      }
+
+      const productId = parseInt(req.params.id);
+      const existing = await storage.getProductById(productId);
+      
+      if (!existing) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+      
+      if (existing.vendorId !== req.user.id) {
+        return res.status(403).json({ error: "Not authorized to edit this product" });
+      }
+
+      const product = await storage.updateProduct(productId, req.body);
+      res.json(product);
+    } catch (error) {
+      console.error("Error updating product:", error);
+      res.status(500).json({ error: "Failed to update product" });
+    }
+  });
+
+  // Delete a product (vendor)
+  app.delete("/api/vendor/products/:id", async (req, res) => {
+    try {
+      if (!req.user || req.user.userType !== 'vendor') {
+        return res.status(403).json({ error: "Vendor access required" });
+      }
+
+      const productId = parseInt(req.params.id);
+      const deleted = await storage.deleteProduct(productId, req.user.id);
+      
+      if (!deleted) {
+        return res.status(404).json({ error: "Product not found or not authorized" });
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting product:", error);
+      res.status(500).json({ error: "Failed to delete product" });
+    }
+  });
+
+  // Get vendor orders
+  app.get("/api/vendor/orders", async (req, res) => {
+    try {
+      if (!req.user || req.user.userType !== 'vendor') {
+        return res.status(403).json({ error: "Vendor access required" });
+      }
+
+      const orders = await storage.getVendorOrders(req.user.id);
+      res.json(orders);
+    } catch (error) {
+      console.error("Error fetching vendor orders:", error);
+      res.status(500).json({ error: "Failed to fetch vendor orders" });
+    }
+  });
+
+  // Update order status (vendor)
+  app.patch("/api/vendor/orders/:id/status", async (req, res) => {
+    try {
+      if (!req.user || req.user.userType !== 'vendor') {
+        return res.status(403).json({ error: "Vendor access required" });
+      }
+
+      const { status, note } = req.body;
+      const validStatuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
+      
+      if (!status || !validStatuses.includes(status)) {
+        return res.status(400).json({ error: "Invalid status" });
+      }
+
+      const order = await storage.updateOrderStatus(req.params.id, status, req.user.id, note);
+      
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+
+      res.json(order);
+    } catch (error) {
+      console.error("Error updating order status:", error);
+      res.status(500).json({ error: "Failed to update order status" });
+    }
+  });
+
+  // Get order status history
+  app.get("/api/vendor/orders/:id/history", async (req, res) => {
+    try {
+      if (!req.user || req.user.userType !== 'vendor') {
+        return res.status(403).json({ error: "Vendor access required" });
+      }
+
+      const history = await storage.getOrderStatusHistory(req.params.id);
+      res.json(history);
+    } catch (error) {
+      console.error("Error fetching order history:", error);
+      res.status(500).json({ error: "Failed to fetch order history" });
+    }
+  });
+
+  // Get vendor customers
+  app.get("/api/vendor/customers", async (req, res) => {
+    try {
+      if (!req.user || req.user.userType !== 'vendor') {
+        return res.status(403).json({ error: "Vendor access required" });
+      }
+
+      const customers = await storage.getVendorCustomers(req.user.id);
+      res.json(customers);
+    } catch (error) {
+      console.error("Error fetching vendor customers:", error);
+      res.status(500).json({ error: "Failed to fetch vendor customers" });
+    }
+  });
+
+  // Get vendor analytics
+  app.get("/api/vendor/analytics", async (req, res) => {
+    try {
+      if (!req.user || req.user.userType !== 'vendor') {
+        return res.status(403).json({ error: "Vendor access required" });
+      }
+
+      const analytics = await storage.getVendorAnalytics(req.user.id);
+      res.json(analytics);
+    } catch (error) {
+      console.error("Error fetching vendor analytics:", error);
+      res.status(500).json({ error: "Failed to fetch vendor analytics" });
+    }
+  });
+
   // ===== USER / FILTERS =====
 
   /**
