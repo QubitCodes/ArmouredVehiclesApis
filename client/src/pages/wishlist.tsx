@@ -2,19 +2,27 @@ import Layout from "@/components/layout/Layout";
 import { Button } from "@/components/ui/button";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { Link } from "wouter";
-import { Heart, Trash2, ShoppingCart, Loader2 } from "lucide-react";
+import { Link, useLocation } from "wouter";
+import { Heart, Trash2, ShoppingCart, Loader2, Lock } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 
 export default function WishlistPage() {
+  const [, setLocation] = useLocation();
   const [wishlistIds, setWishlistIds] = useState<number[]>([]);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
     const token = localStorage.getItem('auth_token');
-    setIsAuthenticated(!!token);
+    const authenticated = !!token;
+    setIsAuthenticated(authenticated);
+    
+    if (!authenticated) {
+      setLocation('/auth/login');
+      return;
+    }
+    
     const stored = localStorage.getItem('wishlist');
     if (stored) {
       try {
@@ -23,7 +31,7 @@ export default function WishlistPage() {
         setWishlistIds([]);
       }
     }
-  }, []);
+  }, [setLocation]);
 
   const { data: allProducts, isLoading } = useQuery({
     queryKey: ['products'],
@@ -42,7 +50,7 @@ export default function WishlistPage() {
     });
   };
 
-  if (isLoading) {
+  if (isAuthenticated === null || isLoading) {
     return (
       <Layout>
         <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -50,6 +58,10 @@ export default function WishlistPage() {
         </div>
       </Layout>
     );
+  }
+
+  if (!isAuthenticated) {
+    return null;
   }
 
   return (

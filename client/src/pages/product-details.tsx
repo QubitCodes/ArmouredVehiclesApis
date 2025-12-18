@@ -77,6 +77,14 @@ export default function ProductDetailsPage() {
   };
 
   const handleAddToWishlist = () => {
+    if (!isAuthenticated) {
+      toast({
+        title: "Please log in",
+        description: "You need to be logged in to add items to wishlist.",
+      });
+      setLocation('/auth/login');
+      return;
+    }
     const wishlist = JSON.parse(localStorage.getItem('wishlist') || '[]');
     if (wishlist.includes(id)) {
       toast({
