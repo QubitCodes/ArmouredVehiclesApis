@@ -214,29 +214,6 @@ export default function ProfilePage() {
 
   return (
     <Layout>
-      <div className="bg-[#3D4736] text-white py-2">
-        <div className="container mx-auto px-4 flex justify-between items-center text-xs">
-          <div className="flex gap-4">
-             {/* Breadcrumbs or secondary nav */}
-          </div>
-          <div className="flex items-center gap-4">
-             {currentUser?.userType && ['vendor', 'admin', 'super_admin'].includes(currentUser.userType) && (
-               <Link href={currentUser.userType === 'admin' || currentUser.userType === 'super_admin' ? '/admin/dashboard' : '/seller/dashboard'}>
-                 <Button size="sm" variant="outline" className="h-7 bg-white text-slate-900 border-white hover:bg-slate-100 font-bold text-xs uppercase rounded-full px-4" data-testid="supplier-admin-zone-btn">
-                   {currentUser.userType === 'admin' || currentUser.userType === 'super_admin' ? 'Admin Area' : 'Supplier Zone'}
-                 </Button>
-               </Link>
-             )}
-             <div className="flex items-center gap-2">
-               <span>{currentUser?.name?.split(' ')[0] || 'John'}</span>
-               <div className="w-6 h-6 rounded-full border border-white grid place-items-center">
-                 <User className="h-3 w-3" />
-               </div>
-             </div>
-          </div>
-        </div>
-      </div>
-
       <div className="bg-slate-50 min-h-screen py-8">
         <div className="container mx-auto px-4">
           <div className="flex flex-col lg:flex-row gap-8">
