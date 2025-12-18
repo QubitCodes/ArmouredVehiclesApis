@@ -1,10 +1,10 @@
 import Layout from "@/components/layout/Layout";
 import { Button } from "@/components/ui/button";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/lib/mockApi";
+import { api } from "@/lib/api";
 import { Link } from "wouter";
 import { ArrowRight, Loader2, ChevronRight, ChevronLeft } from "lucide-react";
-import { Product } from "@/lib/mockApi";
+import type { Product } from "@shared/schema";
 import {
   Carousel,
   CarouselContent,
@@ -14,13 +14,18 @@ import {
 } from "@/components/ui/carousel";
 import Autoplay from "embla-carousel-autoplay";
 
-export default function Home() {
-  const { data: slides } = useQuery({ queryKey: ['slides'], queryFn: api.getSlides });
-  const { data: categories } = useQuery({ queryKey: ['categories'], queryFn: api.getCategories });
-  const { data: featuredProducts } = useQuery({ queryKey: ['featuredProducts'], queryFn: api.getFeaturedProducts });
-  const { data: topSellingProducts } = useQuery({ queryKey: ['topSellingProducts'], queryFn: api.getTopSellingProducts });
+// Mock slides for hero carousel (until we implement slides API)
+const heroSlides = [
+  { id: 1, image: "https://images.unsplash.com/photo-1595565312451-35d11ce8e00a?auto=format&fit=crop&q=80&w=1200", title: "DEFENCE COMMERCE, REINVENTED.", subtitle: "Built for Security. Powered by Compliance.", link: "/products", buttonText: "EXPLORE MARKETPLACE" },
+  { id: 2, image: "https://images.unsplash.com/photo-1601924357840-d0b8db1e5b27?auto=format&fit=crop&q=80&w=1200", title: "ARMORED VEHICLE PARTS", subtitle: "OEM & Aftermarket Solutions", link: "/products", buttonText: "SHOP NOW" },
+];
 
-  if (!slides || !categories || !featuredProducts || !topSellingProducts) {
+export default function Home() {
+  const { data: categories } = useQuery({ queryKey: ['categories'], queryFn: api.categories.getAll });
+  const { data: featuredProducts } = useQuery({ queryKey: ['featuredProducts'], queryFn: api.products.getFeatured });
+  const { data: topSellingProducts } = useQuery({ queryKey: ['topSellingProducts'], queryFn: api.products.getTopSelling });
+
+  if (!categories || !featuredProducts || !topSellingProducts) {
     return (
       <Layout>
         <div className="min-h-screen flex items-center justify-center">
@@ -31,28 +36,35 @@ export default function Home() {
   }
 
   // Helper for Featured Product Card (Dark Theme)
-  const FeaturedCard = ({ product }: { product: Product }) => (
-    <div className="group relative border border-slate-700 bg-[#1A1A1A] p-4 flex flex-col h-full hover:border-[#D97706] transition-colors">
-      <div className="aspect-[4/3] w-full overflow-hidden mb-4 bg-black/20 flex items-center justify-center">
-        <img 
-          src={product.image} 
-          alt={product.name} 
-          className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
-        />
-      </div>
-      <div className="mt-auto">
-        <h3 className="text-white font-bold text-sm mb-1 line-clamp-2">{product.name}</h3>
-        <div className="text-slate-400 text-xs mb-4">
-          {product.price ? `AED ${product.price.toLocaleString()}` : 'Login for Price'}
+  const FeaturedCard = ({ product }: { product: Product }) => {
+    const price = product.price ? parseFloat(product.price.toString()) : null;
+    
+    return (
+      <div className="group relative border border-slate-700 bg-[#1A1A1A] p-4 flex flex-col h-full hover:border-[#D97706] transition-colors">
+        <div className="aspect-[4/3] w-full overflow-hidden mb-4 bg-black/20 flex items-center justify-center">
+          <img 
+            src={product.image} 
+            alt={product.name} 
+            className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
+          />
         </div>
-        <Link href={`/products/${product.id}`}>
-          <Button className={`w-full h-9 text-xs font-bold uppercase rounded-none ${product.actionType === 'inquiry' ? 'bg-white text-black hover:bg-slate-200' : 'bg-white text-black hover:bg-[#D97706] hover:text-white'}`}>
-            {product.actionType === 'inquiry' ? 'SUBMIT INQUIRY' : 'BUY NOW'}
-          </Button>
-        </Link>
+        <div className="mt-auto">
+          <h3 className="text-white font-bold text-sm mb-1 line-clamp-2">{product.name}</h3>
+          <div className="text-slate-400 text-xs mb-4">
+            {price ? `AED ${price.toLocaleString()}` : 'Login for Price'}
+          </div>
+          <Link href={`/products/${product.id}`} data-testid={`link-product-${product.id}`}>
+            <Button 
+              data-testid={`button-${product.actionType === 'inquiry' ? 'inquiry' : 'buy'}-${product.id}`}
+              className={`w-full h-9 text-xs font-bold uppercase rounded-none ${product.actionType === 'inquiry' ? 'bg-white text-black hover:bg-slate-200' : 'bg-white text-black hover:bg-[#D97706] hover:text-white'}`}
+            >
+              {product.actionType === 'inquiry' ? 'SUBMIT INQUIRY' : 'BUY NOW'}
+            </Button>
+          </Link>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <Layout>
@@ -64,7 +76,7 @@ export default function Home() {
           opts={{ loop: true }}
         >
           <CarouselContent className="h-full ml-0">
-            {slides.map((slide) => (
+            {heroSlides.map((slide) => (
               <CarouselItem key={slide.id} className="pl-0 relative h-[500px]">
                 <div className="absolute inset-0">
                   <img 
@@ -78,13 +90,13 @@ export default function Home() {
                 <div className="container mx-auto px-4 h-full flex items-center relative z-10">
                   <div className="max-w-xl">
                     <h1 className="text-5xl lg:text-6xl font-display font-bold text-[#D97706] leading-tight mb-2 uppercase">
-                      {slide.title || "DEFENCE COMMERCE, REINVENTED."}
+                      {slide.title}
                     </h1>
                     <p className="text-lg text-slate-300 mb-8 font-light">
-                      {slide.subtitle || "Built for Security. Powered by Compliance."}
+                      {slide.subtitle}
                     </p>
                     <Link href={slide.link}>
-                      <Button className="bg-[#D97706] hover:bg-orange-700 text-white font-bold uppercase rounded-none h-12 px-8">
+                      <Button data-testid="button-hero-explore" className="bg-[#D97706] hover:bg-orange-700 text-white font-bold uppercase rounded-none h-12 px-8">
                         {slide.buttonText}
                       </Button>
                     </Link>
@@ -92,12 +104,6 @@ export default function Home() {
                 </div>
               </CarouselItem>
             ))}
-            {/* Fallback slide if array is empty or for demo */}
-            {slides.length === 0 && (
-               <CarouselItem className="pl-0 relative h-[500px]">
-                  {/* ... same content as above ... */}
-               </CarouselItem>
-            )}
           </CarouselContent>
           <div className="absolute bottom-8 right-8 flex gap-2">
             <CarouselPrevious className="static translate-y-0 h-10 w-10 border-slate-600 bg-black/50 hover:bg-[#D97706] hover:text-white hover:border-[#D97706] rounded-none text-slate-300" />

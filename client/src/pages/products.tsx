@@ -4,7 +4,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { useQuery } from "@tanstack/react-query";
-import { api, Product } from "@/lib/mockApi";
+import { api } from "@/lib/api";
+import type { Product } from "@shared/schema";
 import { Filter, SlidersHorizontal, ChevronDown, ChevronRight, ChevronLeft, Star } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useLocation, Link } from "wouter";
@@ -29,22 +30,22 @@ export default function ProductsPage() {
 
   const { data: products } = useQuery({
     queryKey: ['products'],
-    queryFn: api.getProducts
+    queryFn: api.products.getAll
   });
 
   const { data: categories } = useQuery({
     queryKey: ['categories'],
-    queryFn: api.getCategories
+    queryFn: api.categories.getAll
   });
 
   const { data: filterOptions } = useQuery({
     queryKey: ['filters'],
-    queryFn: api.getFilters
+    queryFn: api.filters.get
   });
 
   const { data: topSellingProducts } = useQuery({
      queryKey: ['topSellingProducts'],
-     queryFn: api.getTopSellingProducts
+     queryFn: api.products.getTopSelling
   });
 
   const handleCategoryClick = (categoryId: number) => {
@@ -199,12 +200,12 @@ export default function ProductsPage() {
          
          <div className="mb-4">
            {product.price ? (
-             <div className="font-bold text-sm text-black">AED {product.price.toLocaleString()}</div>
+             <div className="font-bold text-sm text-black">AED {parseFloat(product.price.toString()).toLocaleString()}</div>
            ) : (
              <div className="text-xs text-slate-500 italic">Login for Price</div>
            )}
            <div className="text-[10px] text-slate-400 mt-1">
-             Sold by <span className="underline cursor-pointer hover:text-slate-600">{product.vendor}</span>
+             Sold by <span className="underline cursor-pointer hover:text-slate-600">{product.make || 'Vendor'}</span>
            </div>
          </div>
 

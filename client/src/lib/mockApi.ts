@@ -8,6 +8,7 @@ export interface Review {
   date: string;
   comment: string;
   verifiedPurchase: boolean;
+  avatar?: string;
 }
 
 export interface Product {
@@ -121,23 +122,89 @@ export const MOCK_PRODUCTS: Product[] = [
     id: 1,
     name: "DFC - 4000 HybridDynamic Hybrid Rear Brake Pads",
     sku: "WHL-RF-001",
-    price: 3450.00,
+    price: 679.00,
+    originalPrice: 850.00,
     image: "https://images.unsplash.com/photo-1611417866503-424626569738?auto=format&fit=crop&q=80&w=800",
+    gallery: [
+      "https://images.unsplash.com/photo-1611417866503-424626569738?auto=format&fit=crop&q=80&w=800",
+      "https://images.unsplash.com/photo-1600706432502-76b1e601a746?auto=format&fit=crop&q=80&w=800",
+      "https://images.unsplash.com/photo-1616788494707-ec28f08d05a1?auto=format&fit=crop&q=80&w=800",
+      "https://images.unsplash.com/photo-1619642751034-765dfdf7c58e?auto=format&fit=crop&q=80&w=800"
+    ],
     category: "Core Vehicle Systems",
     department: "Wheels",
-    description: "Military-grade runflat inserts for combat wheels.",
+    description: "Military-grade runflat inserts for combat wheels. Designed for heavier vehicles with larger brake systems, DFC Heavy-Duty Brake Pads deliver exceptional braking performance in harsh conditions. DFC Heavy-Duty brake pads are exclusively engineered and formulated to withstand extreme heat, heavy duty operation, frequent stopping, or towing.",
     condition: 'new',
     stock: 50,
     vendor: "ArmoredMart Direct",
     make: "Toyota",
     model: "Land Cruiser 200",
     year: 2023,
-    rating: 5.0,
-    actionType: 'buy_now'
+    rating: 4.5,
+    reviewCount: 3,
+    actionType: 'buy_now',
+    specifications: {
+       "Series": "4000 HybridDynamic",
+       "Friction Material Bonding Type": "Integrally Molded",
+       "SKU #": "314159",
+       "Weight": "6.64lbs",
+       "Brake Kit Vented Type Front": "Vented",
+       "Material": "Iron Alloy",
+       "Minimum Pad Quantity": "4",
+       "Mounting Bolt Hole Quantity": "5",
+       "Outside Diameter": "12.2mm",
+       "Center Hole Diameter": "65.5mm"
+    },
+    features: [
+       "Frequent braking environments, high speed, heavy traffic, steep gradients, towing, or off-roading",
+       "Delivers strong, predictable friction level regardless of temperature, speed, or axle load",
+       "Engineered to withstand extremely high operating temperature range",
+       "Long pad wear, low noise, and low dust",
+       "100% Asbestos Free",
+       "100% Copper Free Eco-Friendly Formulation"
+    ],
+    vehicleFitment: {
+       "Genesis": ["2023-2025 Genesis Electrified GV70", "2021-2025 Genesis G80", "2023-2025 Genesis G90"],
+       "Hyundai": ["2020-2024 Palisade", "2021-2024 Santa Fe"],
+       "Kia": ["2020-2024 Telluride"]
+    },
+    warranty: {
+       period: "12 months/12,000 Miles Limited Warranty",
+       details: {}
+    },
+    reviews: [
+       {
+          id: 1,
+          user: "Omar Abdullah Al Mansoori",
+          rating: 5,
+          date: "Nov 23, 2024",
+          verifiedPurchase: true,
+          comment: "Great price, good quality, only supplier that had them except gm who wanted 183 just for the front. CAMO sent all four say no more for 350. I'm fine okay.",
+          avatar: "https://randomuser.me/api/portraits/men/32.jpg"
+       },
+       {
+          id: 2,
+          user: "Anonymous",
+          rating: 4,
+          date: "Oct 15, 2024",
+          verifiedPurchase: true,
+          comment: "Buy them now, you won't regret it day night and day, you will be shocked at the difference, absolutely shocked!!",
+          avatar: "https://randomuser.me/api/portraits/men/44.jpg"
+       },
+       {
+          id: 3,
+          user: "John Smith",
+          rating: 5,
+          date: "Sep 01, 2024",
+          verifiedPurchase: true,
+          comment: "Perfect fit for my LC200. Very happy with the performance.",
+          avatar: "https://randomuser.me/api/portraits/men/12.jpg"
+       }
+    ]
   },
   {
     id: 2,
-    name: "DFC - 4000 HybridDynamic Hybrid Rear Brake Pads",
+    name: "Headlights (LED, HID, Halogen)",
     sku: "LGT-TAC-002",
     price: 1450.00,
     image: "https://images.unsplash.com/photo-1552975662-72cb78d7e75b?auto=format&fit=crop&q=80&w=800", // Tactical light placeholder
@@ -151,11 +218,12 @@ export const MOCK_PRODUCTS: Product[] = [
     model: "Universal",
     year: 2024,
     rating: 4.8,
+    reviewCount: 12,
     actionType: 'buy_now'
   },
   {
     id: 3,
-    name: "DFC - 4000 HybridDynamic Hybrid Rear Brake Pads",
+    name: "Reinforced Suspension Kits",
     sku: "SUS-HD-003",
     price: 14890.00,
     image: "https://images.unsplash.com/photo-1486262715619-67b85e0b08d3?auto=format&fit=crop&q=80&w=800",
@@ -169,11 +237,12 @@ export const MOCK_PRODUCTS: Product[] = [
     model: "LC300",
     year: 2024,
     rating: 4.9,
+    reviewCount: 5,
     actionType: 'inquiry'
   },
   {
     id: 4,
-    name: "DFC - 4000 HybridDynamic Hybrid Rear Brake Pads",
+    name: "Turbochargers & Superchargers",
     sku: "ENG-TRB-004",
     price: 4500.00,
     image: "https://images.unsplash.com/photo-1619642751034-765dfdf7c58e?auto=format&fit=crop&q=80&w=800",
@@ -187,11 +256,12 @@ export const MOCK_PRODUCTS: Product[] = [
     model: "Patrol Y62",
     year: 2023,
     rating: 4.7,
+    reviewCount: 8,
     actionType: 'buy_now'
   },
   {
     id: 5,
-    name: "DFC - 4000 HybridDynamic Hybrid Rear Brake Pads",
+    name: "Ballistic Glass Panel B6",
     sku: "ARM-GLS-005",
     price: 2200.00,
     image: "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&q=80&w=800",
@@ -205,11 +275,12 @@ export const MOCK_PRODUCTS: Product[] = [
     model: "Hilux",
     year: 2022,
     rating: 5.0,
+    reviewCount: 2,
     actionType: 'inquiry'
   },
   {
     id: 6,
-    name: "DFC - 4000 HybridDynamic Hybrid Rear Brake Pads",
+    name: "Fuel Pumps, Injectors & Rails",
     sku: "ENG-FUL-006",
     price: 850.00,
     image: "https://images.unsplash.com/photo-1606577924004-79d2a2971e38?auto=format&fit=crop&q=80&w=800",
@@ -223,78 +294,7 @@ export const MOCK_PRODUCTS: Product[] = [
     model: "Universal",
     year: 2024,
     rating: 4.6,
-    actionType: 'buy_now'
-  },
-  {
-    id: 7,
-    name: "DFC - 4000 HybridDynamic Hybrid Rear Brake Pads",
-    sku: "ENG-FUL-007",
-    price: 850.00,
-    image: "https://images.unsplash.com/photo-1606577924004-79d2a2971e38?auto=format&fit=crop&q=80&w=800",
-    category: "Core Vehicle Systems",
-    department: "Fuel System",
-    description: "High-flow fuel delivery components.",
-    condition: 'new',
-    stock: 40,
-    vendor: "FuelFlow",
-    make: "Universal",
-    model: "Universal",
-    year: 2024,
-    rating: 4.6,
-    actionType: 'buy_now'
-  },
-  {
-    id: 8,
-    name: "DFC - 4000 HybridDynamic Hybrid Rear Brake Pads",
-    sku: "ENG-FUL-008",
-    price: 850.00,
-    image: "https://images.unsplash.com/photo-1606577924004-79d2a2971e38?auto=format&fit=crop&q=80&w=800",
-    category: "Core Vehicle Systems",
-    department: "Fuel System",
-    description: "High-flow fuel delivery components.",
-    condition: 'new',
-    stock: 40,
-    vendor: "FuelFlow",
-    make: "Universal",
-    model: "Universal",
-    year: 2024,
-    rating: 4.6,
-    actionType: 'inquiry'
-  },
-  {
-    id: 9,
-    name: "DFC - 4000 HybridDynamic Hybrid Rear Brake Pads",
-    sku: "ENG-FUL-009",
-    price: 850.00,
-    image: "https://images.unsplash.com/photo-1606577924004-79d2a2971e38?auto=format&fit=crop&q=80&w=800",
-    category: "Core Vehicle Systems",
-    department: "Fuel System",
-    description: "High-flow fuel delivery components.",
-    condition: 'new',
-    stock: 40,
-    vendor: "FuelFlow",
-    make: "Universal",
-    model: "Universal",
-    year: 2024,
-    rating: 4.6,
-    actionType: 'buy_now'
-  },
-  {
-    id: 10,
-    name: "DFC - 4000 HybridDynamic Hybrid Rear Brake Pads",
-    sku: "ENG-FUL-010",
-    price: 850.00,
-    image: "https://images.unsplash.com/photo-1606577924004-79d2a2971e38?auto=format&fit=crop&q=80&w=800",
-    category: "Core Vehicle Systems",
-    department: "Fuel System",
-    description: "High-flow fuel delivery components.",
-    condition: 'new',
-    stock: 40,
-    vendor: "FuelFlow",
-    make: "Universal",
-    model: "Universal",
-    year: 2024,
-    rating: 4.6,
+    reviewCount: 15,
     actionType: 'buy_now'
   }
 ];
