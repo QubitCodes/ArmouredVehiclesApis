@@ -1,12 +1,23 @@
 // Mock Data and simulated API calls based on the SRS and API list
 // In a real app, these would be fetch calls to the backend
 
+export interface Review {
+  id: number;
+  user: string;
+  rating: number;
+  date: string;
+  comment: string;
+  verifiedPurchase: boolean;
+}
+
 export interface Product {
   id: number;
   name: string;
   sku: string;
   price: number | null; // Price can be null if not authenticated
+  originalPrice?: number;
   image: string;
+  gallery?: string[];
   category: string;
   department?: string;
   description: string;
@@ -17,6 +28,7 @@ export interface Product {
   model: string;
   year: number;
   rating?: number;
+  reviewCount?: number;
   attributes?: {
     surfaceType?: string;
     frictionalMaterial?: string;
@@ -24,6 +36,21 @@ export interface Product {
     brakeLubricantIncluded?: boolean;
     [key: string]: any;
   };
+  // New fields
+  features?: string[];
+  specifications?: Record<string, string>;
+  vehicleFitment?: Record<string, string[]>; // Brand -> Models
+  warranty?: {
+    period: string;
+    details: Record<string, string>;
+  };
+  sellerInfo?: {
+    name: string;
+    rating: number;
+    joinedDate: string;
+    responseRate: string;
+  };
+  reviews?: Review[];
 }
 
 export interface User {
@@ -99,10 +126,16 @@ export const MOCK_PRODUCTS: Product[] = [
     name: "Performance Brake Kit - Ceramic",
     sku: "BRK-001-CER",
     price: 450.00,
+    originalPrice: 520.00,
     image: "https://images.unsplash.com/photo-1600706432502-76b1e601a746?auto=format&fit=crop&q=80&w=800",
+    gallery: [
+      "https://images.unsplash.com/photo-1600706432502-76b1e601a746?auto=format&fit=crop&q=80&w=800",
+      "https://images.unsplash.com/photo-1486262715619-67b85e0b08d3?auto=format&fit=crop&q=80&w=800",
+      "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&q=80&w=800"
+    ],
     category: "Brakes",
     department: "Replacement Parts",
-    description: "High performance ceramic brake kit for extreme stopping power.",
+    description: "High performance ceramic brake kit for extreme stopping power. Designed for daily driving and track use, providing superior heat dissipation and reduced brake fade.",
     condition: 'new',
     stock: 15,
     vendor: "AutoStop Pro",
@@ -110,12 +143,49 @@ export const MOCK_PRODUCTS: Product[] = [
     model: "Camry",
     year: 2022,
     rating: 4.8,
+    reviewCount: 124,
     attributes: {
       surfaceType: "Slotted",
       frictionalMaterial: "Ceramic",
       abutmentClipsIncluded: true,
       brakeLubricantIncluded: true
-    }
+    },
+    features: [
+      "Low dust ceramic formula",
+      "Noise-free braking performance",
+      "Extended rotor life",
+      "Easy installation with included hardware",
+      "Thermal scorched for fast break-in"
+    ],
+    specifications: {
+      "Position": "Front & Rear",
+      "Pad Material": "Ceramic",
+      "Rotor Design": "Drilled & Slotted",
+      "Included Hardware": "Yes",
+      "Weight": "45 lbs"
+    },
+    vehicleFitment: {
+      "Toyota": ["Camry (2018-2023)", "Avalon (2019-2022)", "RAV4 (2019-2023)"],
+      "Lexus": ["ES350 (2019-2023)", "NX300 (2018-2021)"]
+    },
+    warranty: {
+      period: "3 Years / 36,000 Miles",
+      details: {
+        "Coverage": "Defects in material and workmanship",
+        "Exclusions": "Normal wear and tear, improper installation",
+        "Claim Process": "Contact vendor support with proof of purchase"
+      }
+    },
+    sellerInfo: {
+      name: "AutoStop Pro",
+      rating: 4.9,
+      joinedDate: "2020",
+      responseRate: "98%"
+    },
+    reviews: [
+      { id: 1, user: "Mike T.", rating: 5, date: "2024-01-15", comment: "Excellent stopping power compared to OEM.", verifiedPurchase: true },
+      { id: 2, user: "Sarah L.", rating: 4, date: "2023-12-20", comment: "Great pads, but installation instructions were vague.", verifiedPurchase: true }
+    ]
   },
   {
     id: 2,
@@ -132,7 +202,11 @@ export const MOCK_PRODUCTS: Product[] = [
     make: "Honda",
     model: "Civic",
     year: 2021,
-    rating: 4.5
+    rating: 4.5,
+    reviewCount: 56,
+    features: ["Plug & Play", "6000K Color Temp", "50,000 Hour Life"],
+    specifications: { "Bulb Type": "LED", "Voltage": "12V", "Color": "Cool White" },
+    vehicleFitment: { "Honda": ["Civic (2016-2021)", "Accord (2018-2022)"] }
   },
   {
     id: 3,
@@ -149,7 +223,8 @@ export const MOCK_PRODUCTS: Product[] = [
     make: "Universal",
     model: "Universal",
     year: 2024,
-    rating: 4.9
+    rating: 4.9,
+    reviewCount: 203
   },
   {
     id: 4,
@@ -254,11 +329,6 @@ export const api = {
   // Public / Common
   getProducts: async (filters?: any) => {
     await new Promise(resolve => setTimeout(resolve, 500)); // Simulate latency
-    
-    // Simulate unauthenticated user getting null prices randomly for demo purposes
-    // In real app, this would be based on actual auth state
-    // For now, we return as is, but specific page logic might mask it if needed
-    // Or we can assume the user is "guest" by default for this mock if we wanted
     return MOCK_PRODUCTS;
   },
   
@@ -279,6 +349,18 @@ export const api = {
     return MOCK_PRODUCTS.find(p => p.id === id);
   },
   
+  getSimilarProducts: async (productId: number) => {
+    await new Promise(resolve => setTimeout(resolve, 300));
+    // Return random 3 products excluding current
+    return MOCK_PRODUCTS.filter(p => p.id !== productId).slice(0, 3);
+  },
+
+  getRecommendedProducts: async (productId: number) => {
+    await new Promise(resolve => setTimeout(resolve, 300));
+    // Return random 3 products
+    return MOCK_PRODUCTS.slice(3, 6);
+  },
+
   getCategories: async () => {
     return MOCK_CATEGORIES;
   },
