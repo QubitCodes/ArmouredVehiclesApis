@@ -63,8 +63,10 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  // Seed database on startup
-  await seedDatabase();
+  // Seed database on startup only in development or when explicitly enabled
+  if (process.env.NODE_ENV !== "production" || process.env.SEED_ON_START === "1") {
+    await seedDatabase();
+  }
   
   // Setup Swagger documentation
   setupSwagger(app);
