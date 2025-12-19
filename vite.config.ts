@@ -1,9 +1,13 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 import { metaImagesPlugin } from "./vite-plugin-meta-images";
+
+// Load .env files so process.env values are available during config evaluation
+const env = loadEnv(process.env.NODE_ENV || "development", process.cwd(), "");
+process.env = { ...process.env, ...env };
 
 export default defineConfig({
   plugins: [
