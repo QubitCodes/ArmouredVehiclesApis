@@ -36,7 +36,8 @@ export default function LoginPage() {
 
       // Redirect based on user type
       if (data.user.userType === 'vendor') {
-        setLocation('/seller/dashboard');
+        // Redirect to supplier zone which will check onboarding status
+        setLocation('/vendor/supplier-zone');
       } else {
         setLocation('/account/profile');
       }

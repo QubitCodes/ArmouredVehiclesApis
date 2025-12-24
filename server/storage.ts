@@ -1,7 +1,14 @@
 // Integration: blueprint:javascript_database
 import { 
   users, products, categories, reviews, cartItems, orders, orderItems, authSessions,
-  refunds, refundItems, addresses, savedPaymentMethods, orderStatusHistory,
+  refunds, refundItems, addresses, savedPaymentMethods, orderStatusHistory, otpVerifications, userProfiles,
+  adminActionLogs, productMedia, productPricingTiers, productReviewNotes, platformSettings,
+  supportTickets, ticketMessages, ticketAttachments, vendorNotifications,
+  refNatureOfBusiness, refEndUseMarkets, refLicenseTypes, refCountries,
+  refVendorCategories, refCurrencies, refPaymentMethods, refFinancialInstitutions, refProofTypes, refVerificationMethods,
+  refProductSizes, refProductColors, refProductFeatures, refProductPerformance, 
+  refProductThickness, refProductMaterials, refDriveTypes, refDimensionUnits, 
+  refWeightUnits, refControlledItemTypes, refPricingTerms, refManufacturingSources,
   type User, type InsertUser,
   type Product, type InsertProduct,
   type Category, type InsertCategory,
@@ -14,10 +21,21 @@ import {
   type RefundItem, type InsertRefundItem,
   type Address, type InsertAddress,
   type SavedPaymentMethod, type InsertSavedPaymentMethod,
-  type OrderStatusHistory, type InsertOrderStatusHistory
+  type OrderStatusHistory, type InsertOrderStatusHistory,
+  type OtpVerification, type InsertOtpVerification,
+  type UserProfile, type InsertUserProfile,
+  type AdminActionLog, type InsertAdminActionLog,
+  type ProductMedia, type InsertProductMedia,
+  type ProductPricingTier, type InsertProductPricingTier,
+  type ProductReviewNote, type InsertProductReviewNote,
+  type PlatformSetting,
+  type SupportTicket, type InsertSupportTicket,
+  type TicketMessage, type InsertTicketMessage,
+  type TicketAttachment, type InsertTicketAttachment,
+  type VendorNotification, type InsertVendorNotification
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc, sql, or, ilike, isNull, inArray } from "drizzle-orm";
+import { eq, and, desc, sql, or, ilike, isNull, inArray, count, gte, lte, asc } from "drizzle-orm";
 
 export interface IStorage {
   // Users
@@ -25,6 +43,7 @@ export interface IStorage {
   getUserByEmail(email: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUserProfile(id: string, data: { name?: string; email?: string }): Promise<User | undefined>;
+  updateUserPassword(id: string, hashedPassword: string): Promise<User | undefined>;
 
   // Categories
   getCategories(): Promise<Category[]>;
@@ -109,6 +128,123 @@ export interface IStorage {
   updateSavedPayment(id: number, payment: Partial<InsertSavedPaymentMethod>): Promise<SavedPaymentMethod | undefined>;
   deleteSavedPayment(id: number): Promise<void>;
   setDefaultPayment(userId: string, paymentId: number): Promise<void>;
+
+  // OTP Verification
+  createOtpVerification(otp: InsertOtpVerification): Promise<OtpVerification>;
+  getOtpVerification(identifier: string, type: 'email' | 'phone', purpose: string): Promise<OtpVerification | undefined>;
+  incrementOtpAttempts(id: number): Promise<void>;
+  markOtpVerified(id: number): Promise<void>;
+  deleteExpiredOtps(): Promise<void>;
+  deleteOtpById(id: number): Promise<void>;
+
+  // User OTP-related
+  getUserByPhone(phone: string): Promise<User | undefined>;
+  getUserByUsername(username: string): Promise<User | undefined>;
+  getUserByFirebaseUid(uid: string): Promise<User | undefined>;
+  updateUserVerificationStatus(userId: string, field: 'emailVerified' | 'phoneVerified', value: boolean): Promise<User | undefined>;
+  updateUserPhone(userId: string, phone: string, countryCode: string): Promise<User | undefined>;
+  updateUserOnboardingStep(userId: string, step: number): Promise<User | undefined>;
+  
+  // User Profiles
+  getUserProfile(userId: string): Promise<UserProfile | undefined>;
+  createUserProfile(profile: InsertUserProfile): Promise<UserProfile>;
+  updateUserProfile(userId: string, data: Partial<InsertUserProfile>): Promise<UserProfile | undefined>;
+  updateUserFirebaseUid(userId: string, firebaseUid: string): Promise<User | undefined>;
+  
+  // Reference Data
+  getReferenceData(type: 'nature_of_business' | 'end_use_markets' | 'license_types' | 'countries' | 'vendorCategories' | 'currencies' | 'paymentMethods' | 'financialInstitutions' | 'proofTypes' | 'verificationMethods'): Promise<any[]>;
+
+  // ===== ADMIN OPERATIONS =====
+  
+  // Admin Dashboard Stats
+  getAdminDashboardStats(): Promise<{
+    totalSellers: number;
+    activeSellers: number;
+    pendingApprovals: number;
+    totalProducts: number;
+    totalOrders: number;
+    totalRevenue: number;
+    totalCustomers: number;
+    totalRefunds: number;
+  }>;
+  
+  // Seller Management
+  getAllSellers(filters?: {
+    status?: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+    sortBy?: string;
+    sortOrder?: 'asc' | 'desc';
+  }): Promise<{
+    sellers: (User & { userProfile?: UserProfile; stats?: { products: number; orders: number; revenue: number } })[];
+    total: number;
+    page: number;
+    limit: number;
+  }>;
+  
+  getSellerDetails(sellerId: string): Promise<(User & { 
+    userProfile?: UserProfile; 
+    stats: { products: number; orders: number; revenue: number; customers: number };
+    recentOrders: Order[];
+  }) | undefined>;
+  
+  updateSellerStatus(
+    sellerId: string, 
+    status: 'approved' | 'rejected' | 'pending_verification' | 'under_review',
+    adminId: string,
+    note?: string,
+    rejectionReason?: string
+  ): Promise<UserProfile | undefined>;
+  
+  suspendUser(userId: string, adminId: string, reason: string): Promise<User | undefined>;
+  activateUser(userId: string, adminId: string): Promise<User | undefined>;
+  
+  // Admin Action Logs
+  createAdminActionLog(log: InsertAdminActionLog): Promise<AdminActionLog>;
+  getAdminActionLogs(filters?: {
+    adminId?: string;
+    actionType?: string;
+    targetType?: string;
+    targetId?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<{ logs: (AdminActionLog & { admin: User })[]; total: number }>;
+  
+  // Admin Users
+  getAllAdmins(): Promise<User[]>;
+  createAdmin(user: InsertUser): Promise<User>;
+  
+  // ===== SUPPORT TICKETS =====
+  
+  // Customer Ticket Operations
+  createTicket(ticket: InsertSupportTicket, initialMessage: string): Promise<SupportTicket>;
+  getCustomerTickets(customerId: string, filters?: {
+    status?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<{ tickets: (SupportTicket & { order: Order; messagesCount: number })[]; total: number }>;
+  getTicketById(ticketId: string): Promise<(SupportTicket & { 
+    order: Order; 
+    customer: User;
+    assignedTo?: User;
+    messages: (TicketMessage & { sender: User; attachments: TicketAttachment[] })[];
+  }) | undefined>;
+  addTicketMessage(message: InsertTicketMessage): Promise<TicketMessage>;
+  addTicketAttachment(attachment: InsertTicketAttachment): Promise<TicketAttachment>;
+  
+  // Admin Ticket Operations
+  getAllTickets(filters?: {
+    status?: string;
+    priority?: string;
+    assignedToId?: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<{ tickets: (SupportTicket & { order: Order; customer: User; assignedTo?: User; messagesCount: number })[]; total: number }>;
+  assignTicket(ticketId: string, adminId: string): Promise<SupportTicket | undefined>;
+  updateTicketStatus(ticketId: string, status: string): Promise<SupportTicket | undefined>;
+  updateTicketPriority(ticketId: string, priority: string): Promise<SupportTicket | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -140,6 +276,15 @@ export class DatabaseStorage implements IStorage {
     return updatedUser || undefined;
   }
 
+  async updateUserPassword(id: string, hashedPassword: string): Promise<User | undefined> {
+    const [updatedUser] = await db
+      .update(users)
+      .set({ password: hashedPassword })
+      .where(eq(users.id, id))
+      .returning();
+    return updatedUser || undefined;
+  }
+
   // Categories
   async getCategories(): Promise<Category[]> {
     return await db.select().from(categories);
@@ -148,6 +293,15 @@ export class DatabaseStorage implements IStorage {
   async createCategory(category: InsertCategory): Promise<Category> {
     const [newCategory] = await db.insert(categories).values(category as any).returning();
     return newCategory;
+  }
+
+  async validateCategoryIds(categoryIds: number[]): Promise<number[]> {
+    const existingCategories = await db
+      .select({ id: categories.id })
+      .from(categories)
+      .where(inArray(categories.id, categoryIds));
+    
+    return existingCategories.map(cat => cat.id);
   }
 
   // Products
@@ -876,6 +1030,1809 @@ export class DatabaseStorage implements IStorage {
       .update(savedPaymentMethods)
       .set({ isDefault: true, updatedAt: new Date() })
       .where(eq(savedPaymentMethods.id, paymentId));
+  }
+
+  // OTP Verification
+  async createOtpVerification(otp: InsertOtpVerification): Promise<OtpVerification> {
+    const [newOtp] = await db.insert(otpVerifications).values(otp as any).returning();
+    return newOtp;
+  }
+
+  async getOtpVerification(identifier: string, type: 'email' | 'phone', purpose: string): Promise<OtpVerification | undefined> {
+    const [otp] = await db
+      .select()
+      .from(otpVerifications)
+      .where(and(
+        eq(otpVerifications.identifier, identifier),
+        eq(otpVerifications.type, type),
+        eq(otpVerifications.purpose, purpose as any),
+        eq(otpVerifications.verified, false)
+      ))
+      .orderBy(desc(otpVerifications.createdAt))
+      .limit(1);
+    return otp || undefined;
+  }
+
+  async incrementOtpAttempts(id: number): Promise<void> {
+    await db
+      .update(otpVerifications)
+      .set({ attempts: sql`${otpVerifications.attempts} + 1` })
+      .where(eq(otpVerifications.id, id));
+  }
+
+  async markOtpVerified(id: number): Promise<void> {
+    await db
+      .update(otpVerifications)
+      .set({ verified: true })
+      .where(eq(otpVerifications.id, id));
+  }
+
+  async deleteExpiredOtps(): Promise<void> {
+    await db
+      .delete(otpVerifications)
+      .where(sql`${otpVerifications.expiresAt} < NOW()`);
+  }
+
+  async deleteOtpById(id: number): Promise<void> {
+    await db
+      .delete(otpVerifications)
+      .where(eq(otpVerifications.id, id));
+  }
+
+  // User OTP-related
+  async getUserByPhone(phone: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.phone, phone));
+    return user || undefined;
+  }
+
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user || undefined;
+  }
+
+  async getUserByFirebaseUid(uid: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.firebaseUid, uid));
+    return user || undefined;
+  }
+
+  async updateUserVerificationStatus(userId: string, field: 'emailVerified' | 'phoneVerified', value: boolean): Promise<User | undefined> {
+    const [updatedUser] = await db
+      .update(users)
+      .set({ [field]: value })
+      .where(eq(users.id, userId))
+      .returning();
+    return updatedUser || undefined;
+  }
+
+  async updateUserPhone(userId: string, phone: string, countryCode: string): Promise<User | undefined> {
+    const [updatedUser] = await db
+      .update(users)
+      .set({ phone, countryCode })
+      .where(eq(users.id, userId))
+      .returning();
+    return updatedUser || undefined;
+  }
+
+  async updateUserOnboardingStep(userId: string, step: number): Promise<User | undefined> {
+    const [updatedUser] = await db
+      .update(users)
+      .set({ onboardingStep: step })
+      .where(eq(users.id, userId))
+      .returning();
+    return updatedUser || undefined;
+  }
+
+  async updateUserFirebaseUid(userId: string, firebaseUid: string): Promise<User | undefined> {
+    const [updatedUser] = await db
+      .update(users)
+      .set({ firebaseUid })
+      .where(eq(users.id, userId))
+      .returning();
+    return updatedUser || undefined;
+  }
+
+  async getUserProfile(userId: string): Promise<UserProfile | undefined> {
+    const [profile] = await db
+      .select()
+      .from(userProfiles)
+      .where(eq(userProfiles.userId, userId));
+    return profile || undefined;
+  }
+
+  async createUserProfile(profile: InsertUserProfile): Promise<UserProfile> {
+    const [newProfile] = await db
+      .insert(userProfiles)
+      .values(profile)
+      .returning();
+    return newProfile;
+  }
+
+  async updateUserProfile(userId: string, data: Partial<InsertUserProfile>): Promise<UserProfile | undefined> {
+    const [updatedProfile] = await db
+      .update(userProfiles)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(userProfiles.userId, userId))
+      .returning();
+    return updatedProfile || undefined;
+  }
+
+  async getReferenceData(type: 'nature_of_business' | 'end_use_markets' | 'license_types' | 'countries' | 'vendorCategories' | 'currencies' | 'paymentMethods' | 'financialInstitutions' | 'proofTypes' | 'verificationMethods'): Promise<any[]> {
+    switch (type) {
+      case 'nature_of_business':
+        return await db.select().from(refNatureOfBusiness).where(eq(refNatureOfBusiness.isActive, true)).orderBy(refNatureOfBusiness.displayOrder);
+      case 'end_use_markets':
+        return await db.select().from(refEndUseMarkets).where(eq(refEndUseMarkets.isActive, true)).orderBy(refEndUseMarkets.displayOrder);
+      case 'license_types':
+        return await db.select().from(refLicenseTypes).where(eq(refLicenseTypes.isActive, true)).orderBy(refLicenseTypes.displayOrder);
+      case 'countries':
+        return await db.select().from(refCountries).where(eq(refCountries.isActive, true)).orderBy(refCountries.displayOrder);
+      case 'vendorCategories':
+        return await db.select().from(refVendorCategories).where(eq(refVendorCategories.isActive, true)).orderBy(refVendorCategories.displayOrder);
+      case 'currencies':
+        return await db.select().from(refCurrencies).where(eq(refCurrencies.isActive, true)).orderBy(refCurrencies.displayOrder);
+      case 'paymentMethods':
+        return await db.select().from(refPaymentMethods).where(eq(refPaymentMethods.isActive, true)).orderBy(refPaymentMethods.displayOrder);
+      case 'financialInstitutions':
+        return await db.select().from(refFinancialInstitutions).where(eq(refFinancialInstitutions.isActive, true)).orderBy(refFinancialInstitutions.displayOrder);
+      case 'proofTypes':
+        return await db.select().from(refProofTypes).where(eq(refProofTypes.isActive, true)).orderBy(refProofTypes.displayOrder);
+      case 'verificationMethods':
+        return await db.select().from(refVerificationMethods).where(eq(refVerificationMethods.isActive, true)).orderBy(refVerificationMethods.displayOrder);
+      default:
+        return [];
+    }
+  }
+
+  // ===== ADMIN OPERATIONS =====
+
+  async getAdminDashboardStats(): Promise<{
+    totalSellers: number;
+    activeSellers: number;
+    pendingApprovals: number;
+    totalProducts: number;
+    totalOrders: number;
+    totalRevenue: number;
+    totalCustomers: number;
+    totalRefunds: number;
+  }> {
+    // Total sellers (vendors)
+    const allSellers = await db.select().from(users).where(eq(users.userType, 'vendor'));
+    const totalSellers = allSellers.length;
+    const activeSellers = allSellers.filter(s => s.isActive !== false).length;
+    
+    // Pending approvals
+    const pendingProfiles = await db.select().from(userProfiles)
+      .where(or(
+        eq(userProfiles.onboardingStatus, 'pending_verification'),
+        eq(userProfiles.onboardingStatus, 'under_review')
+      ));
+    const pendingApprovals = pendingProfiles.length;
+    
+    // Total products
+    const allProducts = await db.select().from(products);
+    const totalProducts = allProducts.length;
+    
+    // Total orders and revenue
+    const allOrders = await db.select().from(orders);
+    const totalOrders = allOrders.length;
+    const totalRevenue = allOrders.reduce((sum, o) => sum + parseFloat(o.total.toString()), 0);
+    
+    // Total customers
+    const allCustomers = await db.select().from(users).where(eq(users.userType, 'customer'));
+    const totalCustomers = allCustomers.length;
+    
+    // Total refunds
+    const allRefunds = await db.select().from(refunds);
+    const totalRefunds = allRefunds.length;
+    
+    return {
+      totalSellers,
+      activeSellers,
+      pendingApprovals,
+      totalProducts,
+      totalOrders,
+      totalRevenue,
+      totalCustomers,
+      totalRefunds,
+    };
+  }
+
+  async getAllSellers(filters?: {
+    status?: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+    sortBy?: string;
+    sortOrder?: 'asc' | 'desc';
+  }): Promise<{
+    sellers: (User & { userProfile?: UserProfile; stats?: { products: number; orders: number; revenue: number } })[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
+    const page = filters?.page || 1;
+    const limit = filters?.limit || 20;
+    const offset = (page - 1) * limit;
+    
+    // Get all vendors
+    let conditions: any[] = [eq(users.userType, 'vendor')];
+    
+    if (filters?.search) {
+      conditions.push(
+        or(
+          ilike(users.name, `%${filters.search}%`),
+          ilike(users.email, `%${filters.search}%`),
+          ilike(users.username, `%${filters.search}%`)
+        )
+      );
+    }
+    
+    const allVendors = await db.select().from(users)
+      .where(and(...conditions))
+      .orderBy(filters?.sortOrder === 'asc' ? asc(users.createdAt) : desc(users.createdAt))
+      .limit(limit)
+      .offset(offset);
+    
+    // Get total count
+    const totalResult = await db.select({ count: count() }).from(users)
+      .where(and(...conditions));
+    const total = totalResult[0]?.count || 0;
+    
+    // Get vendor profiles and stats for each seller
+    const sellersWithDetails = await Promise.all(
+      allVendors.map(async (seller) => {
+        const [profile] = await db.select().from(userProfiles)
+          .where(eq(userProfiles.userId, seller.id));
+        
+        // Filter by status if provided
+        if (filters?.status && profile?.onboardingStatus !== filters.status) {
+          return null;
+        }
+        
+        // Get stats
+        const vendorProducts = await db.select().from(products)
+          .where(eq(products.vendorId, seller.id));
+        const productIds = vendorProducts.map(p => p.id);
+        
+        let orderCount = 0;
+        let revenue = 0;
+        
+        if (productIds.length > 0) {
+          const vendorOrderItems = await db.select().from(orderItems)
+            .where(inArray(orderItems.productId, productIds));
+          
+          const uniqueOrderIds = new Set(vendorOrderItems.map(item => item.orderId));
+          orderCount = uniqueOrderIds.size;
+          revenue = vendorOrderItems.reduce((sum, item) => 
+            sum + parseFloat(item.price.toString()) * item.quantity, 0);
+        }
+        
+        return {
+          ...seller,
+          userProfile: profile || undefined,
+          stats: {
+            products: vendorProducts.length,
+            orders: orderCount,
+            revenue,
+          },
+        };
+      })
+    );
+    
+    // Filter out nulls from status filtering
+    const filteredSellers = sellersWithDetails.filter(Boolean) as any[];
+    
+    return {
+      sellers: filteredSellers,
+      total,
+      page,
+      limit,
+    };
+  }
+
+  async getSellerDetails(sellerId: string): Promise<(User & { 
+    userProfile?: UserProfile; 
+    stats: { products: number; orders: number; revenue: number; customers: number };
+    recentOrders: Order[];
+  }) | undefined> {
+    const [seller] = await db.select().from(users)
+      .where(and(eq(users.id, sellerId), eq(users.userType, 'vendor')));
+    
+    if (!seller) return undefined;
+    
+    const [profile] = await db.select().from(userProfiles)
+      .where(eq(userProfiles.userId, sellerId));
+    
+    // Get stats
+    const vendorProducts = await db.select().from(products)
+      .where(eq(products.vendorId, sellerId));
+    const productIds = vendorProducts.map(p => p.id);
+    
+    let orderCount = 0;
+    let revenue = 0;
+    let customerIds = new Set<string>();
+    let recentOrders: Order[] = [];
+    
+    if (productIds.length > 0) {
+      const vendorOrderItems = await db.select().from(orderItems)
+        .where(inArray(orderItems.productId, productIds));
+      
+      const uniqueOrderIds = [...new Set(vendorOrderItems.map(item => item.orderId))];
+      orderCount = uniqueOrderIds.length;
+      revenue = vendorOrderItems.reduce((sum, item) => 
+        sum + parseFloat(item.price.toString()) * item.quantity, 0);
+      
+      if (uniqueOrderIds.length > 0) {
+        const relatedOrders = await db.select().from(orders)
+          .where(inArray(orders.id, uniqueOrderIds))
+          .orderBy(desc(orders.createdAt))
+          .limit(10);
+        
+        recentOrders = relatedOrders;
+        relatedOrders.forEach(o => customerIds.add(o.userId));
+      }
+    }
+    
+    return {
+      ...seller,
+      userProfile: profile || undefined,
+      stats: {
+        products: vendorProducts.length,
+        orders: orderCount,
+        revenue,
+        customers: customerIds.size,
+      },
+      recentOrders,
+    };
+  }
+
+  async updateSellerStatus(
+    sellerId: string, 
+    status: 'approved' | 'rejected' | 'pending_verification' | 'under_review',
+    adminId: string,
+    note?: string,
+    rejectionReason?: string
+  ): Promise<UserProfile | undefined> {
+    const [updated] = await db.update(userProfiles)
+      .set({
+        onboardingStatus: status,
+        reviewedBy: adminId,
+        reviewedAt: new Date(),
+        reviewNote: note || null,
+        rejectionReason: status === 'rejected' ? rejectionReason : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(userProfiles.userId, sellerId))
+      .returning();
+    
+    return updated || undefined;
+  }
+
+  async suspendUser(userId: string, adminId: string, reason: string): Promise<User | undefined> {
+    const [updated] = await db.update(users)
+      .set({
+        isActive: false,
+        suspendedAt: new Date(),
+        suspendedBy: adminId,
+        suspendedReason: reason,
+      })
+      .where(eq(users.id, userId))
+      .returning();
+    
+    return updated || undefined;
+  }
+
+  async activateUser(userId: string, adminId: string): Promise<User | undefined> {
+    const [updated] = await db.update(users)
+      .set({
+        isActive: true,
+        suspendedAt: null,
+        suspendedBy: null,
+        suspendedReason: null,
+      })
+      .where(eq(users.id, userId))
+      .returning();
+    
+    return updated || undefined;
+  }
+
+  async createAdminActionLog(log: InsertAdminActionLog): Promise<AdminActionLog> {
+    const [newLog] = await db.insert(adminActionLogs).values(log).returning();
+    return newLog;
+  }
+
+  async getAdminActionLogs(filters?: {
+    adminId?: string;
+    actionType?: string;
+    targetType?: string;
+    targetId?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<{ logs: (AdminActionLog & { admin: User })[]; total: number }> {
+    const page = filters?.page || 1;
+    const limit = filters?.limit || 50;
+    const offset = (page - 1) * limit;
+    
+    let conditions: any[] = [];
+    
+    if (filters?.adminId) {
+      conditions.push(eq(adminActionLogs.adminId, filters.adminId));
+    }
+    if (filters?.actionType) {
+      conditions.push(eq(adminActionLogs.actionType, filters.actionType as any));
+    }
+    if (filters?.targetType) {
+      conditions.push(eq(adminActionLogs.targetType, filters.targetType));
+    }
+    if (filters?.targetId) {
+      conditions.push(eq(adminActionLogs.targetId, filters.targetId));
+    }
+    
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    
+    const logs = await db.select()
+      .from(adminActionLogs)
+      .innerJoin(users, eq(adminActionLogs.adminId, users.id))
+      .where(whereClause)
+      .orderBy(desc(adminActionLogs.createdAt))
+      .limit(limit)
+      .offset(offset);
+    
+    const totalResult = await db.select({ count: count() })
+      .from(adminActionLogs)
+      .where(whereClause);
+    
+    return {
+      logs: logs.map(row => ({
+        ...row.admin_action_logs,
+        admin: row.users,
+      })),
+      total: totalResult[0]?.count || 0,
+    };
+  }
+
+  async getAllAdmins(): Promise<User[]> {
+    return await db.select().from(users)
+      .where(or(eq(users.userType, 'admin'), eq(users.userType, 'super_admin')))
+      .orderBy(desc(users.createdAt));
+  }
+
+  async createAdmin(user: InsertUser): Promise<User> {
+    const [newAdmin] = await db.insert(users).values({
+      ...user,
+      userType: 'admin',
+    }).returning();
+    return newAdmin;
+  }
+
+  // Product Reference Data APIs
+  async getProductReferenceData(type: string): Promise<any[]> {
+    switch (type) {
+      case 'sizes':
+        return await db.select().from(refProductSizes).where(eq(refProductSizes.isActive, true)).orderBy(asc(refProductSizes.displayOrder));
+      case 'colors':
+        return await db.select().from(refProductColors).where(eq(refProductColors.isActive, true)).orderBy(asc(refProductColors.displayOrder));
+      case 'features':
+        return await db.select().from(refProductFeatures).where(eq(refProductFeatures.isActive, true)).orderBy(asc(refProductFeatures.displayOrder));
+      case 'performance':
+        return await db.select().from(refProductPerformance).where(eq(refProductPerformance.isActive, true)).orderBy(asc(refProductPerformance.displayOrder));
+      case 'thickness':
+        return await db.select().from(refProductThickness).where(eq(refProductThickness.isActive, true)).orderBy(asc(refProductThickness.displayOrder));
+      case 'materials':
+        return await db.select().from(refProductMaterials).where(eq(refProductMaterials.isActive, true)).orderBy(asc(refProductMaterials.displayOrder));
+      case 'driveTypes':
+        return await db.select().from(refDriveTypes).where(eq(refDriveTypes.isActive, true)).orderBy(asc(refDriveTypes.displayOrder));
+      case 'dimensionUnits':
+        return await db.select().from(refDimensionUnits).where(eq(refDimensionUnits.isActive, true)).orderBy(asc(refDimensionUnits.displayOrder));
+      case 'weightUnits':
+        return await db.select().from(refWeightUnits).where(eq(refWeightUnits.isActive, true)).orderBy(asc(refWeightUnits.displayOrder));
+      case 'controlledItemTypes':
+        return await db.select().from(refControlledItemTypes).where(eq(refControlledItemTypes.isActive, true)).orderBy(asc(refControlledItemTypes.displayOrder));
+      case 'pricingTerms':
+        return await db.select().from(refPricingTerms).where(eq(refPricingTerms.isActive, true)).orderBy(asc(refPricingTerms.displayOrder));
+      case 'manufacturingSources':
+        return await db.select().from(refManufacturingSources).where(eq(refManufacturingSources.isActive, true)).orderBy(asc(refManufacturingSources.displayOrder));
+      default:
+        return [];
+    }
+  }
+
+  // Vendor Product Management
+  async createProductDraft(vendorId: string): Promise<Product> {
+    const [product] = await db.insert(products).values({
+      vendorId,
+      status: 'draft' as any,
+    }).returning();
+    return product;
+  }
+
+  async getVendorProducts(vendorId: string, filters?: {
+    status?: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<{ products: (Product & { media: ProductMedia[]; pricingTiers: ProductPricingTier[] })[]; total: number }> {
+    const page = filters?.page || 1;
+    const limit = filters?.limit || 20;
+    const offset = (page - 1) * limit;
+    
+    let conditions: any[] = [eq(products.vendorId, vendorId)];
+    
+    if (filters?.status) {
+      conditions.push(eq(products.status, filters.status as any));
+    }
+    if (filters?.search) {
+      conditions.push(or(
+        ilike(products.name, `%${filters.search}%`),
+        ilike(products.sku, `%${filters.search}%`)
+      ));
+    }
+    
+    const whereClause = and(...conditions);
+    
+    const productsList = await db.select()
+      .from(products)
+      .where(whereClause)
+      .orderBy(desc(products.createdAt))
+      .limit(limit)
+      .offset(offset);
+    
+    const totalResult = await db.select({ count: count() })
+      .from(products)
+      .where(whereClause);
+    
+    // Get media and pricing tiers for each product
+    const productsWithRelations = await Promise.all(
+      productsList.map(async (product) => {
+        const media = await db.select().from(productMedia)
+          .where(eq(productMedia.productId, product.id))
+          .orderBy(asc(productMedia.displayOrder));
+        
+        const pricingTiers = await db.select().from(productPricingTiers)
+          .where(eq(productPricingTiers.productId, product.id))
+          .orderBy(asc(productPricingTiers.minQuantity));
+        
+        return { ...product, media, pricingTiers };
+      })
+    );
+    
+    return {
+      products: productsWithRelations,
+      total: totalResult[0]?.count || 0,
+    };
+  }
+
+  async getProductWithDetails(productId: number): Promise<(Product & { media: ProductMedia[]; pricingTiers: ProductPricingTier[]; vendor?: User }) | undefined> {
+    const [product] = await db.select()
+      .from(products)
+      .where(eq(products.id, productId));
+    
+    if (!product) return undefined;
+    
+    const media = await db.select().from(productMedia)
+      .where(eq(productMedia.productId, productId))
+      .orderBy(asc(productMedia.displayOrder));
+    
+    const pricingTiers = await db.select().from(productPricingTiers)
+      .where(eq(productPricingTiers.productId, productId))
+      .orderBy(asc(productPricingTiers.minQuantity));
+    
+    const [vendor] = product.vendorId 
+      ? await db.select().from(users).where(eq(users.id, product.vendorId))
+      : [undefined];
+    
+    return { ...product, media, pricingTiers, vendor };
+  }
+
+  async updateProductData(productId: number, data: Partial<InsertProduct>): Promise<Product | undefined> {
+    const [updated] = await db.update(products)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(products.id, productId))
+      .returning();
+    return updated || undefined;
+  }
+
+  async submitProductForReview(productId: number): Promise<Product | undefined> {
+    const [updated] = await db.update(products)
+      .set({ 
+        status: 'pending_review' as any, 
+        submissionDate: new Date(),
+        updatedAt: new Date() 
+      })
+      .where(eq(products.id, productId))
+      .returning();
+    return updated || undefined;
+  }
+
+  // Product Media Management
+  async addProductMedia(media: InsertProductMedia): Promise<ProductMedia> {
+    const [newMedia] = await db.insert(productMedia).values(media).returning();
+    return newMedia;
+  }
+
+  async updateProductMedia(mediaId: number, data: Partial<InsertProductMedia>): Promise<ProductMedia | undefined> {
+    const [updated] = await db.update(productMedia)
+      .set(data)
+      .where(eq(productMedia.id, mediaId))
+      .returning();
+    return updated || undefined;
+  }
+
+  async deleteProductMedia(mediaId: number): Promise<void> {
+    await db.delete(productMedia).where(eq(productMedia.id, mediaId));
+  }
+
+  async setProductCoverImage(productId: number, mediaId: number): Promise<void> {
+    // Clear all cover flags for this product
+    await db.update(productMedia)
+      .set({ isCover: false })
+      .where(eq(productMedia.productId, productId));
+    
+    // Set the new cover
+    await db.update(productMedia)
+      .set({ isCover: true })
+      .where(eq(productMedia.id, mediaId));
+  }
+
+  // Product Pricing Tiers Management
+  async setProductPricingTiers(productId: number, tiers: InsertProductPricingTier[]): Promise<ProductPricingTier[]> {
+    // Delete existing tiers
+    await db.delete(productPricingTiers).where(eq(productPricingTiers.productId, productId));
+    
+    if (tiers.length === 0) return [];
+    
+    // Insert new tiers
+    const newTiers = await db.insert(productPricingTiers).values(tiers).returning();
+    return newTiers;
+  }
+
+  // Admin Product Management
+  async getProductsForAdmin(filters?: {
+    status?: string;
+    vendorId?: string;
+    search?: string;
+    isFeatured?: boolean;
+    page?: number;
+    limit?: number;
+  }): Promise<{ products: (Product & { vendor: User })[]; total: number }> {
+    const page = filters?.page || 1;
+    const limit = filters?.limit || 20;
+    const offset = (page - 1) * limit;
+    
+    let conditions: any[] = [];
+    
+    if (filters?.status) {
+      conditions.push(eq(products.status, filters.status as any));
+    }
+    if (filters?.vendorId) {
+      conditions.push(eq(products.vendorId, filters.vendorId));
+    }
+    if (filters?.search) {
+      conditions.push(or(
+        ilike(products.name, `%${filters.search}%`),
+        ilike(products.sku, `%${filters.search}%`)
+      ));
+    }
+    if (filters?.isFeatured !== undefined) {
+      conditions.push(eq(products.isFeatured, filters.isFeatured));
+    }
+    
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    
+    const productsList = await db.select()
+      .from(products)
+      .innerJoin(users, eq(products.vendorId, users.id))
+      .where(whereClause)
+      .orderBy(desc(products.createdAt))
+      .limit(limit)
+      .offset(offset);
+    
+    const totalResult = await db.select({ count: count() })
+      .from(products)
+      .where(whereClause);
+    
+    return {
+      products: productsList.map(row => ({
+        ...row.products,
+        vendor: row.users,
+      })),
+      total: totalResult[0]?.count || 0,
+    };
+  }
+
+  async approveProduct(productId: number, adminId: string, note?: string): Promise<Product | undefined> {
+    const [updated] = await db.update(products)
+      .set({
+        status: 'approved' as any,
+        reviewedBy: adminId,
+        reviewedAt: new Date(),
+        reviewNote: note || null,
+        rejectionReason: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(products.id, productId))
+      .returning();
+    return updated || undefined;
+  }
+
+  async rejectProduct(productId: number, adminId: string, reason: string): Promise<Product | undefined> {
+    const [updated] = await db.update(products)
+      .set({
+        status: 'rejected' as any,
+        reviewedBy: adminId,
+        reviewedAt: new Date(),
+        rejectionReason: reason,
+        updatedAt: new Date(),
+      })
+      .where(eq(products.id, productId))
+      .returning();
+    return updated || undefined;
+  }
+
+  async suspendProduct(productId: number, adminId: string, reason: string): Promise<Product | undefined> {
+    const [updated] = await db.update(products)
+      .set({
+        status: 'suspended' as any,
+        reviewedBy: adminId,
+        reviewedAt: new Date(),
+        rejectionReason: reason,
+        updatedAt: new Date(),
+      })
+      .where(eq(products.id, productId))
+      .returning();
+    return updated || undefined;
+  }
+
+  async featureProduct(productId: number, featured: boolean): Promise<Product | undefined> {
+    const [updated] = await db.update(products)
+      .set({ isFeatured: featured, updatedAt: new Date() })
+      .where(eq(products.id, productId))
+      .returning();
+    return updated || undefined;
+  }
+
+  // Product Review Notes (admin feedback to sellers)
+  async addProductReviewNote(note: InsertProductReviewNote): Promise<ProductReviewNote> {
+    const [newNote] = await db.insert(productReviewNotes).values(note).returning();
+    return newNote;
+  }
+
+  async getProductReviewNotes(productId: number, sellerOnly: boolean = false): Promise<(ProductReviewNote & { admin: { id: string; name: string } })[]> {
+    let query = db
+      .select({
+        id: productReviewNotes.id,
+        productId: productReviewNotes.productId,
+        adminId: productReviewNotes.adminId,
+        message: productReviewNotes.message,
+        requiresChanges: productReviewNotes.requiresChanges,
+        isVisibleToSeller: productReviewNotes.isVisibleToSeller,
+        createdAt: productReviewNotes.createdAt,
+        admin: {
+          id: users.id,
+          name: users.name,
+        },
+      })
+      .from(productReviewNotes)
+      .innerJoin(users, eq(productReviewNotes.adminId, users.id))
+      .where(
+        sellerOnly 
+          ? and(eq(productReviewNotes.productId, productId), eq(productReviewNotes.isVisibleToSeller, true))
+          : eq(productReviewNotes.productId, productId)
+      )
+      .orderBy(desc(productReviewNotes.createdAt));
+    
+    return await query;
+  }
+
+  // Vendor Onboarding Management (Admin)
+  async getVendorsForAdmin(filters: {
+    status?: string;
+    search?: string;
+    country?: string;
+    category?: string;
+    page?: number;
+    limit?: number;
+  } = {}): Promise<{ vendors: (UserProfile & { user: User })[], total: number, page: number, limit: number }> {
+    const page = filters.page || 1;
+    const limit = filters.limit || 20;
+    const offset = (page - 1) * limit;
+
+    let conditions: any[] = [];
+
+    // By default, only show vendors who have completed onboarding (submitted for approval)
+    if (filters.status) {
+      conditions.push(eq(userProfiles.onboardingStatus, filters.status as any));
+    } else {
+      // Default: show under_review vendors (those who submitted for approval)
+      conditions.push(eq(userProfiles.onboardingStatus, 'under_review'));
+    }
+
+    if (filters.search) {
+      conditions.push(
+        or(
+          ilike(userProfiles.companyName, `%${filters.search}%`),
+          ilike(userProfiles.tradeBrandName, `%${filters.search}%`),
+          ilike(userProfiles.companyEmail, `%${filters.search}%`),
+          ilike(users.name, `%${filters.search}%`),
+          ilike(users.email, `%${filters.search}%`)
+        )
+      );
+    }
+
+    if (filters.country) {
+      conditions.push(eq(userProfiles.country, filters.country));
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const [countResult] = await db
+      .select({ count: count() })
+      .from(userProfiles)
+      .innerJoin(users, eq(userProfiles.userId, users.id))
+      .where(whereClause);
+
+    const vendorsList = await db
+      .select({
+        userProfile: userProfiles,
+        user: users,
+      })
+      .from(userProfiles)
+      .innerJoin(users, eq(userProfiles.userId, users.id))
+      .where(whereClause)
+      .orderBy(desc(userProfiles.submittedAt), desc(userProfiles.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    const vendors = vendorsList.map(v => ({
+      ...v.userProfile,
+      user: v.user,
+    }));
+
+    return {
+      vendors,
+      total: countResult?.count || 0,
+      page,
+      limit,
+    };
+  }
+
+  async getUserProfileByUserId(userId: string): Promise<UserProfile | undefined> {
+    const [profile] = await db.select().from(userProfiles).where(eq(userProfiles.userId, userId));
+    return profile;
+  }
+
+  async approveVendorOnboarding(userId: string, adminId: string, note?: string): Promise<UserProfile | undefined> {
+    const [updated] = await db.update(userProfiles)
+      .set({
+        onboardingStatus: 'approved',
+        reviewedBy: adminId,
+        reviewedAt: new Date(),
+        reviewNote: note,
+        updatedAt: new Date(),
+      })
+      .where(eq(userProfiles.userId, userId))
+      .returning();
+
+    // Also activate the user
+    if (updated) {
+      await db.update(users)
+        .set({ isActive: true })
+        .where(eq(users.id, userId));
+    }
+
+    return updated || undefined;
+  }
+
+  async rejectVendorOnboarding(userId: string, adminId: string, reason: string, note?: string): Promise<UserProfile | undefined> {
+    const [updated] = await db.update(userProfiles)
+      .set({
+        onboardingStatus: 'rejected',
+        reviewedBy: adminId,
+        reviewedAt: new Date(),
+        reviewNote: note,
+        rejectionReason: reason,
+        updatedAt: new Date(),
+      })
+      .where(eq(userProfiles.userId, userId))
+      .returning();
+
+    return updated || undefined;
+  }
+
+  async suspendVendor(userId: string, adminId: string, reason: string): Promise<UserProfile | undefined> {
+    const [updated] = await db.update(userProfiles)
+      .set({
+        onboardingStatus: 'suspended',
+        reviewedBy: adminId,
+        reviewedAt: new Date(),
+        reviewNote: reason,
+        updatedAt: new Date(),
+      })
+      .where(eq(userProfiles.userId, userId))
+      .returning();
+
+    // Also deactivate the user
+    if (updated) {
+      await db.update(users)
+        .set({ isActive: false })
+        .where(eq(users.id, userId));
+    }
+
+    return updated || undefined;
+  }
+
+  async reactivateVendor(userId: string, adminId: string, note?: string): Promise<UserProfile | undefined> {
+    const [updated] = await db.update(userProfiles)
+      .set({
+        onboardingStatus: 'approved',
+        reviewedBy: adminId,
+        reviewedAt: new Date(),
+        reviewNote: note,
+        updatedAt: new Date(),
+      })
+      .where(eq(userProfiles.userId, userId))
+      .returning();
+
+    // Also activate the user
+    if (updated) {
+      await db.update(users)
+        .set({ isActive: true })
+        .where(eq(users.id, userId));
+    }
+
+    return updated || undefined;
+  }
+
+  // ===== ADMIN ORDERS MANAGEMENT =====
+  async getOrdersForAdmin(filters: {
+    status?: string;
+    vendorId?: string;
+    search?: string;
+    dateFrom?: Date;
+    dateTo?: Date;
+    page?: number;
+    limit?: number;
+  } = {}): Promise<{ orders: (Order & { items: OrderItem[], user: User })[], total: number, page: number, limit: number }> {
+    const page = filters.page || 1;
+    const limit = filters.limit || 20;
+    const offset = (page - 1) * limit;
+
+    // If vendorId filter is provided, first get order IDs with that vendor's items
+    let vendorOrderIds: string[] | undefined;
+    if (filters.vendorId) {
+      const vendorItems = await db
+        .select({ orderId: orderItems.orderId })
+        .from(orderItems)
+        .where(eq(orderItems.vendorId, filters.vendorId));
+      vendorOrderIds = [...new Set(vendorItems.map(i => i.orderId))];
+      if (vendorOrderIds.length === 0) {
+        return { orders: [], total: 0, page, limit };
+      }
+    }
+
+    let conditions: any[] = [];
+
+    if (vendorOrderIds) {
+      conditions.push(inArray(orders.id, vendorOrderIds));
+    }
+
+    if (filters.status) {
+      conditions.push(eq(orders.status, filters.status as any));
+    }
+
+    if (filters.dateFrom) {
+      conditions.push(gte(orders.createdAt, filters.dateFrom));
+    }
+
+    if (filters.dateTo) {
+      conditions.push(lte(orders.createdAt, filters.dateTo));
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const [countResult] = await db
+      .select({ count: count() })
+      .from(orders)
+      .where(whereClause);
+
+    const ordersList = await db
+      .select()
+      .from(orders)
+      .innerJoin(users, eq(orders.userId, users.id))
+      .where(whereClause)
+      .orderBy(desc(orders.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    // Get all order items for these orders
+    const orderIds = ordersList.map(o => o.orders.id);
+    let allItems: OrderItem[] = [];
+    if (orderIds.length > 0) {
+      // If vendor filter, only get that vendor's items
+      if (filters.vendorId) {
+        allItems = await db.select().from(orderItems).where(
+          and(
+            inArray(orderItems.orderId, orderIds),
+            eq(orderItems.vendorId, filters.vendorId)
+          )
+        );
+      } else {
+        allItems = await db.select().from(orderItems).where(inArray(orderItems.orderId, orderIds));
+      }
+    }
+
+    const ordersWithItems = ordersList.map(o => ({
+      ...o.orders,
+      user: o.users,
+      items: allItems.filter(item => item.orderId === o.orders.id),
+    }));
+
+    return {
+      orders: ordersWithItems,
+      total: countResult?.count || 0,
+      page,
+      limit,
+    };
+  }
+
+  async getOrderByIdForAdmin(orderId: string): Promise<(Order & { items: (OrderItem & { product: Product })[], user: User, statusHistory: OrderStatusHistory[] }) | undefined> {
+    const [order] = await db.select().from(orders).where(eq(orders.id, orderId));
+    if (!order) return undefined;
+
+    const [user] = await db.select().from(users).where(eq(users.id, order.userId));
+    const items = await db
+      .select({
+        item: orderItems,
+        product: products,
+      })
+      .from(orderItems)
+      .leftJoin(products, eq(orderItems.productId, products.id))
+      .where(eq(orderItems.orderId, orderId));
+
+    const statusHistory = await db
+      .select()
+      .from(orderStatusHistory)
+      .where(eq(orderStatusHistory.orderId, orderId))
+      .orderBy(desc(orderStatusHistory.createdAt));
+
+    return {
+      ...order,
+      user,
+      items: items.map(i => ({ ...i.item, product: i.product! })),
+      statusHistory,
+    };
+  }
+
+  // ===== VENDOR ORDERS MANAGEMENT =====
+  async getOrdersForVendor(vendorId: string, filters: {
+    status?: string;
+    search?: string;
+    dateFrom?: Date;
+    dateTo?: Date;
+    page?: number;
+    limit?: number;
+  } = {}): Promise<{ orders: (Order & { items: OrderItem[], user: User })[], total: number, page: number, limit: number }> {
+    const page = filters.page || 1;
+    const limit = filters.limit || 20;
+    const offset = (page - 1) * limit;
+
+    // Get order IDs that contain items from this vendor
+    const vendorOrderItems = await db
+      .select({ orderId: orderItems.orderId })
+      .from(orderItems)
+      .where(eq(orderItems.vendorId, vendorId));
+
+    const vendorOrderIds = [...new Set(vendorOrderItems.map(i => i.orderId))];
+
+    if (vendorOrderIds.length === 0) {
+      return { orders: [], total: 0, page, limit };
+    }
+
+    let conditions: any[] = [inArray(orders.id, vendorOrderIds)];
+
+    if (filters.status) {
+      conditions.push(eq(orders.status, filters.status as any));
+    }
+
+    if (filters.dateFrom) {
+      conditions.push(gte(orders.createdAt, filters.dateFrom));
+    }
+
+    if (filters.dateTo) {
+      conditions.push(lte(orders.createdAt, filters.dateTo));
+    }
+
+    const whereClause = and(...conditions);
+
+    const [countResult] = await db
+      .select({ count: count() })
+      .from(orders)
+      .where(whereClause);
+
+    const ordersList = await db
+      .select()
+      .from(orders)
+      .innerJoin(users, eq(orders.userId, users.id))
+      .where(whereClause)
+      .orderBy(desc(orders.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    // Get vendor's order items only
+    const allVendorItems = await db
+      .select()
+      .from(orderItems)
+      .where(and(
+        inArray(orderItems.orderId, ordersList.map(o => o.orders.id)),
+        eq(orderItems.vendorId, vendorId)
+      ));
+
+    const ordersWithItems = ordersList.map(o => ({
+      ...o.orders,
+      user: o.users,
+      items: allVendorItems.filter(item => item.orderId === o.orders.id),
+    }));
+
+    return {
+      orders: ordersWithItems,
+      total: countResult?.count || 0,
+      page,
+      limit,
+    };
+  }
+
+  async updateOrderStatus(orderId: string, status: string, changedBy: string, note?: string): Promise<Order | undefined> {
+    const [updated] = await db
+      .update(orders)
+      .set({ status: status as any })
+      .where(eq(orders.id, orderId))
+      .returning();
+
+    if (updated) {
+      await db.insert(orderStatusHistory).values({
+        orderId,
+        status: status as any,
+        changedBy,
+        note,
+      });
+    }
+
+    return updated || undefined;
+  }
+
+  // ===== REFUND MANAGEMENT =====
+  async getRefundsForAdmin(filters: {
+    status?: string;
+    vendorId?: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+  } = {}): Promise<{ refunds: (Refund & { user: User, order: Order })[], total: number, page: number, limit: number }> {
+    const page = filters.page || 1;
+    const limit = filters.limit || 20;
+    const offset = (page - 1) * limit;
+
+    let conditions: any[] = [];
+
+    if (filters.status) {
+      conditions.push(eq(refunds.requestStatus, filters.status as any));
+    }
+
+    if (filters.vendorId) {
+      conditions.push(eq(refunds.vendorId, filters.vendorId));
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const [countResult] = await db
+      .select({ count: count() })
+      .from(refunds)
+      .where(whereClause);
+
+    const refundsList = await db
+      .select()
+      .from(refunds)
+      .innerJoin(users, eq(refunds.userId, users.id))
+      .innerJoin(orders, eq(refunds.orderId, orders.id))
+      .where(whereClause)
+      .orderBy(desc(refunds.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    return {
+      refunds: refundsList.map(r => ({
+        ...r.refunds,
+        user: r.users,
+        order: r.orders,
+      })),
+      total: countResult?.count || 0,
+      page,
+      limit,
+    };
+  }
+
+  async getRefundById(refundId: string): Promise<(Refund & { user: User, order: Order, items: RefundItem[] }) | undefined> {
+    const [result] = await db
+      .select()
+      .from(refunds)
+      .innerJoin(users, eq(refunds.userId, users.id))
+      .innerJoin(orders, eq(refunds.orderId, orders.id))
+      .where(eq(refunds.id, refundId));
+
+    if (!result) return undefined;
+
+    const items = await db.select().from(refundItems).where(eq(refundItems.refundId, refundId));
+
+    return {
+      ...result.refunds,
+      user: result.users,
+      order: result.orders,
+      items,
+    };
+  }
+
+  async createRefundRequest(data: {
+    orderId: string;
+    userId: string;
+    vendorId?: string;
+    amount: string;
+    reason: string;
+    customerNote?: string;
+  }): Promise<Refund> {
+    const [refund] = await db.insert(refunds).values({
+      orderId: data.orderId,
+      userId: data.userId,
+      vendorId: data.vendorId,
+      amount: data.amount,
+      reason: data.reason,
+      customerNote: data.customerNote,
+      requestStatus: 'pending',
+      status: 'processing',
+    }).returning();
+    return refund;
+  }
+
+  async approveRefund(refundId: string, adminId: string, note?: string): Promise<Refund | undefined> {
+    const [updated] = await db.update(refunds)
+      .set({
+        requestStatus: 'approved',
+        reviewedBy: adminId,
+        reviewedAt: new Date(),
+        adminNote: note,
+      })
+      .where(eq(refunds.id, refundId))
+      .returning();
+    return updated || undefined;
+  }
+
+  async rejectRefund(refundId: string, adminId: string, reason: string, note?: string): Promise<Refund | undefined> {
+    const [updated] = await db.update(refunds)
+      .set({
+        requestStatus: 'rejected',
+        reviewedBy: adminId,
+        reviewedAt: new Date(),
+        rejectionReason: reason,
+        adminNote: note,
+      })
+      .where(eq(refunds.id, refundId))
+      .returning();
+    return updated || undefined;
+  }
+
+  // ===== COMMISSION & PLATFORM SETTINGS =====
+  async getPlatformSetting(key: string): Promise<PlatformSetting | undefined> {
+    const [setting] = await db.select().from(platformSettings).where(eq(platformSettings.key, key));
+    return setting;
+  }
+
+  async setPlatformSetting(key: string, value: string, adminId: string, description?: string): Promise<PlatformSetting> {
+    const existing = await this.getPlatformSetting(key);
+    
+    if (existing) {
+      const [updated] = await db.update(platformSettings)
+        .set({
+          value,
+          description: description || existing.description,
+          updatedBy: adminId,
+          updatedAt: new Date(),
+        })
+        .where(eq(platformSettings.key, key))
+        .returning();
+      return updated;
+    } else {
+      const [created] = await db.insert(platformSettings)
+        .values({
+          key,
+          value,
+          description,
+          updatedBy: adminId,
+        })
+        .returning();
+      return created;
+    }
+  }
+
+  async getVendorCommission(vendorId: string): Promise<{ percent: string, isCustom: boolean }> {
+    const profile = await this.getUserProfileByUserId(vendorId);
+    if (profile?.commissionPercent) {
+      return { percent: profile.commissionPercent, isCustom: true };
+    }
+    
+    const defaultSetting = await this.getPlatformSetting('default_commission_percent');
+    return { percent: defaultSetting?.value || '10', isCustom: false };
+  }
+
+  async setVendorCommission(vendorId: string, percent: string): Promise<UserProfile | undefined> {
+    const [updated] = await db.update(userProfiles)
+      .set({
+        commissionPercent: percent,
+        updatedAt: new Date(),
+      })
+      .where(eq(userProfiles.userId, vendorId))
+      .returning();
+    return updated || undefined;
+  }
+
+  // ===== VENDOR FINANCIALS =====
+  
+  async getVendorFinancials(vendorId: string): Promise<{
+    totalEarnings: number;
+    totalCommission: number;
+    netEarnings: number;
+    pendingPayouts: number;
+    completedPayouts: number;
+    currentMonthEarnings: number;
+    lastMonthEarnings: number;
+    orderCount: number;
+    averageOrderValue: number;
+  }> {
+    const vendorOrders = await db.select()
+      .from(orders)
+      .innerJoin(orderItems, eq(orders.id, orderItems.orderId))
+      .innerJoin(products, eq(orderItems.productId, products.id))
+      .where(eq(products.vendorId, vendorId));
+    
+    const commission = await this.getVendorCommission(vendorId);
+    const commissionRate = parseFloat(commission.percent) / 100;
+    
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+    
+    let totalEarnings = 0;
+    let currentMonthEarnings = 0;
+    let lastMonthEarnings = 0;
+    const uniqueOrders = new Set<string>();
+    
+    for (const row of vendorOrders) {
+      const itemTotal = parseFloat(row.order_items.price) * row.order_items.quantity;
+      totalEarnings += itemTotal;
+      uniqueOrders.add(row.orders.id);
+      
+      const orderDate = new Date(row.orders.createdAt);
+      if (orderDate >= startOfMonth) {
+        currentMonthEarnings += itemTotal;
+      } else if (orderDate >= startOfLastMonth && orderDate <= endOfLastMonth) {
+        lastMonthEarnings += itemTotal;
+      }
+    }
+    
+    const totalCommission = totalEarnings * commissionRate;
+    const netEarnings = totalEarnings - totalCommission;
+    const orderCount = uniqueOrders.size;
+    const averageOrderValue = orderCount > 0 ? totalEarnings / orderCount : 0;
+    
+    return {
+      totalEarnings,
+      totalCommission,
+      netEarnings,
+      pendingPayouts: 0,
+      completedPayouts: 0,
+      currentMonthEarnings,
+      lastMonthEarnings,
+      orderCount,
+      averageOrderValue,
+    };
+  }
+  
+  async getVendorEarningsByMonth(vendorId: string, months: number = 12): Promise<{ month: string; earnings: number; commission: number; net: number }[]> {
+    const vendorOrders = await db.select()
+      .from(orders)
+      .innerJoin(orderItems, eq(orders.id, orderItems.orderId))
+      .innerJoin(products, eq(orderItems.productId, products.id))
+      .where(eq(products.vendorId, vendorId));
+    
+    const commission = await this.getVendorCommission(vendorId);
+    const commissionRate = parseFloat(commission.percent) / 100;
+    
+    const monthlyData: Record<string, { earnings: number; commission: number; net: number }> = {};
+    
+    for (const row of vendorOrders) {
+      const orderDate = new Date(row.orders.createdAt);
+      const monthKey = `${orderDate.getFullYear()}-${String(orderDate.getMonth() + 1).padStart(2, '0')}`;
+      
+      if (!monthlyData[monthKey]) {
+        monthlyData[monthKey] = { earnings: 0, commission: 0, net: 0 };
+      }
+      
+      const itemTotal = parseFloat(row.order_items.price) * row.order_items.quantity;
+      const itemCommission = itemTotal * commissionRate;
+      
+      monthlyData[monthKey].earnings += itemTotal;
+      monthlyData[monthKey].commission += itemCommission;
+      monthlyData[monthKey].net += itemTotal - itemCommission;
+    }
+    
+    const result = Object.entries(monthlyData)
+      .map(([month, data]) => ({ month, ...data }))
+      .sort((a, b) => a.month.localeCompare(b.month))
+      .slice(-months);
+    
+    return result;
+  }
+  
+  async getVendorRefunds(vendorId: string, filters?: {
+    status?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<{ refunds: (Refund & { order: Order; items: RefundItem[] })[]; total: number }> {
+    const page = filters?.page || 1;
+    const limit = filters?.limit || 10;
+    const offset = (page - 1) * limit;
+    
+    const conditions = [eq(refunds.vendorId, vendorId)];
+    if (filters?.status) {
+      conditions.push(sql`${refunds.requestStatus} = ${filters.status}`);
+    }
+    
+    const [countResult] = await db.select({ count: count() })
+      .from(refunds)
+      .where(and(...conditions));
+    
+    const refundsData = await db.select()
+      .from(refunds)
+      .where(and(...conditions))
+      .orderBy(desc(refunds.createdAt))
+      .limit(limit)
+      .offset(offset);
+    
+    const refundsWithDetails = await Promise.all(refundsData.map(async (refund) => {
+      const [order] = await db.select().from(orders).where(eq(orders.id, refund.orderId));
+      const items = await db.select().from(refundItems).where(eq(refundItems.refundId, refund.id));
+      return { ...refund, order, items };
+    }));
+    
+    return {
+      refunds: refundsWithDetails,
+      total: countResult?.count || 0,
+    };
+  }
+  
+  async updateVendorStock(vendorId: string, updates: { productId: number; stock: number }[]): Promise<{ updated: number; failed: number }> {
+    let updated = 0;
+    let failed = 0;
+    
+    for (const { productId, stock } of updates) {
+      try {
+        const [product] = await db.select().from(products).where(
+          and(eq(products.id, productId), eq(products.vendorId, vendorId))
+        );
+        
+        if (product) {
+          await db.update(products)
+            .set({ stock, updatedAt: new Date() })
+            .where(eq(products.id, productId));
+          updated++;
+        } else {
+          failed++;
+        }
+      } catch (error) {
+        failed++;
+      }
+    }
+    
+    return { updated, failed };
+  }
+
+  // ===== VENDOR NOTIFICATIONS =====
+  
+  async getVendorNotifications(vendorId: string, filters?: {
+    type?: string;
+    unreadOnly?: boolean;
+    page?: number;
+    limit?: number;
+  }): Promise<{ notifications: VendorNotification[]; total: number; unreadCount: number }> {
+    const page = filters?.page || 1;
+    const limit = filters?.limit || 20;
+    const offset = (page - 1) * limit;
+    
+    const conditions = [eq(vendorNotifications.vendorId, vendorId)];
+    if (filters?.type) {
+      conditions.push(sql`${vendorNotifications.type} = ${filters.type}`);
+    }
+    if (filters?.unreadOnly) {
+      conditions.push(eq(vendorNotifications.isRead, false));
+    }
+    
+    const [countResult] = await db.select({ count: count() })
+      .from(vendorNotifications)
+      .where(and(...conditions));
+    
+    const [unreadResult] = await db.select({ count: count() })
+      .from(vendorNotifications)
+      .where(and(eq(vendorNotifications.vendorId, vendorId), eq(vendorNotifications.isRead, false)));
+    
+    const notifications = await db.select()
+      .from(vendorNotifications)
+      .where(and(...conditions))
+      .orderBy(desc(vendorNotifications.createdAt))
+      .limit(limit)
+      .offset(offset);
+    
+    return {
+      notifications,
+      total: countResult?.count || 0,
+      unreadCount: unreadResult?.count || 0,
+    };
+  }
+  
+  async createVendorNotification(notification: InsertVendorNotification): Promise<VendorNotification> {
+    const [created] = await db.insert(vendorNotifications)
+      .values(notification as any)
+      .returning();
+    return created;
+  }
+  
+  async markNotificationRead(vendorId: string, notificationId: number): Promise<VendorNotification | undefined> {
+    const [updated] = await db.update(vendorNotifications)
+      .set({ isRead: true })
+      .where(and(eq(vendorNotifications.id, notificationId), eq(vendorNotifications.vendorId, vendorId)))
+      .returning();
+    return updated;
+  }
+  
+  async markAllNotificationsRead(vendorId: string): Promise<number> {
+    const result = await db.update(vendorNotifications)
+      .set({ isRead: true })
+      .where(and(eq(vendorNotifications.vendorId, vendorId), eq(vendorNotifications.isRead, false)));
+    return result.rowCount || 0;
+  }
+  
+  async deleteNotification(vendorId: string, notificationId: number): Promise<boolean> {
+    const result = await db.delete(vendorNotifications)
+      .where(and(eq(vendorNotifications.id, notificationId), eq(vendorNotifications.vendorId, vendorId)));
+    return (result.rowCount || 0) > 0;
+  }
+
+  // ===== SUPPORT TICKETS =====
+  
+  async createTicket(ticket: InsertSupportTicket, initialMessage: string): Promise<SupportTicket> {
+    const [newTicket] = await db.insert(supportTickets)
+      .values(ticket as any)
+      .returning();
+    
+    await db.insert(ticketMessages).values({
+      ticketId: newTicket.id,
+      senderId: ticket.customerId,
+      senderType: 'customer',
+      message: initialMessage,
+      isInternal: false,
+    });
+    
+    return newTicket;
+  }
+  
+  async getCustomerTickets(customerId: string, filters?: {
+    status?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<{ tickets: (SupportTicket & { order: Order; messagesCount: number })[]; total: number }> {
+    const page = filters?.page || 1;
+    const limit = filters?.limit || 10;
+    const offset = (page - 1) * limit;
+    
+    const conditions = [eq(supportTickets.customerId, customerId)];
+    if (filters?.status) {
+      conditions.push(sql`${supportTickets.status} = ${filters.status}`);
+    }
+    
+    const [countResult] = await db.select({ count: count() })
+      .from(supportTickets)
+      .where(and(...conditions));
+    
+    const ticketsData = await db.select()
+      .from(supportTickets)
+      .where(and(...conditions))
+      .orderBy(desc(supportTickets.createdAt))
+      .limit(limit)
+      .offset(offset);
+    
+    const ticketsWithDetails = await Promise.all(ticketsData.map(async (ticket) => {
+      const [order] = await db.select().from(orders).where(eq(orders.id, ticket.orderId));
+      const [messageCount] = await db.select({ count: count() })
+        .from(ticketMessages)
+        .where(eq(ticketMessages.ticketId, ticket.id));
+      
+      return {
+        ...ticket,
+        order,
+        messagesCount: messageCount?.count || 0,
+      };
+    }));
+    
+    return {
+      tickets: ticketsWithDetails,
+      total: countResult?.count || 0,
+    };
+  }
+  
+  async getTicketById(ticketId: string): Promise<(SupportTicket & { 
+    order: Order; 
+    customer: User;
+    assignedTo?: User;
+    messages: (TicketMessage & { sender: User; attachments: TicketAttachment[] })[];
+  }) | undefined> {
+    const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, ticketId));
+    if (!ticket) return undefined;
+    
+    const [order] = await db.select().from(orders).where(eq(orders.id, ticket.orderId));
+    const [customer] = await db.select().from(users).where(eq(users.id, ticket.customerId));
+    
+    let assignedTo: User | undefined;
+    if (ticket.assignedToId) {
+      const [admin] = await db.select().from(users).where(eq(users.id, ticket.assignedToId));
+      assignedTo = admin;
+    }
+    
+    const messagesData = await db.select()
+      .from(ticketMessages)
+      .where(eq(ticketMessages.ticketId, ticketId))
+      .orderBy(asc(ticketMessages.createdAt));
+    
+    const messagesWithDetails = await Promise.all(messagesData.map(async (msg) => {
+      const [sender] = await db.select().from(users).where(eq(users.id, msg.senderId));
+      const attachments = await db.select()
+        .from(ticketAttachments)
+        .where(eq(ticketAttachments.messageId, msg.id));
+      
+      return {
+        ...msg,
+        sender,
+        attachments,
+      };
+    }));
+    
+    return {
+      ...ticket,
+      order,
+      customer,
+      assignedTo,
+      messages: messagesWithDetails,
+    };
+  }
+  
+  async addTicketMessage(message: InsertTicketMessage): Promise<TicketMessage> {
+    const [newMessage] = await db.insert(ticketMessages).values(message as any).returning();
+    
+    await db.update(supportTickets)
+      .set({ updatedAt: new Date() })
+      .where(eq(supportTickets.id, message.ticketId));
+    
+    return newMessage;
+  }
+  
+  async addTicketAttachment(attachment: InsertTicketAttachment): Promise<TicketAttachment> {
+    const [newAttachment] = await db.insert(ticketAttachments).values(attachment as any).returning();
+    return newAttachment;
+  }
+  
+  async getAllTickets(filters?: {
+    status?: string;
+    priority?: string;
+    assignedToId?: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<{ tickets: (SupportTicket & { order: Order; customer: User; assignedTo?: User; messagesCount: number })[]; total: number }> {
+    const page = filters?.page || 1;
+    const limit = filters?.limit || 10;
+    const offset = (page - 1) * limit;
+    
+    const conditions: any[] = [];
+    if (filters?.status) {
+      conditions.push(sql`${supportTickets.status} = ${filters.status}`);
+    }
+    if (filters?.priority) {
+      conditions.push(sql`${supportTickets.priority} = ${filters.priority}`);
+    }
+    if (filters?.assignedToId) {
+      conditions.push(eq(supportTickets.assignedToId, filters.assignedToId));
+    }
+    
+    let countQuery = db.select({ count: count() }).from(supportTickets);
+    let dataQuery = db.select().from(supportTickets);
+    
+    if (conditions.length > 0) {
+      countQuery = countQuery.where(and(...conditions)) as any;
+      dataQuery = dataQuery.where(and(...conditions)) as any;
+    }
+    
+    const [countResult] = await countQuery;
+    
+    const ticketsData = await dataQuery
+      .orderBy(desc(supportTickets.createdAt))
+      .limit(limit)
+      .offset(offset);
+    
+    const ticketsWithDetails = await Promise.all(ticketsData.map(async (ticket) => {
+      const [order] = await db.select().from(orders).where(eq(orders.id, ticket.orderId));
+      const [customer] = await db.select().from(users).where(eq(users.id, ticket.customerId));
+      const [messageCount] = await db.select({ count: count() })
+        .from(ticketMessages)
+        .where(eq(ticketMessages.ticketId, ticket.id));
+      
+      let assignedTo: User | undefined;
+      if (ticket.assignedToId) {
+        const [admin] = await db.select().from(users).where(eq(users.id, ticket.assignedToId));
+        assignedTo = admin;
+      }
+      
+      return {
+        ...ticket,
+        order,
+        customer,
+        assignedTo,
+        messagesCount: messageCount?.count || 0,
+      };
+    }));
+    
+    return {
+      tickets: ticketsWithDetails,
+      total: countResult?.count || 0,
+    };
+  }
+  
+  async assignTicket(ticketId: string, adminId: string): Promise<SupportTicket | undefined> {
+    const [updated] = await db.update(supportTickets)
+      .set({
+        assignedToId: adminId,
+        status: 'in_progress',
+        updatedAt: new Date(),
+      })
+      .where(eq(supportTickets.id, ticketId))
+      .returning();
+    return updated || undefined;
+  }
+  
+  async updateTicketStatus(ticketId: string, status: string): Promise<SupportTicket | undefined> {
+    const updateData: any = {
+      status,
+      updatedAt: new Date(),
+    };
+    
+    if (status === 'resolved') {
+      updateData.resolvedAt = new Date();
+    } else if (status === 'closed') {
+      updateData.closedAt = new Date();
+    }
+    
+    const [updated] = await db.update(supportTickets)
+      .set(updateData)
+      .where(eq(supportTickets.id, ticketId))
+      .returning();
+    return updated || undefined;
+  }
+  
+  async updateTicketPriority(ticketId: string, priority: string): Promise<SupportTicket | undefined> {
+    const [updated] = await db.update(supportTickets)
+      .set({
+        priority: priority as any,
+        updatedAt: new Date(),
+      })
+      .where(eq(supportTickets.id, ticketId))
+      .returning();
+    return updated || undefined;
   }
 }
 

@@ -6,6 +6,7 @@ import { z } from "zod";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
+import { sendOtpEmail } from "./email";
 
 // JWT Secret - in production use a proper secret from environment
 const JWT_SECRET = process.env.JWT_SECRET || 'armoredmart-jwt-secret-key-2024';
@@ -343,6 +344,900 @@ export async function registerRoutes(
     }
   });
 
+  // ===== OTP LOGIN =====
+
+  /**
+   * @swagger
+   * /auth/otp/login/start:
+   *   post:
+   *     tags: [Auth - OTP]
+   *     summary: Start OTP login flow
+   *     description: Sends a 6-digit OTP to the user's email for passwordless login
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [email]
+   *             properties:
+   *               email: { type: string, format: email }
+   *     responses:
+   *       200:
+   *         description: OTP sent successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 message: { type: string }
+   *                 expiresIn: { type: integer, description: OTP expiry in seconds }
+   *                 debugOtp: { type: string, description: Only in development mode }
+   *       400:
+   *         description: Email is required
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 error: { type: string }
+   *       404:
+   *         description: No account found with this email
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 error: { type: string }
+   */
+  app.post("/api/auth/otp/login/start", async (req, res) => {
+    try {
+      const { email } = req.body;
+
+      if (!email) {
+        return res.status(400).json({ error: "Email is required" });
+      }
+
+      const user = await storage.getUserByEmail(email);
+      if (!user) {
+        return res.status(404).json({ error: "No account found with this email" });
+      }
+
+      // Generate 6-digit OTP
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+      // Delete any existing OTPs for this email (will use purpose-based lookup and delete)
+      const existingOtp = await storage.getOtpVerification(email, 'email', 'login');
+      if (existingOtp) {
+        await storage.deleteOtpById(existingOtp.id);
+      }
+
+      // Store OTP
+      await storage.createOtpVerification({
+        identifier: email,
+        code: otpCode,
+        type: 'email',
+        purpose: 'login',
+        userId: user.id,
+        expiresAt,
+      });
+
+      // Send OTP via Resend
+      const isDev = process.env.NODE_ENV === 'development';
+      try {
+        const resendApiKey = process.env.RESEND_API_KEY;
+        if (resendApiKey) {
+          const { Resend } = await import('resend');
+          const resend = new Resend(resendApiKey);
+          await resend.emails.send({
+            from: 'ArmoredMart <onboarding@resend.dev>',
+            to: email,
+            subject: 'Your ArmoredMart Login Code',
+            html: `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #3D4736;">ArmoredMart Login</h2>
+                <p>Your verification code is:</p>
+                <h1 style="color: #D97706; font-size: 32px; letter-spacing: 8px;">${otpCode}</h1>
+                <p>This code expires in 10 minutes.</p>
+                <p style="color: #666;">If you didn't request this code, please ignore this email.</p>
+              </div>
+            `,
+          });
+        }
+      } catch (emailError) {
+        console.error("Failed to send login OTP email:", emailError);
+      }
+
+      console.log(`[OTP] Login OTP for ${email}: ${otpCode}`);
+
+      res.json({
+        message: isDev ? "OTP generated (check console)" : "Verification code sent to your email",
+        expiresIn: 600,
+        ...(isDev && { debugOtp: otpCode }),
+      });
+    } catch (error) {
+      console.error("OTP login start error:", error);
+      res.status(500).json({ error: "Failed to start login" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /auth/otp/login/verify:
+   *   post:
+   *     tags: [Auth - OTP]
+   *     summary: Verify OTP and complete login
+   *     description: Verifies the OTP code and returns access/refresh tokens for authentication
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [email, code]
+   *             properties:
+   *               email: { type: string, format: email }
+   *               code: { type: string, description: 6-digit OTP code }
+   *     responses:
+   *       200:
+   *         description: Login successful
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 user: { $ref: '#/components/schemas/User' }
+   *                 accessToken: { type: string }
+   *                 refreshToken: { type: string }
+   *                 expiresIn: { type: integer }
+   *       400:
+   *         description: Invalid or expired OTP
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 error: { type: string }
+   *                 attemptsRemaining: { type: integer }
+   *       404:
+   *         description: User not found
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 error: { type: string }
+   */
+  app.post("/api/auth/otp/login/verify", async (req, res) => {
+    try {
+      const { email, code } = req.body;
+
+      if (!email || !code) {
+        return res.status(400).json({ error: "Email and code are required" });
+      }
+
+      // Find and validate OTP
+      const otpRecord = await storage.getOtpVerification(email, 'email', 'login');
+      if (!otpRecord) {
+        return res.status(400).json({ error: "Invalid or expired verification code" });
+      }
+
+      if (new Date(otpRecord.expiresAt) < new Date()) {
+        await storage.deleteOtpById(otpRecord.id);
+        return res.status(400).json({ error: "Verification code has expired" });
+      }
+
+      if ((otpRecord.attempts || 0) >= 5) {
+        await storage.deleteOtpById(otpRecord.id);
+        return res.status(400).json({ error: "Too many attempts. Please request a new code." });
+      }
+
+      // Increment attempts
+      await storage.incrementOtpAttempts(otpRecord.id);
+
+      // Check if code matches
+      if (otpRecord.code !== code) {
+        return res.status(400).json({ error: "Invalid verification code" });
+      }
+
+      // Get user
+      const user = await storage.getUserByEmail(email);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      // Delete OTP
+      await storage.deleteOtpById(otpRecord.id);
+
+      // Create session
+      const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+      const userAgent = req.headers['user-agent'];
+      const ipAddress = req.ip || req.headers['x-forwarded-for'] as string || 'unknown';
+      
+      const session = await storage.createSession({
+        userId: user.id,
+        refreshTokenHash: 'temp',
+        userAgent: userAgent || null,
+        ipAddress,
+        deviceLabel: parseUserAgent(userAgent),
+        expiresAt,
+      });
+
+      // Generate tokens
+      const accessToken = generateAccessToken(user, session.id);
+      const refreshToken = generateRefreshToken(user.id, session.id, user.tokenVersion || 0);
+
+      res.json({
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          userType: user.userType,
+        },
+        accessToken,
+        refreshToken,
+        expiresIn: 900,
+      });
+    } catch (error) {
+      console.error("OTP login verify error:", error);
+      res.status(500).json({ error: "Failed to verify login" });
+    }
+  });
+
+  // ===== OTP AUTHENTICATION =====
+
+  /**
+   * @swagger
+   * /auth/otp/register/start:
+   *   post:
+   *     tags: [Auth - OTP]
+   *     summary: Start OTP registration flow
+   *     description: |
+   *       Creates a pending user and sends OTP to email for verification.
+   *       If the email already exists but is NOT verified, the registration is resumed
+   *       using the existing user data (name, username) from the database.
+   *       Only blocks registration if the email is already verified.
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [email, username, name]
+   *             properties:
+   *               email:
+   *                 type: string
+   *                 format: email
+   *               username:
+   *                 type: string
+   *               name:
+   *                 type: string
+   *               userType:
+   *                 type: string
+   *                 enum: [vendor, customer]
+   *                 default: vendor
+   *     responses:
+   *       200:
+   *         description: Resuming incomplete registration
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 message:
+   *                   type: string
+   *                 userId:
+   *                   type: string
+   *                 email:
+   *                   type: string
+   *                 name:
+   *                   type: string
+   *                 username:
+   *                   type: string
+   *                 resuming:
+   *                   type: boolean
+   *                 expiresIn:
+   *                   type: integer
+   *                 debugOtp:
+   *                   type: string
+   *                   description: Only included in development mode
+   *       201:
+   *         description: New registration started
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 message: { type: string }
+   *                 userId: { type: string }
+   *                 email: { type: string }
+   *                 name: { type: string }
+   *                 username: { type: string }
+   *                 expiresIn: { type: integer }
+   *                 debugOtp: { type: string, description: Only in development mode }
+   *       400:
+   *         description: Email already verified or validation error
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 error: { type: string }
+   *                 continueToPhone: { type: boolean, description: If true, redirect to phone verification step }
+   */
+  app.post("/api/auth/otp/register/start", async (req, res) => {
+    try {
+      const { email, username, name, userType } = req.body;
+
+      if (!email || !username || !name) {
+        return res.status(400).json({ error: "Email, username, and name are required" });
+      }
+
+      let user;
+      let resumingRegistration = false;
+
+      // Check if email already exists
+      const existingEmail = await storage.getUserByEmail(email);
+      if (existingEmail) {
+        // If email is verified but phone is NOT verified, they can continue registration
+        if (existingEmail.emailVerified && !existingEmail.phoneVerified) {
+          return res.status(200).json({ 
+            message: "Email verified. Please continue to phone verification.",
+            userId: existingEmail.id,
+            email: existingEmail.email,
+            name: existingEmail.name,
+            username: existingEmail.username,
+            continueToPhone: true,
+            onboardingStep: existingEmail.onboardingStep || 2,
+          });
+        }
+        // If both email and phone are verified, they're fully registered
+        if (existingEmail.emailVerified && existingEmail.phoneVerified) {
+          return res.status(400).json({ error: "Email already registered. Please login instead." });
+        }
+        // Email exists but not verified - resume registration with existing data
+        user = existingEmail;
+        resumingRegistration = true;
+      } else {
+        // Check if username already exists (but only for new registrations)
+        const existingUsername = await storage.getUserByUsername(username);
+        if (existingUsername && existingUsername.emailVerified) {
+          return res.status(400).json({ error: "Username already taken" });
+        }
+
+        // Create user with onboarding step 1 (email not verified)
+        user = await storage.createUser({
+          name,
+          email,
+          username,
+          userType: userType || 'vendor',
+        });
+      }
+
+      // Generate 6-digit OTP
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+      // Store OTP (creates new or replaces existing)
+      await storage.createOtpVerification({
+        identifier: email,
+        code: otpCode,
+        type: 'email',
+        purpose: 'registration',
+        userId: user.id,
+        expiresAt,
+      });
+
+      // Send email with OTP code via Resend
+      const emailSent = await sendOtpEmail(email, otpCode, user.name);
+      
+      // In development or if email fails, include OTP in response for testing
+      const isDev = process.env.NODE_ENV === 'development';
+      
+      res.status(resumingRegistration ? 200 : 201).json({
+        message: resumingRegistration 
+          ? (emailSent ? "Resuming registration. OTP sent to email" : "Resuming registration. OTP generated (email not configured)")
+          : (emailSent ? "OTP sent to email" : "OTP generated (email not configured)"),
+        userId: user.id,
+        email: user.email,
+        name: user.name,
+        username: user.username,
+        resuming: resumingRegistration,
+        expiresIn: 600,
+        ...((!emailSent || isDev) && { debugOtp: otpCode }),
+      });
+    } catch (error) {
+      console.error("OTP registration start error:", error);
+      res.status(500).json({ error: "Failed to start registration" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /auth/otp/verify-email:
+   *   post:
+   *     tags: [Auth - OTP]
+   *     summary: Verify email OTP
+   *     description: Verifies the OTP sent to email and marks the user's email as verified
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [email, code]
+   *             properties:
+   *               userId: { type: string }
+   *               email: { type: string, format: email }
+   *               code: { type: string, description: 6-digit OTP code }
+   *     responses:
+   *       200:
+   *         description: Email verified successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 message: { type: string }
+   *                 userId: { type: string }
+   *                 nextStep: { type: string, example: phone_number }
+   *       400:
+   *         description: Invalid OTP or too many attempts
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 error: { type: string }
+   *                 attemptsRemaining: { type: integer }
+   *       404:
+   *         description: User not found
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 error: { type: string }
+   */
+  app.post("/api/auth/otp/verify-email", async (req, res) => {
+    try {
+      const { userId, email, code } = req.body;
+
+      if (!email || !code) {
+        return res.status(400).json({ error: "Email and code are required" });
+      }
+
+      // Get the OTP verification record
+      const otpRecord = await storage.getOtpVerification(email, 'email', 'registration');
+      if (!otpRecord) {
+        return res.status(400).json({ error: "No pending verification found" });
+      }
+
+      // Check if expired
+      if (new Date() > new Date(otpRecord.expiresAt)) {
+        return res.status(400).json({ error: "OTP has expired" });
+      }
+
+      // Check attempts (max 5)
+      if ((otpRecord.attempts || 0) >= 5) {
+        return res.status(400).json({ error: "Too many attempts. Please request a new code." });
+      }
+
+      // Verify code
+      if (otpRecord.code !== code) {
+        await storage.incrementOtpAttempts(otpRecord.id);
+        return res.status(400).json({ error: "Invalid OTP code" });
+      }
+
+      // Mark OTP as verified
+      await storage.markOtpVerified(otpRecord.id);
+
+      // Update user email verification status
+      const targetUserId = userId || otpRecord.userId;
+      if (targetUserId) {
+        await storage.updateUserVerificationStatus(targetUserId, 'emailVerified', true);
+        await storage.updateUserOnboardingStep(targetUserId, 2);
+      }
+
+      res.json({
+        message: "Email verified successfully",
+        userId: targetUserId,
+        nextStep: "phone_number",
+      });
+    } catch (error) {
+      console.error("Email verification error:", error);
+      res.status(500).json({ error: "Failed to verify email" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /auth/otp/resend-email:
+   *   post:
+   *     tags: [Auth - OTP]
+   *     summary: Resend email OTP
+   *     description: Generates and sends a new 6-digit OTP to the user's email
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [email]
+   *             properties:
+   *               email: { type: string, format: email }
+   *               userId: { type: string }
+   *     responses:
+   *       200:
+   *         description: New OTP sent
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 message: { type: string }
+   *                 expiresIn: { type: integer }
+   *                 debugOtp: { type: string, description: Only in development mode }
+   *       400:
+   *         description: Email is required
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 error: { type: string }
+   *       404:
+   *         description: User not found
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 error: { type: string }
+   */
+  app.post("/api/auth/otp/resend-email", async (req, res) => {
+    try {
+      const { email, userId } = req.body;
+
+      if (!email) {
+        return res.status(400).json({ error: "Email is required" });
+      }
+
+      // Generate new 6-digit OTP
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+      // Store new OTP
+      await storage.createOtpVerification({
+        identifier: email,
+        code: otpCode,
+        type: 'email',
+        purpose: 'registration',
+        userId: userId || null,
+        expiresAt,
+      });
+
+      // Get user name for email template
+      let userName = "User";
+      if (userId) {
+        const user = await storage.getUser(userId);
+        if (user) userName = user.name;
+      }
+
+      // Send email with OTP code via Resend
+      const emailSent = await sendOtpEmail(email, otpCode, userName);
+      
+      // In development or if email fails, include OTP in response for testing
+      const isDev = process.env.NODE_ENV === 'development';
+
+      res.json({
+        message: emailSent ? "OTP resent to email" : "OTP generated (email not configured)",
+        expiresIn: 600,
+        ...((!emailSent || isDev) && { debugOtp: otpCode }),
+      });
+    } catch (error) {
+      console.error("Email OTP resend error:", error);
+      res.status(500).json({ error: "Failed to resend OTP" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /auth/otp/set-phone:
+   *   post:
+   *     tags: [Auth - OTP]
+   *     summary: Set phone number and send OTP
+   *     description: |
+   *       Updates user phone number and sends OTP for verification.
+   *       Only blocks if the phone is already verified by a different user.
+   *       Unverified phone numbers can be reused/overwritten.
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [userId, phone, countryCode]
+   *             properties:
+   *               userId:
+   *                 type: string
+   *               phone:
+   *                 type: string
+   *               countryCode:
+   *                 type: string
+   *                 example: "+1"
+   *     responses:
+   *       200:
+   *         description: OTP sent to phone
+   *       400:
+   *         description: Phone already verified by another user
+   */
+  app.post("/api/auth/otp/set-phone", async (req, res) => {
+    try {
+      const { userId, phone, countryCode } = req.body;
+
+      if (!userId || !phone || !countryCode) {
+        return res.status(400).json({ error: "User ID, phone number, and country code are required" });
+      }
+
+      // Check if phone already exists and is verified by another user
+      const fullPhone = `${countryCode}${phone}`;
+      const existingPhone = await storage.getUserByPhone(fullPhone);
+      if (existingPhone && existingPhone.id !== userId && existingPhone.phoneVerified) {
+        return res.status(400).json({ error: "Phone number already registered" });
+      }
+
+      // Update user phone
+      await storage.updateUserPhone(userId, fullPhone, countryCode);
+      await storage.updateUserOnboardingStep(userId, 3);
+
+      // Generate 6-digit OTP
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+      // Store OTP
+      await storage.createOtpVerification({
+        identifier: fullPhone,
+        code: otpCode,
+        type: 'phone',
+        purpose: 'verify_phone',
+        userId,
+        expiresAt,
+      });
+
+      // TODO: Send SMS with OTP code via SMS service (Firebase/Twilio)
+      console.log(`[OTP] Phone OTP for ${fullPhone}: ${otpCode}`);
+      
+      // In development mode, include OTP in response for testing
+      const isDev = process.env.NODE_ENV === 'development';
+
+      res.json({
+        message: isDev ? "OTP generated (SMS not configured)" : "OTP sent to phone",
+        expiresIn: 600,
+        ...(isDev && { debugOtp: otpCode }),
+      });
+    } catch (error) {
+      console.error("Set phone error:", error);
+      res.status(500).json({ error: "Failed to set phone number" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /auth/otp/verify-phone:
+   *   post:
+   *     tags: [Auth - OTP]
+   *     summary: Verify phone OTP
+   *     description: |
+   *       Verifies the OTP sent to phone and completes registration.
+   *       Supports two verification methods:
+   *       1. Firebase Phone Auth - Pass `firebaseUid` (trusted, skips backend OTP check)
+   *       2. Backend OTP - Pass `code` for fallback verification
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [userId, phone]
+   *             properties:
+   *               userId:
+   *                 type: string
+   *               phone:
+   *                 type: string
+   *               code:
+   *                 type: string
+   *                 description: 6-digit OTP code (for backend verification)
+   *               firebaseUid:
+   *                 type: string
+   *                 description: Firebase user UID (for Firebase phone auth)
+   *     responses:
+   *       200:
+   *         description: Phone verified, registration complete
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 message:
+   *                   type: string
+   *                 user:
+   *                   type: object
+   *                 accessToken:
+   *                   type: string
+   *                 refreshToken:
+   *                   type: string
+   *       400:
+   *         description: Invalid OTP or missing required fields
+   */
+  app.post("/api/auth/otp/verify-phone", async (req, res) => {
+    try {
+      const { userId, phone, code, firebaseUid } = req.body;
+
+      if (!phone) {
+        return res.status(400).json({ error: "Phone is required" });
+      }
+
+      // If Firebase UID is provided, we trust Firebase's verification
+      // Otherwise, fall back to backend OTP verification
+      if (firebaseUid) {
+        // Firebase has already verified the phone number
+        console.log(`[OTP] Phone verified via Firebase for ${phone}, UID: ${firebaseUid}`);
+      } else if (code) {
+        // Fallback to backend OTP verification
+        const otpRecord = await storage.getOtpVerification(phone, 'phone', 'verify_phone');
+        if (!otpRecord) {
+          return res.status(400).json({ error: "No pending verification found" });
+        }
+
+        if (new Date() > new Date(otpRecord.expiresAt)) {
+          return res.status(400).json({ error: "OTP has expired" });
+        }
+
+        if ((otpRecord.attempts || 0) >= 5) {
+          return res.status(400).json({ error: "Too many attempts. Please request a new code." });
+        }
+
+        if (otpRecord.code !== code) {
+          await storage.incrementOtpAttempts(otpRecord.id);
+          return res.status(400).json({ error: "Invalid OTP code" });
+        }
+
+        await storage.markOtpVerified(otpRecord.id);
+      } else {
+        return res.status(400).json({ error: "Code or Firebase UID is required" });
+      }
+
+      // Update user phone verification status and complete onboarding
+      if (userId) {
+        await storage.updateUserVerificationStatus(userId, 'phoneVerified', true);
+        await storage.updateUserOnboardingStep(userId, 4);
+        
+        // Store Firebase UID if provided
+        if (firebaseUid) {
+          await storage.updateUserFirebaseUid(userId, firebaseUid);
+        }
+      }
+
+      // Create session and generate tokens
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+      const userAgent = req.headers['user-agent'];
+      const ipAddress = req.ip || req.headers['x-forwarded-for'] as string || 'unknown';
+      
+      const session = await storage.createSession({
+        userId: user.id,
+        refreshTokenHash: 'temp',
+        userAgent: userAgent || null,
+        ipAddress,
+        deviceLabel: parseUserAgent(userAgent),
+        expiresAt,
+      });
+
+      const accessToken = generateAccessToken(user, session.id);
+      const refreshToken = generateRefreshToken(user.id, session.id, user.tokenVersion || 0);
+
+      res.json({
+        message: "Phone verified successfully. Registration complete!",
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          userType: user.userType,
+          emailVerified: true,
+          phoneVerified: true,
+        },
+        accessToken,
+        refreshToken,
+        expiresIn: 900,
+      });
+    } catch (error) {
+      console.error("Phone verification error:", error);
+      res.status(500).json({ error: "Failed to verify phone" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /auth/otp/resend-phone:
+   *   post:
+   *     tags: [Auth - OTP]
+   *     summary: Resend phone OTP
+   *     description: Generates and sends a new 6-digit OTP to the user's phone number
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [phone]
+   *             properties:
+   *               phone: { type: string, description: Full phone number including country code }
+   *               userId: { type: string }
+   *     responses:
+   *       200:
+   *         description: New OTP sent
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 message: { type: string }
+   *                 expiresIn: { type: integer }
+   *                 debugOtp: { type: string, description: Only in development mode }
+   *       400:
+   *         description: Phone is required
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 error: { type: string }
+   */
+  app.post("/api/auth/otp/resend-phone", async (req, res) => {
+    try {
+      const { phone, userId } = req.body;
+
+      if (!phone) {
+        return res.status(400).json({ error: "Phone is required" });
+      }
+
+      // Generate new 6-digit OTP
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+      // Store new OTP
+      await storage.createOtpVerification({
+        identifier: phone,
+        code: otpCode,
+        type: 'phone',
+        purpose: 'verify_phone',
+        userId: userId || null,
+        expiresAt,
+      });
+
+      // TODO: Send SMS with OTP code
+      console.log(`[OTP] Resent Phone OTP for ${phone}: ${otpCode}`);
+      
+      // In development mode, include OTP in response for testing
+      const isDev = process.env.NODE_ENV === 'development';
+
+      res.json({
+        message: isDev ? "OTP generated (SMS not configured)" : "OTP resent to phone",
+        expiresIn: 600,
+        ...(isDev && { debugOtp: otpCode }),
+      });
+    } catch (error) {
+      console.error("Phone OTP resend error:", error);
+      res.status(500).json({ error: "Failed to resend OTP" });
+    }
+  });
+
   /**
    * @swagger
    * /auth/logout:
@@ -471,6 +1366,977 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error updating profile:", error);
       res.status(500).json({ error: "Failed to update profile" });
+    }
+  });
+
+  // ===== VENDOR ONBOARDING ROUTES =====
+
+  /**
+   * @swagger
+   * /vendor/onboarding/profile:
+   *   get:
+   *     tags: [Vendor - Onboarding]
+   *     summary: Get vendor onboarding profile
+   *     description: Retrieves the current vendor's onboarding profile and user information
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: Vendor profile and user information
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 profile:
+   *                   $ref: '#/components/schemas/UserProfile'
+   *                 user:
+   *                   type: object
+   *                   properties:
+   *                     id: { type: string }
+   *                     name: { type: string }
+   *                     email: { type: string }
+   *                     phone: { type: string }
+   *                     userType: { type: string }
+   *                     emailVerified: { type: boolean }
+   *                     phoneVerified: { type: boolean }
+   *                     onboardingStep: { type: integer }
+   *       401:
+   *         description: Authentication required
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 error: { type: string }
+   */
+  app.get("/api/vendor/onboarding/profile", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+
+    try {
+      const profile = await storage.getUserProfile(req.user.id);
+      const user = await storage.getUser(req.user.id);
+      
+      res.json({
+        profile: profile || null,
+        user: {
+          id: user?.id,
+          name: user?.name,
+          email: user?.email,
+          phone: user?.phone,
+          userType: user?.userType,
+          emailVerified: user?.emailVerified,
+          phoneVerified: user?.phoneVerified,
+          onboardingStep: user?.onboardingStep,
+        }
+      });
+    } catch (error) {
+      console.error("Error fetching vendor profile:", error);
+      res.status(500).json({ error: "Failed to fetch vendor profile" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/onboarding/step0:
+   *   post:
+   *     tags: [Vendor - Onboarding]
+   *     summary: Save Step 0 - Initial Store Creation
+   *     description: Creates or updates the initial vendor store profile with basic company information
+   *     security:
+   *       - bearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [country, companyName, companyEmail, companyPhone]
+   *             properties:
+   *               country: { type: string, description: ISO country code }
+   *               companyName: { type: string }
+   *               companyEmail: { type: string, format: email }
+   *               companyPhone: { type: string }
+   *               companyPhoneCountryCode: { type: string, example: "+971" }
+   *     responses:
+   *       200:
+   *         description: Store created/updated successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 message: { type: string }
+   *                 profile: { $ref: '#/components/schemas/UserProfile' }
+   *                 nextStep: { type: integer }
+   *       401:
+   *         description: Authentication required
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 error: { type: string }
+   */
+  app.post("/api/vendor/onboarding/step0", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+
+    try {
+      const { country, companyName, companyEmail, companyPhone, companyPhoneCountryCode } = req.body;
+      
+      // Check if profile exists
+      let profile = await storage.getUserProfile(req.user.id);
+      
+      if (profile) {
+        // Update existing profile
+        profile = await storage.updateUserProfile(req.user.id, {
+          country,
+          companyName,
+          companyEmail,
+          companyPhone,
+          companyPhoneCountryCode,
+          currentStep: 1,
+          onboardingStatus: 'in_progress',
+        });
+      } else {
+        // Create new profile
+        profile = await storage.createUserProfile({
+          userId: req.user.id,
+          country,
+          companyName,
+          companyEmail,
+          companyPhone,
+          companyPhoneCountryCode,
+          currentStep: 1,
+          onboardingStatus: 'in_progress',
+        });
+      }
+
+      // Update user onboarding step
+      await storage.updateUserOnboardingStep(req.user.id, 5);
+
+      res.json({
+        message: "Store created successfully",
+        profile,
+        nextStep: 1,
+      });
+    } catch (error) {
+      console.error("Error saving step 0:", error);
+      res.status(500).json({ error: "Failed to create store" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/onboarding/step1:
+   *   post:
+   *     tags: [Vendor - Onboarding]
+   *     summary: Save Step 1 - Company Registration Details
+   *     description: Saves company registration and legal entity information
+   *     security:
+   *       - bearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               countryOfRegistration: { type: string }
+   *               registeredCompanyName: { type: string }
+   *               tradeBrandName: { type: string }
+   *               yearOfEstablishment: { type: integer }
+   *               legalEntityId: { type: string }
+   *               legalEntityIssueDate: { type: string, format: date }
+   *               legalEntityExpiryDate: { type: string, format: date }
+   *               cityOfficeAddress: { type: string }
+   *               officialWebsite: { type: string }
+   *               entityType: { type: string, enum: [manufacturer, distributor, wholesaler, retailer, importer, exporter, other] }
+   *               dunsNumber: { type: string }
+   *               vatCertificateUrl: { type: string }
+   *               taxVatNumber: { type: string }
+   *               taxIssuingDate: { type: string, format: date }
+   *               taxExpiryDate: { type: string, format: date }
+   *     responses:
+   *       200:
+   *         description: Step 1 saved successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 message: { type: string }
+   *                 profile: { $ref: '#/components/schemas/UserProfile' }
+   *                 nextStep: { type: integer }
+   *       400:
+   *         description: Please complete step 0 first
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 error: { type: string }
+   *       401:
+   *         description: Authentication required
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 error: { type: string }
+   */
+  app.post("/api/vendor/onboarding/step1", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+
+    try {
+      const { 
+        countryOfRegistration,
+        registeredCompanyName,
+        tradeBrandName,
+        yearOfEstablishment,
+        legalEntityId,
+        legalEntityIssueDate,
+        legalEntityExpiryDate,
+        cityOfficeAddress,
+        officialWebsite,
+        entityType,
+        dunsNumber,
+        vatCertificateUrl,
+        taxVatNumber,
+        taxIssuingDate,
+        taxExpiryDate,
+      } = req.body;
+      
+      // Check if profile exists
+      let profile = await storage.getUserProfile(req.user.id);
+      
+      if (profile) {
+        // Update existing profile
+        profile = await storage.updateUserProfile(req.user.id, {
+          countryOfRegistration,
+          registeredCompanyName,
+          tradeBrandName,
+          yearOfEstablishment: yearOfEstablishment ? parseInt(yearOfEstablishment) : null,
+          legalEntityId,
+          legalEntityIssueDate,
+          legalEntityExpiryDate,
+          cityOfficeAddress,
+          officialWebsite,
+          entityType,
+          dunsNumber,
+          vatCertificateUrl,
+          taxVatNumber,
+          taxIssuingDate,
+          taxExpiryDate,
+          currentStep: 2,
+          onboardingStatus: 'in_progress',
+        });
+      } else {
+        return res.status(400).json({ error: "Please complete step 0 first" });
+      }
+
+      // Update user onboarding step
+      await storage.updateUserOnboardingStep(req.user.id, 5); // Move past OTP steps to onboarding
+
+      res.json({
+        message: "Step 1 saved successfully",
+        profile,
+        nextStep: 2,
+      });
+    } catch (error) {
+      console.error("Error saving step 1:", error);
+      res.status(500).json({ error: "Failed to save store details" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/onboarding/step2:
+   *   post:
+   *     tags: [Vendor - Onboarding]
+   *     summary: Save Step 2 - Authorized Contact Details
+   *     description: Saves authorized contact person information and terms acceptance
+   *     security:
+   *       - bearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [contactFullName, termsAccepted]
+   *             properties:
+   *               contactFullName: { type: string }
+   *               contactJobTitle: { type: string }
+   *               contactWorkEmail: { type: string, format: email }
+   *               contactIdDocumentUrl: { type: string }
+   *               contactMobile: { type: string }
+   *               contactMobileCountryCode: { type: string }
+   *               termsAccepted: { type: boolean }
+   *     responses:
+   *       200:
+   *         description: Step 2 saved successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 message: { type: string }
+   *                 profile: { $ref: '#/components/schemas/UserProfile' }
+   *                 nextStep: { type: integer }
+   *       400:
+   *         description: Terms must be accepted
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 error: { type: string }
+   *       401:
+   *         description: Authentication required
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 error: { type: string }
+   */
+  app.post("/api/vendor/onboarding/step2", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+
+    try {
+      const {
+        contactFullName,
+        contactJobTitle,
+        contactWorkEmail,
+        contactIdDocumentUrl,
+        contactMobile,
+        contactMobileCountryCode,
+        termsAccepted,
+      } = req.body;
+
+      if (!termsAccepted) {
+        return res.status(400).json({ error: "You must confirm the accuracy of information" });
+      }
+      
+      const profile = await storage.updateUserProfile(req.user.id, {
+        contactFullName,
+        contactJobTitle,
+        contactWorkEmail,
+        contactIdDocumentUrl,
+        contactMobile,
+        contactMobileCountryCode,
+        termsAccepted: true,
+        termsAcceptedAt: new Date(),
+        currentStep: 3,
+        onboardingStatus: 'in_progress',
+      });
+
+      res.json({
+        message: "Step 2 saved successfully",
+        profile,
+        nextStep: 3,
+      });
+    } catch (error) {
+      console.error("Error saving step 2:", error);
+      res.status(500).json({ error: "Failed to save contact details" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/onboarding/step3:
+   *   post:
+   *     tags: [Vendor - Onboarding]
+   *     summary: Save Step 3 - Business & Compliance
+   *     description: Saves business nature, compliance information, and required licenses
+   *     security:
+   *       - bearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [natureOfBusiness, endUseMarkets, businessLicenseUrl, complianceTermsAccepted]
+   *             properties:
+   *               natureOfBusiness: { type: array, items: { type: string } }
+   *               controlledDualUseItems: { type: string }
+   *               licenseTypes: { type: array, items: { type: string } }
+   *               endUseMarkets: { type: array, items: { type: string } }
+   *               operatingCountries: { type: array, items: { type: string } }
+   *               isOnSanctionsList: { type: boolean }
+   *               businessLicenseUrl: { type: string }
+   *               defenseApprovalUrl: { type: string }
+   *               companyProfileUrl: { type: string }
+   *               complianceTermsAccepted: { type: boolean }
+   *     responses:
+   *       200:
+   *         description: Step 3 saved successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 message: { type: string }
+   *                 profile: { $ref: '#/components/schemas/UserProfile' }
+   *                 nextStep: { type: integer }
+   *       400:
+   *         description: Validation error (missing required fields)
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 error: { type: string }
+   *       401:
+   *         description: Authentication required
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 error: { type: string }
+   */
+  app.post("/api/vendor/onboarding/step3", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+
+    try {
+      const {
+        natureOfBusiness,
+        controlledDualUseItems,
+        licenseTypes,
+        endUseMarkets,
+        operatingCountries,
+        isOnSanctionsList,
+        businessLicenseUrl,
+        defenseApprovalUrl,
+        companyProfileUrl,
+        complianceTermsAccepted,
+      } = req.body;
+
+      if (!complianceTermsAccepted) {
+        return res.status(400).json({ error: "You must accept the compliance terms" });
+      }
+
+      if (!natureOfBusiness || natureOfBusiness.length === 0) {
+        return res.status(400).json({ error: "Please select at least one nature of business" });
+      }
+
+      if (!endUseMarkets || endUseMarkets.length === 0) {
+        return res.status(400).json({ error: "Please select at least one end-use market" });
+      }
+
+      if (!businessLicenseUrl) {
+        return res.status(400).json({ error: "Business license is required" });
+      }
+      
+      const profile = await storage.updateUserProfile(req.user.id, {
+        natureOfBusiness,
+        controlledDualUseItems,
+        licenseTypes,
+        endUseMarkets,
+        operatingCountries,
+        isOnSanctionsList: isOnSanctionsList === true,
+        businessLicenseUrl,
+        defenseApprovalUrl,
+        companyProfileUrl,
+        complianceTermsAccepted: true,
+        complianceTermsAcceptedAt: new Date(),
+        currentStep: 4,
+        onboardingStatus: 'in_progress',
+      });
+
+      res.json({
+        message: "Step 3 saved successfully",
+        profile,
+        nextStep: 4,
+      });
+    } catch (error) {
+      console.error("Error saving step 3:", error);
+      res.status(500).json({ error: "Failed to save business & compliance details" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/onboarding/step4:
+   *   post:
+   *     tags: [Vendor - Onboarding]
+   *     summary: Save Step 4 - Account Preferences
+   *     description: Saves selling categories, currency preferences, and creates vendor password
+   *     security:
+   *       - bearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               sellingCategories: { type: array, items: { type: string }, description: Array of category names }
+   *               registerAs: { type: string, default: "Verified Supplier" }
+   *               preferredCurrency: { type: string, example: "AED" }
+   *               sponsorContent: { type: boolean }
+   *               password: { type: string, minLength: 8, description: Must contain uppercase, lowercase, number, and special character }
+   *               isDraft: { type: boolean, description: If true, saves as draft without validation }
+   *     responses:
+   *       200:
+   *         description: Step 4 saved successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 message: { type: string }
+   *                 profile: { $ref: '#/components/schemas/UserProfile' }
+   *                 nextStep: { type: integer }
+   *       400:
+   *         description: Validation error (password requirements, missing categories)
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 error: { type: string }
+   *       401:
+   *         description: Authentication required
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 error: { type: string }
+   */
+  app.post("/api/vendor/onboarding/step4", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+
+    try {
+      const {
+        sellingCategories,
+        registerAs,
+        preferredCurrency,
+        sponsorContent,
+        password,
+        isDraft,
+      } = req.body;
+
+      if (!isDraft) {
+        if (!sellingCategories || sellingCategories.length === 0) {
+          return res.status(400).json({ error: "Please select at least one selling category" });
+        }
+
+        if (!password) {
+          return res.status(400).json({ error: "Password is required" });
+        }
+
+        if (password.length < 8) {
+          return res.status(400).json({ error: "Password must be at least 8 characters" });
+        }
+      }
+
+      const updateData: any = {
+        sellingCategories,
+        registerAs: registerAs || 'Verified Supplier',
+        preferredCurrency,
+        sponsorContent: sponsorContent || false,
+        currentStep: 5,
+        onboardingStatus: 'in_progress',
+      };
+
+      if (password) {
+        const hashedPassword = await bcrypt.hash(password, 10);
+        await storage.updateUserPassword(req.user.id, hashedPassword);
+      }
+
+      const profile = await storage.updateUserProfile(req.user.id, updateData);
+
+      res.json({
+        message: isDraft ? "Draft saved successfully" : "Step 4 saved successfully",
+        profile,
+        nextStep: 5,
+      });
+    } catch (error) {
+      console.error("Error saving step 4:", error);
+      res.status(500).json({ error: "Failed to save account preferences" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/onboarding/step5:
+   *   post:
+   *     tags: [Vendor - Onboarding]
+   *     summary: Save Step 5 - Bank Details
+   *     description: Saves payment method preferences and bank account information for vendor payouts
+   *     security:
+   *       - bearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               paymentMethod: { type: string, description: Selected payment method name }
+   *               bankCountry: { type: string, description: ISO country code }
+   *               financialInstitution: { type: string, description: Bank name }
+   *               swiftCode: { type: string, description: Auto-filled from bank selection }
+   *               bankAccountNumber: { type: string }
+   *               proofType: { type: string, enum: ["Bank Statement", "Cancelled Cheque", "Bank Letter", "Account Confirmation Letter"] }
+   *               bankProofUrl: { type: string }
+   *               isDraft: { type: boolean, description: If true, saves as draft without validation }
+   *     responses:
+   *       200:
+   *         description: Step 5 saved successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 message: { type: string }
+   *                 profile: { $ref: '#/components/schemas/UserProfile' }
+   *                 nextStep: { type: string, example: "verification" }
+   *       400:
+   *         description: Validation error
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 error: { type: string }
+   *       401:
+   *         description: Authentication required
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 error: { type: string }
+   */
+  app.post("/api/vendor/onboarding/step5", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+
+    try {
+      const {
+        paymentMethod,
+        bankCountry,
+        financialInstitution,
+        swiftCode,
+        bankAccountNumber,
+        proofType,
+        bankProofUrl,
+        isDraft,
+      } = req.body;
+
+      if (!isDraft) {
+        if (!paymentMethod) {
+          return res.status(400).json({ error: "Please select a payment method" });
+        }
+
+        if (!financialInstitution) {
+          return res.status(400).json({ error: "Please select your bank" });
+        }
+
+        if (!bankAccountNumber) {
+          return res.status(400).json({ error: "Bank account number is required" });
+        }
+
+        if (!proofType) {
+          return res.status(400).json({ error: "Please select a proof type" });
+        }
+
+        if (!bankProofUrl) {
+          return res.status(400).json({ error: "Bank proof document is required" });
+        }
+      }
+
+      const profile = await storage.updateUserProfile(req.user.id, {
+        paymentMethod,
+        bankCountry,
+        financialInstitution,
+        swiftCode,
+        bankAccountNumber,
+        proofType,
+        bankProofUrl,
+        currentStep: 6,
+        onboardingStatus: 'in_progress',
+      });
+
+      res.json({
+        message: isDraft ? "Draft saved successfully" : "Step 5 saved successfully",
+        profile,
+        nextStep: 'verification',
+      });
+    } catch (error) {
+      console.error("Error saving step 5:", error);
+      res.status(500).json({ error: "Failed to save bank details" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/onboarding/submit-verification:
+   *   post:
+   *     tags: [Vendor - Onboarding]
+   *     summary: Submit for Identity Verification
+   *     description: Submits the vendor application for identity verification and sets status to pending_verification
+   *     security:
+   *       - bearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [verificationMethod]
+   *             properties:
+   *               verificationMethod: 
+   *                 type: string
+   *                 description: Selected verification method
+   *                 example: "Over a Live Video Call"
+   *     responses:
+   *       200:
+   *         description: Application submitted for verification
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 message: { type: string }
+   *                 profile: { $ref: '#/components/schemas/UserProfile' }
+   *       400:
+   *         description: Verification method not selected
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 error: { type: string }
+   *       401:
+   *         description: Authentication required
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 error: { type: string }
+   */
+  app.post("/api/vendor/onboarding/submit-verification", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+
+    try {
+      const { verificationMethod } = req.body;
+
+      if (!verificationMethod) {
+        return res.status(400).json({ error: "Please select a verification method" });
+      }
+
+      const profile = await storage.updateUserProfile(req.user.id, {
+        verificationMethod,
+        submittedForApproval: true,
+        submittedAt: new Date(),
+        onboardingStatus: 'pending_verification',
+      });
+
+      res.json({
+        message: "Application submitted for verification",
+        profile,
+      });
+    } catch (error) {
+      console.error("Error submitting verification:", error);
+      res.status(500).json({ error: "Failed to submit for verification" });
+    }
+  });
+
+  // Reference Data APIs
+  /**
+   * @swagger
+   * /reference/nature-of-business:
+   *   get:
+   *     tags: [Reference Data]
+   *     summary: Get nature of business options
+   */
+  app.get("/api/reference/nature-of-business", async (req, res) => {
+    try {
+      const data = await storage.getReferenceData('nature_of_business');
+      res.json(data.map(item => ({ id: item.id, name: item.name })));
+    } catch (error) {
+      console.error("Error fetching nature of business:", error);
+      res.status(500).json({ error: "Failed to fetch data" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /reference/end-use-markets:
+   *   get:
+   *     tags: [Reference Data]
+   *     summary: Get end-use market options
+   */
+  app.get("/api/reference/end-use-markets", async (req, res) => {
+    try {
+      const data = await storage.getReferenceData('end_use_markets');
+      res.json(data.map(item => ({ id: item.id, name: item.name })));
+    } catch (error) {
+      console.error("Error fetching end-use markets:", error);
+      res.status(500).json({ error: "Failed to fetch data" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /reference/license-types:
+   *   get:
+   *     tags: [Reference Data]
+   *     summary: Get license type options
+   */
+  app.get("/api/reference/license-types", async (req, res) => {
+    try {
+      const data = await storage.getReferenceData('license_types');
+      res.json(data.map(item => ({ id: item.id, name: item.name })));
+    } catch (error) {
+      console.error("Error fetching license types:", error);
+      res.status(500).json({ error: "Failed to fetch data" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /reference/countries:
+   *   get:
+   *     tags: [Reference Data]
+   *     summary: Get countries list
+   */
+  app.get("/api/reference/countries", async (req, res) => {
+    try {
+      const data = await storage.getReferenceData('countries');
+      res.json(data.map(item => ({ id: item.id, code: item.code, name: item.name, flag: item.flag })));
+    } catch (error) {
+      console.error("Error fetching countries:", error);
+      res.status(500).json({ error: "Failed to fetch data" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /reference/vendor-categories:
+   *   get:
+   *     tags: [Reference Data]
+   *     summary: Get vendor categories for Step 4
+   */
+  app.get("/api/reference/vendor-categories", async (req, res) => {
+    try {
+      const data = await storage.getReferenceData('vendorCategories');
+      res.json(data);
+    } catch (error) {
+      console.error("Error fetching vendor categories:", error);
+      res.status(500).json({ error: "Failed to fetch data" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /reference/currencies:
+   *   get:
+   *     tags: [Reference Data]
+   *     summary: Get currencies list
+   */
+  app.get("/api/reference/currencies", async (req, res) => {
+    try {
+      const data = await storage.getReferenceData('currencies');
+      res.json(data);
+    } catch (error) {
+      console.error("Error fetching currencies:", error);
+      res.status(500).json({ error: "Failed to fetch data" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /reference/payment-methods:
+   *   get:
+   *     tags: [Reference Data]
+   *     summary: Get payment methods
+   */
+  app.get("/api/reference/payment-methods", async (req, res) => {
+    try {
+      const data = await storage.getReferenceData('paymentMethods');
+      res.json(data);
+    } catch (error) {
+      console.error("Error fetching payment methods:", error);
+      res.status(500).json({ error: "Failed to fetch data" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /reference/financial-institutions:
+   *   get:
+   *     tags: [Reference Data]
+   *     summary: Get financial institutions (banks)
+   */
+  app.get("/api/reference/financial-institutions", async (req, res) => {
+    try {
+      const countryCode = req.query.country as string | undefined;
+      const data = await storage.getReferenceData('financialInstitutions');
+      const filtered = countryCode 
+        ? data.filter((item: any) => item.countryCode === countryCode)
+        : data;
+      res.json(filtered);
+    } catch (error) {
+      console.error("Error fetching financial institutions:", error);
+      res.status(500).json({ error: "Failed to fetch data" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /reference/proof-types:
+   *   get:
+   *     tags: [Reference Data]
+   *     summary: Get proof types for bank verification
+   */
+  app.get("/api/reference/proof-types", async (req, res) => {
+    try {
+      const data = await storage.getReferenceData('proofTypes');
+      res.json(data);
+    } catch (error) {
+      console.error("Error fetching proof types:", error);
+      res.status(500).json({ error: "Failed to fetch data" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /reference/verification-methods:
+   *   get:
+   *     tags: [Reference Data]
+   *     summary: Get identity verification methods
+   */
+  app.get("/api/reference/verification-methods", async (req, res) => {
+    try {
+      const data = await storage.getReferenceData('verificationMethods');
+      res.json(data);
+    } catch (error) {
+      console.error("Error fetching verification methods:", error);
+      res.status(500).json({ error: "Failed to fetch data" });
     }
   });
 
@@ -2114,6 +3980,3642 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching vendor analytics:", error);
       res.status(500).json({ error: "Failed to fetch vendor analytics" });
+    }
+  });
+
+  // ===== VENDOR PANEL EXTENDED APIs =====
+
+  /**
+   * @swagger
+   * /vendor/financials:
+   *   get:
+   *     tags: [Vendor Panel]
+   *     summary: Get vendor financial summary
+   *     description: Returns earnings, commissions, and payout information
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: Financial summary
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 totalEarnings: { type: number }
+   *                 totalCommission: { type: number }
+   *                 netEarnings: { type: number }
+   *                 pendingPayouts: { type: number }
+   *                 completedPayouts: { type: number }
+   *                 currentMonthEarnings: { type: number }
+   *                 lastMonthEarnings: { type: number }
+   *                 orderCount: { type: integer }
+   *                 averageOrderValue: { type: number }
+   */
+  app.get("/api/vendor/financials", async (req, res) => {
+    try {
+      if (!req.user || req.user.userType !== 'vendor') {
+        return res.status(403).json({ error: "Vendor access required" });
+      }
+
+      const financials = await storage.getVendorFinancials(req.user.id);
+      res.json(financials);
+    } catch (error) {
+      console.error("Error fetching vendor financials:", error);
+      res.status(500).json({ error: "Failed to fetch financial data" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/financials/monthly:
+   *   get:
+   *     tags: [Vendor Panel]
+   *     summary: Get monthly earnings breakdown
+   *     description: Returns earnings, commission, and net by month
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: query
+   *         name: months
+   *         schema: { type: integer, default: 12 }
+   *         description: Number of months to return
+   *     responses:
+   *       200:
+   *         description: Monthly earnings data
+   */
+  app.get("/api/vendor/financials/monthly", async (req, res) => {
+    try {
+      if (!req.user || req.user.userType !== 'vendor') {
+        return res.status(403).json({ error: "Vendor access required" });
+      }
+
+      const months = req.query.months ? parseInt(req.query.months as string) : 12;
+      const data = await storage.getVendorEarningsByMonth(req.user.id, months);
+      res.json(data);
+    } catch (error) {
+      console.error("Error fetching monthly earnings:", error);
+      res.status(500).json({ error: "Failed to fetch monthly earnings" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/commission:
+   *   get:
+   *     tags: [Vendor Panel]
+   *     summary: Get vendor's commission rate
+   *     description: Returns the vendor's current commission percentage
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: Commission info
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 percent: { type: string }
+   *                 isCustom: { type: boolean }
+   */
+  app.get("/api/vendor/commission", async (req, res) => {
+    try {
+      if (!req.user || req.user.userType !== 'vendor') {
+        return res.status(403).json({ error: "Vendor access required" });
+      }
+
+      const commission = await storage.getVendorCommission(req.user.id);
+      res.json(commission);
+    } catch (error) {
+      console.error("Error fetching commission:", error);
+      res.status(500).json({ error: "Failed to fetch commission" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/refunds:
+   *   get:
+   *     tags: [Vendor Panel]
+   *     summary: Get refund requests for vendor's products
+   *     description: Returns refund requests that involve the vendor's products
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: query
+   *         name: status
+   *         schema: { type: string, enum: [pending, under_review, approved, rejected, processing, completed, failed] }
+   *       - in: query
+   *         name: page
+   *         schema: { type: integer, default: 1 }
+   *       - in: query
+   *         name: limit
+   *         schema: { type: integer, default: 10 }
+   *     responses:
+   *       200:
+   *         description: List of refund requests
+   */
+  app.get("/api/vendor/refunds", async (req, res) => {
+    try {
+      if (!req.user || req.user.userType !== 'vendor') {
+        return res.status(403).json({ error: "Vendor access required" });
+      }
+
+      const { status, page, limit } = req.query;
+      const result = await storage.getVendorRefunds(req.user.id, {
+        status: status as string,
+        page: page ? parseInt(page as string) : undefined,
+        limit: limit ? parseInt(limit as string) : undefined,
+      });
+      
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching vendor refunds:", error);
+      res.status(500).json({ error: "Failed to fetch refunds" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/inventory/bulk:
+   *   put:
+   *     tags: [Vendor Panel]
+   *     summary: Bulk update product inventory
+   *     description: Updates stock levels for multiple products at once
+   *     security:
+   *       - bearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [updates]
+   *             properties:
+   *               updates:
+   *                 type: array
+   *                 items:
+   *                   type: object
+   *                   properties:
+   *                     productId: { type: integer }
+   *                     stock: { type: integer }
+   *     responses:
+   *       200:
+   *         description: Update result
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 updated: { type: integer }
+   *                 failed: { type: integer }
+   */
+  app.put("/api/vendor/inventory/bulk", async (req, res) => {
+    try {
+      if (!req.user || req.user.userType !== 'vendor') {
+        return res.status(403).json({ error: "Vendor access required" });
+      }
+
+      const { updates } = req.body;
+      
+      if (!updates || !Array.isArray(updates)) {
+        return res.status(400).json({ error: "Updates array is required" });
+      }
+      
+      const result = await storage.updateVendorStock(req.user.id, updates);
+      res.json(result);
+    } catch (error) {
+      console.error("Error updating inventory:", error);
+      res.status(500).json({ error: "Failed to update inventory" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/onboarding/status:
+   *   get:
+   *     tags: [Vendor Panel]
+   *     summary: Get vendor onboarding status
+   *     description: Returns the vendor's current onboarding status and review information
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: Onboarding status
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 status: { type: string }
+   *                 currentStep: { type: integer }
+   *                 submittedAt: { type: string, format: date-time }
+   *                 reviewedAt: { type: string, format: date-time }
+   *                 rejectionReason: { type: string }
+   *                 reviewNote: { type: string }
+   */
+  app.get("/api/vendor/onboarding/status", async (req, res) => {
+    try {
+      if (!req.user || req.user.userType !== 'vendor') {
+        return res.status(403).json({ error: "Vendor access required" });
+      }
+
+      const profile = await storage.getUserProfile(req.user.id);
+      
+      if (!profile) {
+        return res.status(404).json({ error: "Vendor profile not found" });
+      }
+      
+      res.json({
+        status: profile.onboardingStatus,
+        currentStep: profile.currentStep,
+        submittedAt: profile.submittedAt,
+        reviewedAt: profile.reviewedAt,
+        rejectionReason: profile.rejectionReason,
+        reviewNote: profile.reviewNote,
+      });
+    } catch (error) {
+      console.error("Error fetching onboarding status:", error);
+      res.status(500).json({ error: "Failed to fetch status" });
+    }
+  });
+
+  // ===== VENDOR NOTIFICATIONS APIs =====
+
+  /**
+   * @swagger
+   * /vendor/notifications:
+   *   get:
+   *     tags: [Vendor Panel]
+   *     summary: Get vendor notifications
+   *     description: Returns paginated notifications for the authenticated vendor
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: query
+   *         name: type
+   *         schema: { type: string, enum: [order_new, order_status, refund_request, payout, approval, product_review] }
+   *       - in: query
+   *         name: unreadOnly
+   *         schema: { type: boolean, default: false }
+   *       - in: query
+   *         name: page
+   *         schema: { type: integer, default: 1 }
+   *       - in: query
+   *         name: limit
+   *         schema: { type: integer, default: 20 }
+   *     responses:
+   *       200:
+   *         description: Notifications list
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 notifications: { type: array }
+   *                 total: { type: integer }
+   *                 unreadCount: { type: integer }
+   */
+  app.get("/api/vendor/notifications", async (req, res) => {
+    try {
+      if (!req.user || req.user.userType !== 'vendor') {
+        return res.status(403).json({ error: "Vendor access required" });
+      }
+
+      const { type, unreadOnly, page, limit } = req.query;
+      const result = await storage.getVendorNotifications(req.user.id, {
+        type: type as string,
+        unreadOnly: unreadOnly === 'true',
+        page: page ? parseInt(page as string) : undefined,
+        limit: limit ? parseInt(limit as string) : undefined,
+      });
+      
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching notifications:", error);
+      res.status(500).json({ error: "Failed to fetch notifications" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/notifications/{notificationId}/read:
+   *   post:
+   *     tags: [Vendor Panel]
+   *     summary: Mark notification as read
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: notificationId
+   *         required: true
+   *         schema: { type: integer }
+   *     responses:
+   *       200:
+   *         description: Notification marked as read
+   */
+  app.post("/api/vendor/notifications/:notificationId/read", async (req, res) => {
+    try {
+      if (!req.user || req.user.userType !== 'vendor') {
+        return res.status(403).json({ error: "Vendor access required" });
+      }
+
+      const notificationId = parseInt(req.params.notificationId);
+      const notification = await storage.markNotificationRead(req.user.id, notificationId);
+      
+      if (!notification) {
+        return res.status(404).json({ error: "Notification not found" });
+      }
+      
+      res.json(notification);
+    } catch (error) {
+      console.error("Error marking notification read:", error);
+      res.status(500).json({ error: "Failed to mark notification as read" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/notifications/read-all:
+   *   post:
+   *     tags: [Vendor Panel]
+   *     summary: Mark all notifications as read
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: All notifications marked as read
+   */
+  app.post("/api/vendor/notifications/read-all", async (req, res) => {
+    try {
+      if (!req.user || req.user.userType !== 'vendor') {
+        return res.status(403).json({ error: "Vendor access required" });
+      }
+
+      const count = await storage.markAllNotificationsRead(req.user.id);
+      res.json({ marked: count });
+    } catch (error) {
+      console.error("Error marking notifications read:", error);
+      res.status(500).json({ error: "Failed to mark notifications as read" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/notifications/{notificationId}:
+   *   delete:
+   *     tags: [Vendor Panel]
+   *     summary: Delete a notification
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: notificationId
+   *         required: true
+   *         schema: { type: integer }
+   *     responses:
+   *       200:
+   *         description: Notification deleted
+   */
+  app.delete("/api/vendor/notifications/:notificationId", async (req, res) => {
+    try {
+      if (!req.user || req.user.userType !== 'vendor') {
+        return res.status(403).json({ error: "Vendor access required" });
+      }
+
+      const notificationId = parseInt(req.params.notificationId);
+      const deleted = await storage.deleteNotification(req.user.id, notificationId);
+      
+      if (!deleted) {
+        return res.status(404).json({ error: "Notification not found" });
+      }
+      
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting notification:", error);
+      res.status(500).json({ error: "Failed to delete notification" });
+    }
+  });
+
+  // ===== ADMIN PANEL APIs =====
+
+  // Admin middleware helper
+  function requireAdmin(req: Request, res: Response, next: NextFunction) {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+    if (req.user.userType !== 'admin' && req.user.userType !== 'super_admin') {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+    next();
+  }
+
+  /**
+   * @swagger
+   * /admin/dashboard:
+   *   get:
+   *     tags: [Admin]
+   *     summary: Get admin dashboard statistics
+   *     description: Returns platform-wide statistics for the admin dashboard
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: Dashboard statistics
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 totalSellers: { type: integer }
+   *                 activeSellers: { type: integer }
+   *                 pendingApprovals: { type: integer }
+   *                 totalProducts: { type: integer }
+   *                 totalOrders: { type: integer }
+   *                 totalRevenue: { type: number }
+   *                 totalCustomers: { type: integer }
+   *                 totalRefunds: { type: integer }
+   */
+  app.get("/api/admin/dashboard", requireAdmin, async (req, res) => {
+    try {
+      const stats = await storage.getAdminDashboardStats();
+      res.json(stats);
+    } catch (error) {
+      console.error("Error fetching admin dashboard stats:", error);
+      res.status(500).json({ error: "Failed to fetch dashboard statistics" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/sellers:
+   *   get:
+   *     tags: [Admin - Sellers]
+   *     summary: Get all sellers with filters and pagination
+   *     description: Returns a paginated list of sellers with their profiles and stats
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: query
+   *         name: status
+   *         schema:
+   *           type: string
+   *           enum: [pending, in_progress, pending_verification, under_review, approved, rejected]
+   *         description: Filter by onboarding status
+   *       - in: query
+   *         name: search
+   *         schema:
+   *           type: string
+   *         description: Search by name, email, or username
+   *       - in: query
+   *         name: page
+   *         schema:
+   *           type: integer
+   *           default: 1
+   *       - in: query
+   *         name: limit
+   *         schema:
+   *           type: integer
+   *           default: 20
+   *       - in: query
+   *         name: sortOrder
+   *         schema:
+   *           type: string
+   *           enum: [asc, desc]
+   *           default: desc
+   *     responses:
+   *       200:
+   *         description: Paginated list of sellers
+   */
+  app.get("/api/admin/sellers", requireAdmin, async (req, res) => {
+    try {
+      const { status, search, page, limit, sortOrder } = req.query;
+      
+      const result = await storage.getAllSellers({
+        status: status as string,
+        search: search as string,
+        page: page ? parseInt(page as string) : 1,
+        limit: limit ? parseInt(limit as string) : 20,
+        sortOrder: (sortOrder as 'asc' | 'desc') || 'desc',
+      });
+      
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching sellers:", error);
+      res.status(500).json({ error: "Failed to fetch sellers" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/sellers/{id}:
+   *   get:
+   *     tags: [Admin - Sellers]
+   *     summary: Get seller details
+   *     description: Returns detailed information about a specific seller
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema:
+   *           type: string
+   *     responses:
+   *       200:
+   *         description: Seller details with profile, stats, and recent orders
+   *       404:
+   *         description: Seller not found
+   */
+  app.get("/api/admin/sellers/:id", requireAdmin, async (req, res) => {
+    try {
+      const seller = await storage.getSellerDetails(req.params.id);
+      
+      if (!seller) {
+        return res.status(404).json({ error: "Seller not found" });
+      }
+      
+      res.json(seller);
+    } catch (error) {
+      console.error("Error fetching seller details:", error);
+      res.status(500).json({ error: "Failed to fetch seller details" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/sellers/{id}/status:
+   *   patch:
+   *     tags: [Admin - Sellers]
+   *     summary: Update seller status
+   *     description: Approve, reject, or update seller onboarding status
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema:
+   *           type: string
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [status]
+   *             properties:
+   *               status:
+   *                 type: string
+   *                 enum: [approved, rejected, pending_verification, under_review]
+   *               note:
+   *                 type: string
+   *               rejectionReason:
+   *                 type: string
+   *     responses:
+   *       200:
+   *         description: Updated vendor profile
+   */
+  app.patch("/api/admin/sellers/:id/status", requireAdmin, async (req, res) => {
+    try {
+      const { status, note, rejectionReason } = req.body;
+      const validStatuses = ['approved', 'rejected', 'pending_verification', 'under_review'];
+      
+      if (!status || !validStatuses.includes(status)) {
+        return res.status(400).json({ error: "Invalid status. Must be one of: " + validStatuses.join(', ') });
+      }
+      
+      if (status === 'rejected' && !rejectionReason) {
+        return res.status(400).json({ error: "Rejection reason is required when rejecting a seller" });
+      }
+      
+      // Get seller before update for logging
+      const sellerBefore = await storage.getSellerDetails(req.params.id);
+      if (!sellerBefore) {
+        return res.status(404).json({ error: "Seller not found" });
+      }
+      
+      const updated = await storage.updateSellerStatus(
+        req.params.id,
+        status,
+        req.user!.id,
+        note,
+        rejectionReason
+      );
+      
+      if (!updated) {
+        return res.status(404).json({ error: "Seller profile not found" });
+      }
+      
+      // Log admin action
+      const actionType = status === 'approved' ? 'seller_approved' : 
+                        status === 'rejected' ? 'seller_rejected' : 'settings_changed';
+      
+      await storage.createAdminActionLog({
+        adminId: req.user!.id,
+        actionType: actionType as any,
+        targetType: 'user',
+        targetId: req.params.id,
+        previousValue: JSON.stringify({ status: sellerBefore.userProfile?.onboardingStatus }),
+        newValue: JSON.stringify({ status, note, rejectionReason }),
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+      });
+      
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating seller status:", error);
+      res.status(500).json({ error: "Failed to update seller status" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/sellers/{id}/suspend:
+   *   post:
+   *     tags: [Admin - Sellers]
+   *     summary: Suspend a seller account
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema:
+   *           type: string
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [reason]
+   *             properties:
+   *               reason:
+   *                 type: string
+   *     responses:
+   *       200:
+   *         description: Seller suspended
+   */
+  app.post("/api/admin/sellers/:id/suspend", requireAdmin, async (req, res) => {
+    try {
+      const { reason } = req.body;
+      
+      if (!reason) {
+        return res.status(400).json({ error: "Suspension reason is required" });
+      }
+      
+      const suspended = await storage.suspendUser(req.params.id, req.user!.id, reason);
+      
+      if (!suspended) {
+        return res.status(404).json({ error: "Seller not found" });
+      }
+      
+      // Log admin action
+      await storage.createAdminActionLog({
+        adminId: req.user!.id,
+        actionType: 'seller_suspended',
+        targetType: 'user',
+        targetId: req.params.id,
+        newValue: JSON.stringify({ reason }),
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+      });
+      
+      res.json({ success: true, user: suspended });
+    } catch (error) {
+      console.error("Error suspending seller:", error);
+      res.status(500).json({ error: "Failed to suspend seller" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/sellers/{id}/activate:
+   *   post:
+   *     tags: [Admin - Sellers]
+   *     summary: Activate a suspended seller account
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema:
+   *           type: string
+   *     responses:
+   *       200:
+   *         description: Seller activated
+   */
+  app.post("/api/admin/sellers/:id/activate", requireAdmin, async (req, res) => {
+    try {
+      const activated = await storage.activateUser(req.params.id, req.user!.id);
+      
+      if (!activated) {
+        return res.status(404).json({ error: "Seller not found" });
+      }
+      
+      // Log admin action
+      await storage.createAdminActionLog({
+        adminId: req.user!.id,
+        actionType: 'seller_activated',
+        targetType: 'user',
+        targetId: req.params.id,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+      });
+      
+      res.json({ success: true, user: activated });
+    } catch (error) {
+      console.error("Error activating seller:", error);
+      res.status(500).json({ error: "Failed to activate seller" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/action-logs:
+   *   get:
+   *     tags: [Admin]
+   *     summary: Get admin action logs
+   *     description: Returns audit trail of admin actions
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: query
+   *         name: adminId
+   *         schema:
+   *           type: string
+   *       - in: query
+   *         name: actionType
+   *         schema:
+   *           type: string
+   *       - in: query
+   *         name: targetType
+   *         schema:
+   *           type: string
+   *       - in: query
+   *         name: targetId
+   *         schema:
+   *           type: string
+   *       - in: query
+   *         name: page
+   *         schema:
+   *           type: integer
+   *       - in: query
+   *         name: limit
+   *         schema:
+   *           type: integer
+   *     responses:
+   *       200:
+   *         description: Paginated list of admin action logs
+   */
+  app.get("/api/admin/action-logs", requireAdmin, async (req, res) => {
+    try {
+      const { adminId, actionType, targetType, targetId, page, limit } = req.query;
+      
+      const result = await storage.getAdminActionLogs({
+        adminId: adminId as string,
+        actionType: actionType as string,
+        targetType: targetType as string,
+        targetId: targetId as string,
+        page: page ? parseInt(page as string) : 1,
+        limit: limit ? parseInt(limit as string) : 50,
+      });
+      
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching admin action logs:", error);
+      res.status(500).json({ error: "Failed to fetch action logs" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/admins:
+   *   get:
+   *     tags: [Admin]
+   *     summary: Get all admin users
+   *     description: Returns list of admin and super_admin users
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: List of admin users
+   */
+  app.get("/api/admin/admins", requireAdmin, async (req, res) => {
+    try {
+      const admins = await storage.getAllAdmins();
+      res.json(admins);
+    } catch (error) {
+      console.error("Error fetching admins:", error);
+      res.status(500).json({ error: "Failed to fetch admins" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/admins:
+   *   post:
+   *     tags: [Admin]
+   *     summary: Create a new admin user
+   *     description: Only super_admin can create new admin users
+   *     security:
+   *       - bearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [name, email, password]
+   *             properties:
+   *               name: { type: string }
+   *               email: { type: string, format: email }
+   *               password: { type: string, minLength: 6 }
+   *     responses:
+   *       201:
+   *         description: Admin created successfully
+   *       403:
+   *         description: Only super_admin can create admins
+   */
+  app.post("/api/admin/admins", requireAdmin, async (req, res) => {
+    try {
+      // Only super_admin can create new admins
+      if (req.user!.userType !== 'super_admin') {
+        return res.status(403).json({ error: "Only super admins can create new admin users" });
+      }
+      
+      const { name, email, password } = req.body;
+      
+      if (!name || !email || !password) {
+        return res.status(400).json({ error: "Name, email, and password are required" });
+      }
+      
+      if (password.length < 6) {
+        return res.status(400).json({ error: "Password must be at least 6 characters" });
+      }
+      
+      // Check if email exists
+      const existing = await storage.getUserByEmail(email);
+      if (existing) {
+        return res.status(400).json({ error: "Email already registered" });
+      }
+      
+      // Hash password
+      const hashedPassword = await bcrypt.hash(password, 10);
+      
+      const admin = await storage.createAdmin({
+        name,
+        email,
+        password: hashedPassword,
+        userType: 'admin',
+      });
+      
+      // Log admin action
+      await storage.createAdminActionLog({
+        adminId: req.user!.id,
+        actionType: 'admin_created',
+        targetType: 'user',
+        targetId: admin.id,
+        newValue: JSON.stringify({ name, email }),
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+      });
+      
+      res.status(201).json({
+        id: admin.id,
+        name: admin.name,
+        email: admin.email,
+        userType: admin.userType,
+        createdAt: admin.createdAt,
+      });
+    } catch (error) {
+      console.error("Error creating admin:", error);
+      res.status(500).json({ error: "Failed to create admin" });
+    }
+  });
+
+  // ===== PRODUCT REFERENCE DATA APIs =====
+
+  /**
+   * @swagger
+   * /products/reference/{type}:
+   *   get:
+   *     tags: [Products]
+   *     summary: Get product reference data
+   *     description: Returns reference data for product dropdowns (sizes, colors, features, etc.)
+   *     parameters:
+   *       - in: path
+   *         name: type
+   *         required: true
+   *         schema:
+   *           type: string
+   *           enum: [sizes, colors, features, performance, thickness, materials, driveTypes, dimensionUnits, weightUnits, controlledItemTypes, pricingTerms, manufacturingSources]
+   *     responses:
+   *       200:
+   *         description: Reference data list
+   */
+  app.get("/api/products/reference/:type", async (req, res) => {
+    try {
+      const data = await storage.getProductReferenceData(req.params.type);
+      res.json(data);
+    } catch (error) {
+      console.error("Error fetching product reference data:", error);
+      res.status(500).json({ error: "Failed to fetch reference data" });
+    }
+  });
+
+  // ===== VENDOR PRODUCT APIs =====
+
+  /**
+   * @swagger
+   * /vendor/products:
+   *   get:
+   *     tags: [Vendor Products]
+   *     summary: List vendor's products
+   *     description: Returns paginated list of vendor's products with optional filters
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: query
+   *         name: status
+   *         schema:
+   *           type: string
+   *           enum: [draft, pending_review, approved, rejected, suspended]
+   *       - in: query
+   *         name: search
+   *         schema: { type: string }
+   *       - in: query
+   *         name: page
+   *         schema: { type: integer, default: 1 }
+   *       - in: query
+   *         name: limit
+   *         schema: { type: integer, default: 20 }
+   *     responses:
+   *       200:
+   *         description: Paginated list of vendor products
+   *       401:
+   *         description: Not authenticated
+   */
+  app.get("/api/vendor/products", async (req, res) => {
+    if (!req.user || req.user.userType !== 'vendor') {
+      return res.status(401).json({ error: "Vendor authentication required" });
+    }
+    
+    try {
+      const { status, search, page, limit } = req.query;
+      const result = await storage.getVendorProducts(req.user.id, {
+        status: status as string,
+        search: search as string,
+        page: page ? parseInt(page as string) : undefined,
+        limit: limit ? parseInt(limit as string) : undefined,
+      });
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching vendor products:", error);
+      res.status(500).json({ error: "Failed to fetch products" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/products:
+   *   post:
+   *     tags: [Vendor Products]
+   *     summary: Create a new product draft
+   *     description: |
+   *       Creates a new product in draft status for the authenticated vendor.
+   *       This initializes an empty product that can be populated through PATCH updates.
+   *       Use the returned product ID to update product data via PATCH /vendor/products/{id}.
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       201:
+   *         description: Product draft created successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/VendorProduct'
+   *       401:
+   *         description: Not authenticated or not a vendor
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/Error'
+   */
+  app.post("/api/vendor/products", async (req, res) => {
+    if (!req.user || req.user.userType !== 'vendor') {
+      return res.status(401).json({ error: "Vendor authentication required" });
+    }
+    
+    try {
+      const product = await storage.createProductDraft(req.user.id);
+      res.status(201).json(product);
+    } catch (error) {
+      console.error("Error creating product draft:", error);
+      res.status(500).json({ error: "Failed to create product draft" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/products/{id}:
+   *   get:
+   *     tags: [Vendor Products]
+   *     summary: Get product details
+   *     description: Returns full product details including media and pricing tiers
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: integer }
+   *     responses:
+   *       200:
+   *         description: Product details
+   *       404:
+   *         description: Product not found
+   */
+  app.get("/api/vendor/products/:id", async (req, res) => {
+    if (!req.user || req.user.userType !== 'vendor') {
+      return res.status(401).json({ error: "Vendor authentication required" });
+    }
+    
+    try {
+      const product = await storage.getProductWithDetails(parseInt(req.params.id));
+      if (!product) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+      if (product.vendorId !== req.user.id) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      res.json(product);
+    } catch (error) {
+      console.error("Error fetching product:", error);
+      res.status(500).json({ error: "Failed to fetch product" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/products/{id}:
+   *   patch:
+   *     tags: [Vendor Products]
+   *     summary: Update product data
+   *     description: |
+   *       Updates product fields (auto-saves as draft). Submit any combination of product fields.
+   *       The product remains in draft status until explicitly submitted for review.
+   *       See VendorProductInput schema for all available fields organized by tabs.
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: integer }
+   *         description: Product ID
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             $ref: '#/components/schemas/VendorProductInput'
+   *           examples:
+   *             basicInfo:
+   *               summary: Tab 1 - Basic Information
+   *               value:
+   *                 name: "Armored Door Panel - Level 4"
+   *                 sku: "ADP-L4-2024"
+   *                 mainCategoryId: 1
+   *                 categoryId: 5
+   *                 vehicleCompatibility: "Land Cruiser 200 Series"
+   *                 certifications: "NIJ Level IV"
+   *                 countryOfOrigin: "USA"
+   *             technicalSpecs:
+   *               summary: Tab 2 - Technical Specifications
+   *               value:
+   *                 dimensionLength: 120.5
+   *                 dimensionWidth: 80.3
+   *                 dimensionHeight: 5.2
+   *                 dimensionUnit: "cm"
+   *                 materials: ["Hardened Steel", "Kevlar Composite"]
+   *                 features: ["Blast Resistant", "Corrosion Protected"]
+   *                 technicalDescription: "Advanced composite armor..."
+   *             variants:
+   *               summary: Tab 2 - Available Variants
+   *               value:
+   *                 driveTypes: ["4WD", "AWD"]
+   *                 sizes: ["Standard", "Extended"]
+   *                 thickness: ["25mm", "30mm"]
+   *                 colors: ["Black", "Gray"]
+   *                 weightValue: 45.5
+   *                 weightUnit: "kg"
+   *                 minOrderQuantity: 2
+   *             pricing:
+   *               summary: Tab 3 - Pricing & Availability
+   *               value:
+   *                 basePrice: 4599.99
+   *                 currency: "USD"
+   *                 pricingTerms: ["FOB", "CIF"]
+   *                 productionLeadTime: 45
+   *                 readyStockAvailable: true
+   *                 stock: 25
+   *             compliance:
+   *               summary: Tab 5 - Compliance & Declarations
+   *               value:
+   *                 manufacturingSource: "OEM"
+   *                 requiresExportLicense: true
+   *                 hasWarranty: true
+   *                 warrantyDuration: 24
+   *                 warrantyDurationUnit: "months"
+   *                 complianceConfirmed: true
+   *     responses:
+   *       200:
+   *         description: Product updated successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/VendorProduct'
+   *       404:
+   *         description: Product not found
+   *       403:
+   *         description: Access denied - not your product
+   */
+  app.patch("/api/vendor/products/:id", async (req, res) => {
+    if (!req.user || req.user.userType !== 'vendor') {
+      return res.status(401).json({ error: "Vendor authentication required" });
+    }
+    
+    try {
+      const product = await storage.getProductById(parseInt(req.params.id));
+      if (!product) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+      if (product.vendorId !== req.user.id) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      
+      // Validate category IDs if provided
+      const { mainCategoryId, categoryId, subCategoryId } = req.body;
+      const categoryIds = [mainCategoryId, categoryId, subCategoryId].filter(id => id !== undefined);
+      
+      if (categoryIds.length > 0) {
+        const validCategories = await storage.validateCategoryIds(categoryIds);
+        const invalidIds = categoryIds.filter(id => !validCategories.includes(id));
+        
+        if (invalidIds.length > 0) {
+          return res.status(400).json({ 
+            error: "Invalid category IDs", 
+            invalidIds,
+            message: `The following category IDs do not exist: ${invalidIds.join(', ')}`
+          });
+        }
+      }
+      
+      const updated = await storage.updateProductData(parseInt(req.params.id), req.body);
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating product:", error);
+      res.status(500).json({ error: "Failed to update product" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/products/{id}/submit:
+   *   post:
+   *     tags: [Vendor Products]
+   *     summary: Submit product for review
+   *     description: Submits a draft product for admin review
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: integer }
+   *     responses:
+   *       200:
+   *         description: Product submitted for review
+   *       400:
+   *         description: Product not ready for submission
+   */
+  app.post("/api/vendor/products/:id/submit", async (req, res) => {
+    if (!req.user || req.user.userType !== 'vendor') {
+      return res.status(401).json({ error: "Vendor authentication required" });
+    }
+    
+    try {
+      const product = await storage.getProductById(parseInt(req.params.id));
+      if (!product) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+      if (product.vendorId !== req.user.id) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      if (product.status !== 'draft' && product.status !== 'rejected') {
+        return res.status(400).json({ error: "Only draft or rejected products can be submitted" });
+      }
+      
+      const updated = await storage.submitProductForReview(parseInt(req.params.id));
+      res.json(updated);
+    } catch (error) {
+      console.error("Error submitting product:", error);
+      res.status(500).json({ error: "Failed to submit product" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/products/{id}:
+   *   delete:
+   *     tags: [Vendor Products]
+   *     summary: Delete a product
+   *     description: Deletes a product (only drafts can be deleted)
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: integer }
+   *     responses:
+   *       204:
+   *         description: Product deleted
+   *       400:
+   *         description: Cannot delete non-draft product
+   */
+  app.delete("/api/vendor/products/:id", async (req, res) => {
+    if (!req.user || req.user.userType !== 'vendor') {
+      return res.status(401).json({ error: "Vendor authentication required" });
+    }
+    
+    try {
+      const product = await storage.getProductById(parseInt(req.params.id));
+      if (!product) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+      if (product.vendorId !== req.user.id) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      if (product.status !== 'draft') {
+        return res.status(400).json({ error: "Only draft products can be deleted" });
+      }
+      
+      await storage.deleteProduct(parseInt(req.params.id), req.user.id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting product:", error);
+      res.status(500).json({ error: "Failed to delete product" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/products/{id}/media:
+   *   post:
+   *     tags: [Vendor Products]
+   *     summary: Add product media
+   *     description: Adds an image or file to the product
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: integer }
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [type, url]
+   *             properties:
+   *               type: { type: string, enum: [product_image, cad_file, certificate, msds, manual, video] }
+   *               url: { type: string }
+   *               fileName: { type: string }
+   *               fileSize: { type: integer }
+   *               mimeType: { type: string }
+   *               isCover: { type: boolean }
+   *               displayOrder: { type: integer }
+   *     responses:
+   *       201:
+   *         description: Media added
+   */
+  app.post("/api/vendor/products/:id/media", async (req, res) => {
+    if (!req.user || req.user.userType !== 'vendor') {
+      return res.status(401).json({ error: "Vendor authentication required" });
+    }
+    
+    try {
+      const product = await storage.getProductById(parseInt(req.params.id));
+      if (!product) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+      if (product.vendorId !== req.user.id) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      
+      const media = await storage.addProductMedia({
+        productId: parseInt(req.params.id),
+        ...req.body,
+      });
+      res.status(201).json(media);
+    } catch (error) {
+      console.error("Error adding product media:", error);
+      res.status(500).json({ error: "Failed to add media" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/products/{id}/media/{mediaId}:
+   *   delete:
+   *     tags: [Vendor Products]
+   *     summary: Delete product media
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: integer }
+   *       - in: path
+   *         name: mediaId
+   *         required: true
+   *         schema: { type: integer }
+   *     responses:
+   *       204:
+   *         description: Media deleted
+   */
+  app.delete("/api/vendor/products/:id/media/:mediaId", async (req, res) => {
+    if (!req.user || req.user.userType !== 'vendor') {
+      return res.status(401).json({ error: "Vendor authentication required" });
+    }
+    
+    try {
+      const product = await storage.getProductById(parseInt(req.params.id));
+      if (!product) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+      if (product.vendorId !== req.user.id) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      
+      await storage.deleteProductMedia(parseInt(req.params.mediaId));
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting product media:", error);
+      res.status(500).json({ error: "Failed to delete media" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/products/{id}/media/{mediaId}/cover:
+   *   post:
+   *     tags: [Vendor Products]
+   *     summary: Set cover image
+   *     description: Sets a media item as the product cover image
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: integer }
+   *       - in: path
+   *         name: mediaId
+   *         required: true
+   *         schema: { type: integer }
+   *     responses:
+   *       200:
+   *         description: Cover image set
+   */
+  app.post("/api/vendor/products/:id/media/:mediaId/cover", async (req, res) => {
+    if (!req.user || req.user.userType !== 'vendor') {
+      return res.status(401).json({ error: "Vendor authentication required" });
+    }
+    
+    try {
+      const product = await storage.getProductById(parseInt(req.params.id));
+      if (!product) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+      if (product.vendorId !== req.user.id) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      
+      await storage.setProductCoverImage(parseInt(req.params.id), parseInt(req.params.mediaId));
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error setting cover image:", error);
+      res.status(500).json({ error: "Failed to set cover image" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/products/{id}/pricing-tiers:
+   *   put:
+   *     tags: [Vendor Products]
+   *     summary: Set pricing tiers
+   *     description: Replaces all pricing tiers for a product
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: integer }
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               tiers:
+   *                 type: array
+   *                 items:
+   *                   type: object
+   *                   required: [minQuantity, price]
+   *                   properties:
+   *                     minQuantity: { type: integer }
+   *                     maxQuantity: { type: integer }
+   *                     price: { type: number }
+   *     responses:
+   *       200:
+   *         description: Pricing tiers updated
+   */
+  app.put("/api/vendor/products/:id/pricing-tiers", async (req, res) => {
+    if (!req.user || req.user.userType !== 'vendor') {
+      return res.status(401).json({ error: "Vendor authentication required" });
+    }
+    
+    try {
+      const product = await storage.getProductById(parseInt(req.params.id));
+      if (!product) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+      if (product.vendorId !== req.user.id) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      
+      const { tiers } = req.body;
+      const tiersWithProductId = (tiers || []).map((tier: any) => ({
+        ...tier,
+        productId: parseInt(req.params.id),
+      }));
+      
+      const updatedTiers = await storage.setProductPricingTiers(parseInt(req.params.id), tiersWithProductId);
+      res.json(updatedTiers);
+    } catch (error) {
+      console.error("Error setting pricing tiers:", error);
+      res.status(500).json({ error: "Failed to set pricing tiers" });
+    }
+  });
+
+  // ===== ADMIN PRODUCT APIs =====
+
+  /**
+   * @swagger
+   * /admin/products:
+   *   get:
+   *     tags: [Admin Products]
+   *     summary: List all products for admin
+   *     description: Returns paginated list of all products with optional filters
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: query
+   *         name: status
+   *         schema:
+   *           type: string
+   *           enum: [draft, pending_review, approved, rejected, suspended]
+   *       - in: query
+   *         name: vendorId
+   *         schema: { type: string }
+   *       - in: query
+   *         name: search
+   *         schema: { type: string }
+   *       - in: query
+   *         name: isFeatured
+   *         schema: { type: boolean }
+   *       - in: query
+   *         name: page
+   *         schema: { type: integer, default: 1 }
+   *       - in: query
+   *         name: limit
+   *         schema: { type: integer, default: 20 }
+   *     responses:
+   *       200:
+   *         description: Paginated list of products
+   *       401:
+   *         description: Not authenticated
+   */
+  app.get("/api/admin/products", requireAdmin, async (req, res) => {
+    try {
+      const { status, vendorId, search, isFeatured, page, limit } = req.query;
+      const result = await storage.getProductsForAdmin({
+        status: status as string,
+        vendorId: vendorId as string,
+        search: search as string,
+        isFeatured: isFeatured === 'true' ? true : isFeatured === 'false' ? false : undefined,
+        page: page ? parseInt(page as string) : undefined,
+        limit: limit ? parseInt(limit as string) : undefined,
+      });
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching products for admin:", error);
+      res.status(500).json({ error: "Failed to fetch products" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/products/{id}:
+   *   get:
+   *     tags: [Admin Products]
+   *     summary: Get product details for admin
+   *     description: Returns full product details including media, pricing, and vendor info
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: integer }
+   *     responses:
+   *       200:
+   *         description: Product details
+   *       404:
+   *         description: Product not found
+   */
+  app.get("/api/admin/products/:id", requireAdmin, async (req, res) => {
+    try {
+      const product = await storage.getProductWithDetails(parseInt(req.params.id));
+      if (!product) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+      res.json(product);
+    } catch (error) {
+      console.error("Error fetching product:", error);
+      res.status(500).json({ error: "Failed to fetch product" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/products/{id}/approve:
+   *   post:
+   *     tags: [Admin Products]
+   *     summary: Approve a product
+   *     description: Approves a pending product for listing
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: integer }
+   *     requestBody:
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               note: { type: string }
+   *     responses:
+   *       200:
+   *         description: Product approved
+   */
+  app.post("/api/admin/products/:id/approve", requireAdmin, async (req, res) => {
+    try {
+      const { note } = req.body;
+      const product = await storage.approveProduct(parseInt(req.params.id), req.user!.id, note);
+      
+      if (!product) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+      
+      await storage.createAdminActionLog({
+        adminId: req.user!.id,
+        actionType: 'product_approved',
+        targetType: 'product',
+        targetId: req.params.id,
+        newValue: 'approved',
+        note,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+      });
+      
+      res.json(product);
+    } catch (error) {
+      console.error("Error approving product:", error);
+      res.status(500).json({ error: "Failed to approve product" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/products/{id}/reject:
+   *   post:
+   *     tags: [Admin Products]
+   *     summary: Reject a product
+   *     description: Rejects a product with a reason
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: integer }
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [reason]
+   *             properties:
+   *               reason: { type: string }
+   *     responses:
+   *       200:
+   *         description: Product rejected
+   */
+  app.post("/api/admin/products/:id/reject", requireAdmin, async (req, res) => {
+    try {
+      const { reason } = req.body;
+      
+      if (!reason) {
+        return res.status(400).json({ error: "Rejection reason is required" });
+      }
+      
+      const product = await storage.rejectProduct(parseInt(req.params.id), req.user!.id, reason);
+      
+      if (!product) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+      
+      await storage.createAdminActionLog({
+        adminId: req.user!.id,
+        actionType: 'product_rejected',
+        targetType: 'product',
+        targetId: req.params.id,
+        newValue: 'rejected',
+        note: reason,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+      });
+      
+      res.json(product);
+    } catch (error) {
+      console.error("Error rejecting product:", error);
+      res.status(500).json({ error: "Failed to reject product" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/products/{id}/suspend:
+   *   post:
+   *     tags: [Admin Products]
+   *     summary: Suspend a product
+   *     description: Suspends an approved product
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: integer }
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [reason]
+   *             properties:
+   *               reason: { type: string }
+   *     responses:
+   *       200:
+   *         description: Product suspended
+   */
+  app.post("/api/admin/products/:id/suspend", requireAdmin, async (req, res) => {
+    try {
+      const { reason } = req.body;
+      
+      if (!reason) {
+        return res.status(400).json({ error: "Suspension reason is required" });
+      }
+      
+      const product = await storage.suspendProduct(parseInt(req.params.id), req.user!.id, reason);
+      
+      if (!product) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+      
+      await storage.createAdminActionLog({
+        adminId: req.user!.id,
+        actionType: 'product_approved', // Using existing enum
+        targetType: 'product',
+        targetId: req.params.id,
+        previousValue: 'approved',
+        newValue: 'suspended',
+        note: reason,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+      });
+      
+      res.json(product);
+    } catch (error) {
+      console.error("Error suspending product:", error);
+      res.status(500).json({ error: "Failed to suspend product" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/products/{id}/feature:
+   *   post:
+   *     tags: [Admin Products]
+   *     summary: Feature/unfeature a product
+   *     description: Toggles the featured status of a product
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: integer }
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [featured]
+   *             properties:
+   *               featured: { type: boolean }
+   *     responses:
+   *       200:
+   *         description: Product feature status updated
+   */
+  app.post("/api/admin/products/:id/feature", requireAdmin, async (req, res) => {
+    try {
+      const { featured } = req.body;
+      
+      if (typeof featured !== 'boolean') {
+        return res.status(400).json({ error: "Featured must be a boolean" });
+      }
+      
+      const product = await storage.featureProduct(parseInt(req.params.id), featured);
+      
+      if (!product) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+      
+      await storage.createAdminActionLog({
+        adminId: req.user!.id,
+        actionType: featured ? 'product_featured' : 'product_unfeatured',
+        targetType: 'product',
+        targetId: req.params.id,
+        newValue: featured ? 'featured' : 'unfeatured',
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+      });
+      
+      res.json(product);
+    } catch (error) {
+      console.error("Error featuring product:", error);
+      res.status(500).json({ error: "Failed to feature product" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/products/{id}/notes:
+   *   post:
+   *     tags: [Admin Products]
+   *     summary: Add a review note to a product
+   *     description: Adds admin feedback/comment to a product for the seller to see
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: integer }
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [message]
+   *             properties:
+   *               message: { type: string }
+   *               requiresChanges: { type: boolean, description: "Flag if seller needs to make changes" }
+   *               isVisibleToSeller: { type: boolean, default: true }
+   *     responses:
+   *       201:
+   *         description: Note added
+   */
+  app.post("/api/admin/products/:id/notes", requireAdmin, async (req, res) => {
+    try {
+      const { message, requiresChanges, isVisibleToSeller } = req.body;
+      
+      if (!message || message.trim() === '') {
+        return res.status(400).json({ error: "Message is required" });
+      }
+      
+      const product = await storage.getProductById(parseInt(req.params.id));
+      if (!product) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+      
+      const note = await storage.addProductReviewNote({
+        productId: parseInt(req.params.id),
+        adminId: req.user!.id,
+        message: message.trim(),
+        requiresChanges: requiresChanges ?? false,
+        isVisibleToSeller: isVisibleToSeller ?? true,
+      });
+      
+      await storage.createAdminActionLog({
+        adminId: req.user!.id,
+        actionType: 'product_note_added',
+        targetType: 'product',
+        targetId: req.params.id,
+        note: message.substring(0, 100),
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+      });
+      
+      res.status(201).json(note);
+    } catch (error) {
+      console.error("Error adding product note:", error);
+      res.status(500).json({ error: "Failed to add note" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/products/{id}/notes:
+   *   get:
+   *     tags: [Admin Products]
+   *     summary: Get all review notes for a product
+   *     description: Returns all admin notes for a product (including internal notes)
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: integer }
+   *     responses:
+   *       200:
+   *         description: List of review notes
+   */
+  app.get("/api/admin/products/:id/notes", requireAdmin, async (req, res) => {
+    try {
+      const notes = await storage.getProductReviewNotes(parseInt(req.params.id), false);
+      res.json(notes);
+    } catch (error) {
+      console.error("Error fetching product notes:", error);
+      res.status(500).json({ error: "Failed to fetch notes" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/products/{id}/notes:
+   *   get:
+   *     tags: [Vendor Products]
+   *     summary: Get admin feedback on a product
+   *     description: Returns admin notes/feedback visible to the seller
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: integer }
+   *     responses:
+   *       200:
+   *         description: List of visible review notes
+   */
+  app.get("/api/vendor/products/:id/notes", async (req, res) => {
+    if (!req.user || req.user.userType !== 'vendor') {
+      return res.status(401).json({ error: "Vendor authentication required" });
+    }
+    
+    try {
+      const product = await storage.getProductById(parseInt(req.params.id));
+      if (!product) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+      if (product.vendorId !== req.user.id) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      
+      const notes = await storage.getProductReviewNotes(parseInt(req.params.id), true);
+      res.json(notes);
+    } catch (error) {
+      console.error("Error fetching product notes:", error);
+      res.status(500).json({ error: "Failed to fetch notes" });
+    }
+  });
+
+  // ===== ADMIN VENDOR ONBOARDING APIs =====
+
+  /**
+   * @swagger
+   * /admin/vendors:
+   *   get:
+   *     tags: [Admin Vendors]
+   *     summary: List vendors for admin review
+   *     description: Returns paginated list of vendors. By default shows only vendors pending approval (under_review status).
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: query
+   *         name: status
+   *         schema:
+   *           type: string
+   *           enum: [pending, in_progress, pending_verification, under_review, approved, rejected, suspended]
+   *         description: Filter by onboarding status. Defaults to 'under_review' if not specified.
+   *       - in: query
+   *         name: search
+   *         schema: { type: string }
+   *         description: Search by company name, email, or user name
+   *       - in: query
+   *         name: country
+   *         schema: { type: string }
+   *       - in: query
+   *         name: page
+   *         schema: { type: integer, default: 1 }
+   *       - in: query
+   *         name: limit
+   *         schema: { type: integer, default: 20 }
+   *     responses:
+   *       200:
+   *         description: Paginated list of vendors
+   */
+  app.get("/api/admin/vendors", requireAdmin, async (req, res) => {
+    try {
+      const { status, search, country, category, page, limit } = req.query;
+      const result = await storage.getVendorsForAdmin({
+        status: status as string,
+        search: search as string,
+        country: country as string,
+        category: category as string,
+        page: page ? parseInt(page as string) : undefined,
+        limit: limit ? parseInt(limit as string) : undefined,
+      });
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching vendors:", error);
+      res.status(500).json({ error: "Failed to fetch vendors" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/vendors/{userId}:
+   *   get:
+   *     tags: [Admin Vendors]
+   *     summary: Get vendor details
+   *     description: Returns full vendor profile including user info and onboarding details
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: userId
+   *         required: true
+   *         schema: { type: string }
+   *     responses:
+   *       200:
+   *         description: Vendor profile details
+   *       404:
+   *         description: Vendor not found
+   */
+  app.get("/api/admin/vendors/:userId", requireAdmin, async (req, res) => {
+    try {
+      const profile = await storage.getUserProfileByUserId(req.params.userId);
+      if (!profile) {
+        return res.status(404).json({ error: "Vendor not found" });
+      }
+      const user = await storage.getUser(req.params.userId);
+      res.json({ ...profile, user });
+    } catch (error) {
+      console.error("Error fetching vendor:", error);
+      res.status(500).json({ error: "Failed to fetch vendor" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/vendors/{userId}/approve:
+   *   post:
+   *     tags: [Admin Vendors]
+   *     summary: Approve vendor onboarding
+   *     description: Approves a vendor's onboarding application and activates their account
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: userId
+   *         required: true
+   *         schema: { type: string }
+   *     requestBody:
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               note: { type: string }
+   *     responses:
+   *       200:
+   *         description: Vendor approved
+   */
+  app.post("/api/admin/vendors/:userId/approve", requireAdmin, async (req, res) => {
+    try {
+      const { note } = req.body;
+      const profile = await storage.approveVendorOnboarding(req.params.userId, req.user!.id, note);
+      
+      if (!profile) {
+        return res.status(404).json({ error: "Vendor not found" });
+      }
+      
+      await storage.createAdminActionLog({
+        adminId: req.user!.id,
+        actionType: 'seller_approved',
+        targetType: 'user',
+        targetId: req.params.userId,
+        newValue: 'approved',
+        note,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+      });
+      
+      res.json(profile);
+    } catch (error) {
+      console.error("Error approving vendor:", error);
+      res.status(500).json({ error: "Failed to approve vendor" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/vendors/{userId}/reject:
+   *   post:
+   *     tags: [Admin Vendors]
+   *     summary: Reject vendor onboarding
+   *     description: Rejects a vendor's onboarding application with a reason
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: userId
+   *         required: true
+   *         schema: { type: string }
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [reason]
+   *             properties:
+   *               reason: { type: string }
+   *               note: { type: string }
+   *     responses:
+   *       200:
+   *         description: Vendor rejected
+   */
+  app.post("/api/admin/vendors/:userId/reject", requireAdmin, async (req, res) => {
+    try {
+      const { reason, note } = req.body;
+      
+      if (!reason) {
+        return res.status(400).json({ error: "Rejection reason is required" });
+      }
+      
+      const profile = await storage.rejectVendorOnboarding(req.params.userId, req.user!.id, reason, note);
+      
+      if (!profile) {
+        return res.status(404).json({ error: "Vendor not found" });
+      }
+      
+      await storage.createAdminActionLog({
+        adminId: req.user!.id,
+        actionType: 'seller_rejected',
+        targetType: 'user',
+        targetId: req.params.userId,
+        newValue: 'rejected',
+        note: reason,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+      });
+      
+      res.json(profile);
+    } catch (error) {
+      console.error("Error rejecting vendor:", error);
+      res.status(500).json({ error: "Failed to reject vendor" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/vendors/{userId}/suspend:
+   *   post:
+   *     tags: [Admin Vendors]
+   *     summary: Suspend a vendor
+   *     description: Suspends an approved vendor's account
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: userId
+   *         required: true
+   *         schema: { type: string }
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [reason]
+   *             properties:
+   *               reason: { type: string }
+   *     responses:
+   *       200:
+   *         description: Vendor suspended
+   */
+  app.post("/api/admin/vendors/:userId/suspend", requireAdmin, async (req, res) => {
+    try {
+      const { reason } = req.body;
+      
+      if (!reason) {
+        return res.status(400).json({ error: "Suspension reason is required" });
+      }
+      
+      const profile = await storage.suspendVendor(req.params.userId, req.user!.id, reason);
+      
+      if (!profile) {
+        return res.status(404).json({ error: "Vendor not found" });
+      }
+      
+      await storage.createAdminActionLog({
+        adminId: req.user!.id,
+        actionType: 'seller_suspended',
+        targetType: 'user',
+        targetId: req.params.userId,
+        previousValue: 'approved',
+        newValue: 'suspended',
+        note: reason,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+      });
+      
+      res.json(profile);
+    } catch (error) {
+      console.error("Error suspending vendor:", error);
+      res.status(500).json({ error: "Failed to suspend vendor" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/vendors/{userId}/reactivate:
+   *   post:
+   *     tags: [Admin Vendors]
+   *     summary: Reactivate a suspended vendor
+   *     description: Reactivates a suspended vendor's account
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: userId
+   *         required: true
+   *         schema: { type: string }
+   *     requestBody:
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               note: { type: string }
+   *     responses:
+   *       200:
+   *         description: Vendor reactivated
+   */
+  app.post("/api/admin/vendors/:userId/reactivate", requireAdmin, async (req, res) => {
+    try {
+      const { note } = req.body;
+      const profile = await storage.reactivateVendor(req.params.userId, req.user!.id, note);
+      
+      if (!profile) {
+        return res.status(404).json({ error: "Vendor not found" });
+      }
+      
+      await storage.createAdminActionLog({
+        adminId: req.user!.id,
+        actionType: 'seller_activated',
+        targetType: 'user',
+        targetId: req.params.userId,
+        previousValue: 'suspended',
+        newValue: 'approved',
+        note,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+      });
+      
+      res.json(profile);
+    } catch (error) {
+      console.error("Error reactivating vendor:", error);
+      res.status(500).json({ error: "Failed to reactivate vendor" });
+    }
+  });
+
+  // ===== VENDOR ONBOARDING STATUS API =====
+
+  /**
+   * @swagger
+   * /vendor/onboarding/status:
+   *   get:
+   *     tags: [Vendor Onboarding]
+   *     summary: Get vendor's onboarding status
+   *     description: Returns the vendor's current onboarding status and any rejection reasons
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: Onboarding status details
+   */
+  app.get("/api/vendor/onboarding/status", async (req, res) => {
+    if (!req.user || req.user.userType !== 'vendor') {
+      return res.status(401).json({ error: "Vendor authentication required" });
+    }
+    
+    try {
+      const profile = await storage.getUserProfileByUserId(req.user.id);
+      if (!profile) {
+        return res.status(404).json({ error: "Vendor profile not found" });
+      }
+      
+      res.json({
+        status: profile.onboardingStatus,
+        currentStep: profile.currentStep,
+        submittedAt: profile.submittedAt,
+        reviewedAt: profile.reviewedAt,
+        rejectionReason: profile.rejectionReason,
+        reviewNote: profile.reviewNote,
+      });
+    } catch (error) {
+      console.error("Error fetching onboarding status:", error);
+      res.status(500).json({ error: "Failed to fetch status" });
+    }
+  });
+
+  // ===== ADMIN ORDERS APIs =====
+
+  /**
+   * @swagger
+   * /admin/orders:
+   *   get:
+   *     tags: [Admin Orders]
+   *     summary: List all orders
+   *     description: Returns paginated list of all orders with filters
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: query
+   *         name: status
+   *         schema:
+   *           type: string
+   *           enum: [pending, processing, shipped, delivered, cancelled, returned]
+   *       - in: query
+   *         name: vendorId
+   *         schema: { type: string }
+   *         description: Filter by vendor ID
+   *       - in: query
+   *         name: dateFrom
+   *         schema: { type: string, format: date }
+   *       - in: query
+   *         name: dateTo
+   *         schema: { type: string, format: date }
+   *       - in: query
+   *         name: page
+   *         schema: { type: integer, default: 1 }
+   *       - in: query
+   *         name: limit
+   *         schema: { type: integer, default: 20 }
+   *     responses:
+   *       200:
+   *         description: Paginated list of orders
+   */
+  app.get("/api/admin/orders", requireAdmin, async (req, res) => {
+    try {
+      const { status, vendorId, dateFrom, dateTo, page, limit } = req.query;
+      const result = await storage.getOrdersForAdmin({
+        status: status as string,
+        vendorId: vendorId as string,
+        dateFrom: dateFrom ? new Date(dateFrom as string) : undefined,
+        dateTo: dateTo ? new Date(dateTo as string) : undefined,
+        page: page ? parseInt(page as string) : undefined,
+        limit: limit ? parseInt(limit as string) : undefined,
+      });
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching orders:", error);
+      res.status(500).json({ error: "Failed to fetch orders" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/orders/{orderId}:
+   *   get:
+   *     tags: [Admin Orders]
+   *     summary: Get order details
+   *     description: Returns full order details including items, user, and status history
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: orderId
+   *         required: true
+   *         schema: { type: string }
+   *     responses:
+   *       200:
+   *         description: Order details
+   *       404:
+   *         description: Order not found
+   */
+  app.get("/api/admin/orders/:orderId", requireAdmin, async (req, res) => {
+    try {
+      const order = await storage.getOrderByIdForAdmin(req.params.orderId);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      res.json(order);
+    } catch (error) {
+      console.error("Error fetching order:", error);
+      res.status(500).json({ error: "Failed to fetch order" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/orders/{orderId}/status:
+   *   put:
+   *     tags: [Admin Orders]
+   *     summary: Update order status
+   *     description: Updates the order status (admin only)
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: orderId
+   *         required: true
+   *         schema: { type: string }
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [status]
+   *             properties:
+   *               status:
+   *                 type: string
+   *                 enum: [pending, processing, shipped, delivered, cancelled, returned]
+   *               note: { type: string }
+   *     responses:
+   *       200:
+   *         description: Order status updated
+   */
+  app.put("/api/admin/orders/:orderId/status", requireAdmin, async (req, res) => {
+    try {
+      const { status, note } = req.body;
+      if (!status) {
+        return res.status(400).json({ error: "Status is required" });
+      }
+      
+      const order = await storage.updateOrderStatus(req.params.orderId, status, req.user!.id, note);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      
+      await storage.createAdminActionLog({
+        adminId: req.user!.id,
+        actionType: 'order_status_changed',
+        targetType: 'order',
+        targetId: req.params.orderId,
+        newValue: status,
+        note,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+      });
+      
+      res.json(order);
+    } catch (error) {
+      console.error("Error updating order status:", error);
+      res.status(500).json({ error: "Failed to update order status" });
+    }
+  });
+
+  // ===== VENDOR ORDERS APIs =====
+
+  /**
+   * @swagger
+   * /vendor/orders:
+   *   get:
+   *     tags: [Vendor Orders]
+   *     summary: List vendor's orders
+   *     description: Returns paginated list of orders containing vendor's products
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: query
+   *         name: status
+   *         schema:
+   *           type: string
+   *           enum: [pending, processing, shipped, delivered, cancelled, returned]
+   *       - in: query
+   *         name: dateFrom
+   *         schema: { type: string, format: date }
+   *       - in: query
+   *         name: dateTo
+   *         schema: { type: string, format: date }
+   *       - in: query
+   *         name: page
+   *         schema: { type: integer, default: 1 }
+   *       - in: query
+   *         name: limit
+   *         schema: { type: integer, default: 20 }
+   *     responses:
+   *       200:
+   *         description: Paginated list of vendor's orders
+   */
+  app.get("/api/vendor/orders", async (req, res) => {
+    if (!req.user || req.user.userType !== 'vendor') {
+      return res.status(401).json({ error: "Vendor authentication required" });
+    }
+    
+    try {
+      const { status, dateFrom, dateTo, page, limit } = req.query;
+      const result = await storage.getOrdersForVendor(req.user.id, {
+        status: status as string,
+        dateFrom: dateFrom ? new Date(dateFrom as string) : undefined,
+        dateTo: dateTo ? new Date(dateTo as string) : undefined,
+        page: page ? parseInt(page as string) : undefined,
+        limit: limit ? parseInt(limit as string) : undefined,
+      });
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching vendor orders:", error);
+      res.status(500).json({ error: "Failed to fetch orders" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/orders/{orderId}:
+   *   get:
+   *     tags: [Vendor Orders]
+   *     summary: Get order details
+   *     description: Returns order details (only vendor's items)
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: orderId
+   *         required: true
+   *         schema: { type: string }
+   *     responses:
+   *       200:
+   *         description: Order details
+   */
+  app.get("/api/vendor/orders/:orderId", async (req, res) => {
+    if (!req.user || req.user.userType !== 'vendor') {
+      return res.status(401).json({ error: "Vendor authentication required" });
+    }
+    
+    try {
+      const order = await storage.getOrderByIdForAdmin(req.params.orderId);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      
+      // Filter to only show vendor's items
+      const vendorItems = order.items.filter(item => item.vendorId === req.user!.id);
+      if (vendorItems.length === 0) {
+        return res.status(403).json({ error: "Access denied - not your order" });
+      }
+      
+      res.json({
+        ...order,
+        items: vendorItems,
+      });
+    } catch (error) {
+      console.error("Error fetching order:", error);
+      res.status(500).json({ error: "Failed to fetch order" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/orders/{orderId}/status:
+   *   put:
+   *     tags: [Vendor Orders]
+   *     summary: Update order status
+   *     description: Vendor can update order status (processing, shipped)
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: orderId
+   *         required: true
+   *         schema: { type: string }
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [status]
+   *             properties:
+   *               status:
+   *                 type: string
+   *                 enum: [processing, shipped]
+   *               note: { type: string }
+   *               trackingNumber: { type: string }
+   *     responses:
+   *       200:
+   *         description: Order status updated
+   */
+  app.put("/api/vendor/orders/:orderId/status", async (req, res) => {
+    if (!req.user || req.user.userType !== 'vendor') {
+      return res.status(401).json({ error: "Vendor authentication required" });
+    }
+    
+    try {
+      const { status, note } = req.body;
+      
+      // Vendors can only set to processing or shipped
+      if (!['processing', 'shipped'].includes(status)) {
+        return res.status(400).json({ error: "Vendors can only set status to 'processing' or 'shipped'" });
+      }
+      
+      // Verify vendor owns items in this order
+      const existingOrder = await storage.getOrderByIdForAdmin(req.params.orderId);
+      if (!existingOrder) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      
+      const vendorItems = existingOrder.items.filter(item => item.vendorId === req.user!.id);
+      if (vendorItems.length === 0) {
+        return res.status(403).json({ error: "Access denied - you don't have items in this order" });
+      }
+      
+      const order = await storage.updateOrderStatus(req.params.orderId, status, req.user.id, note);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      
+      res.json(order);
+    } catch (error) {
+      console.error("Error updating order status:", error);
+      res.status(500).json({ error: "Failed to update order status" });
+    }
+  });
+
+  // ===== REFUND APIs (ADMIN ONLY) =====
+
+  /**
+   * @swagger
+   * /admin/refunds:
+   *   get:
+   *     tags: [Admin Refunds]
+   *     summary: List all refund requests
+   *     description: Returns paginated list of refund requests for admin review
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: query
+   *         name: status
+   *         schema:
+   *           type: string
+   *           enum: [pending, under_review, approved, rejected, processing, completed, failed]
+   *       - in: query
+   *         name: vendorId
+   *         schema: { type: string }
+   *       - in: query
+   *         name: page
+   *         schema: { type: integer, default: 1 }
+   *       - in: query
+   *         name: limit
+   *         schema: { type: integer, default: 20 }
+   *     responses:
+   *       200:
+   *         description: Paginated list of refund requests
+   */
+  app.get("/api/admin/refunds", requireAdmin, async (req, res) => {
+    try {
+      const { status, vendorId, page, limit } = req.query;
+      const result = await storage.getRefundsForAdmin({
+        status: status as string,
+        vendorId: vendorId as string,
+        page: page ? parseInt(page as string) : undefined,
+        limit: limit ? parseInt(limit as string) : undefined,
+      });
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching refunds:", error);
+      res.status(500).json({ error: "Failed to fetch refunds" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/refunds/{refundId}:
+   *   get:
+   *     tags: [Admin Refunds]
+   *     summary: Get refund details
+   *     description: Returns full refund request details
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: refundId
+   *         required: true
+   *         schema: { type: string }
+   *     responses:
+   *       200:
+   *         description: Refund details
+   *       404:
+   *         description: Refund not found
+   */
+  app.get("/api/admin/refunds/:refundId", requireAdmin, async (req, res) => {
+    try {
+      const refund = await storage.getRefundById(req.params.refundId);
+      if (!refund) {
+        return res.status(404).json({ error: "Refund not found" });
+      }
+      res.json(refund);
+    } catch (error) {
+      console.error("Error fetching refund:", error);
+      res.status(500).json({ error: "Failed to fetch refund" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/refunds/{refundId}/approve:
+   *   post:
+   *     tags: [Admin Refunds]
+   *     summary: Approve a refund request
+   *     description: Approves a customer's refund request
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: refundId
+   *         required: true
+   *         schema: { type: string }
+   *     requestBody:
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               note: { type: string }
+   *     responses:
+   *       200:
+   *         description: Refund approved
+   */
+  app.post("/api/admin/refunds/:refundId/approve", requireAdmin, async (req, res) => {
+    try {
+      const { note } = req.body;
+      const refund = await storage.approveRefund(req.params.refundId, req.user!.id, note);
+      
+      if (!refund) {
+        return res.status(404).json({ error: "Refund not found" });
+      }
+      
+      await storage.createAdminActionLog({
+        adminId: req.user!.id,
+        actionType: 'refund_approved',
+        targetType: 'refund',
+        targetId: req.params.refundId,
+        newValue: 'approved',
+        note,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+      });
+      
+      res.json(refund);
+    } catch (error) {
+      console.error("Error approving refund:", error);
+      res.status(500).json({ error: "Failed to approve refund" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/refunds/{refundId}/reject:
+   *   post:
+   *     tags: [Admin Refunds]
+   *     summary: Reject a refund request
+   *     description: Rejects a customer's refund request with a reason
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: refundId
+   *         required: true
+   *         schema: { type: string }
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [reason]
+   *             properties:
+   *               reason: { type: string }
+   *               note: { type: string }
+   *     responses:
+   *       200:
+   *         description: Refund rejected
+   */
+  app.post("/api/admin/refunds/:refundId/reject", requireAdmin, async (req, res) => {
+    try {
+      const { reason, note } = req.body;
+      
+      if (!reason) {
+        return res.status(400).json({ error: "Rejection reason is required" });
+      }
+      
+      const refund = await storage.rejectRefund(req.params.refundId, req.user!.id, reason, note);
+      
+      if (!refund) {
+        return res.status(404).json({ error: "Refund not found" });
+      }
+      
+      await storage.createAdminActionLog({
+        adminId: req.user!.id,
+        actionType: 'refund_rejected',
+        targetType: 'refund',
+        targetId: req.params.refundId,
+        newValue: 'rejected',
+        note: reason,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+      });
+      
+      res.json(refund);
+    } catch (error) {
+      console.error("Error rejecting refund:", error);
+      res.status(500).json({ error: "Failed to reject refund" });
+    }
+  });
+
+  // ===== CUSTOMER REFUND REQUEST =====
+
+  /**
+   * @swagger
+   * /orders/{orderId}/refund-request:
+   *   post:
+   *     tags: [Orders]
+   *     summary: Request a refund
+   *     description: Customer can request a refund for an order
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: orderId
+   *         required: true
+   *         schema: { type: string }
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [reason, amount]
+   *             properties:
+   *               reason: { type: string }
+   *               amount: { type: string }
+   *               note: { type: string }
+   *     responses:
+   *       200:
+   *         description: Refund request created
+   */
+  app.post("/api/orders/:orderId/refund-request", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+    
+    try {
+      const { reason, amount, note } = req.body;
+      
+      if (!reason || !amount) {
+        return res.status(400).json({ error: "Reason and amount are required" });
+      }
+      
+      const order = await storage.getOrderById(req.params.orderId);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      
+      if (order.userId !== req.user.id) {
+        return res.status(403).json({ error: "Access denied - not your order" });
+      }
+      
+      // Get vendorId from order items (first vendor)
+      const vendorId = order.items[0]?.vendorId;
+      
+      const refund = await storage.createRefundRequest({
+        orderId: req.params.orderId,
+        userId: req.user.id,
+        vendorId: vendorId || undefined,
+        amount,
+        reason,
+        customerNote: note,
+      });
+      
+      res.json(refund);
+    } catch (error) {
+      console.error("Error creating refund request:", error);
+      res.status(500).json({ error: "Failed to create refund request" });
+    }
+  });
+
+  // ===== COMMISSION MANAGEMENT APIs =====
+
+  /**
+   * @swagger
+   * /admin/settings/commission:
+   *   get:
+   *     tags: [Admin Settings]
+   *     summary: Get global commission settings
+   *     description: Returns the default commission percentage
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: Commission settings
+   */
+  app.get("/api/admin/settings/commission", requireAdmin, async (req, res) => {
+    try {
+      const setting = await storage.getPlatformSetting('default_commission_percent');
+      res.json({
+        defaultCommissionPercent: setting?.value || '10',
+        updatedAt: setting?.updatedAt,
+      });
+    } catch (error) {
+      console.error("Error fetching commission settings:", error);
+      res.status(500).json({ error: "Failed to fetch settings" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/settings/commission:
+   *   put:
+   *     tags: [Admin Settings]
+   *     summary: Update global commission settings
+   *     description: Updates the default commission percentage for all vendors
+   *     security:
+   *       - bearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [percent]
+   *             properties:
+   *               percent: { type: string, description: "Commission percentage, e.g. 10 for 10%" }
+   *     responses:
+   *       200:
+   *         description: Commission settings updated
+   */
+  app.put("/api/admin/settings/commission", requireAdmin, async (req, res) => {
+    try {
+      const { percent } = req.body;
+      
+      if (!percent) {
+        return res.status(400).json({ error: "Percent is required" });
+      }
+      
+      const setting = await storage.setPlatformSetting(
+        'default_commission_percent',
+        percent,
+        req.user!.id,
+        'Default commission percentage for all vendors'
+      );
+      
+      await storage.createAdminActionLog({
+        adminId: req.user!.id,
+        actionType: 'settings_changed',
+        targetType: 'setting',
+        targetId: 'default_commission_percent',
+        newValue: percent,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+      });
+      
+      res.json({
+        defaultCommissionPercent: setting.value,
+        updatedAt: setting.updatedAt,
+      });
+    } catch (error) {
+      console.error("Error updating commission settings:", error);
+      res.status(500).json({ error: "Failed to update settings" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/vendors/{userId}/commission:
+   *   get:
+   *     tags: [Admin Vendors]
+   *     summary: Get vendor's commission rate
+   *     description: Returns vendor's commission percentage (custom or default)
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: userId
+   *         required: true
+   *         schema: { type: string }
+   *     responses:
+   *       200:
+   *         description: Vendor commission info
+   */
+  app.get("/api/admin/vendors/:userId/commission", requireAdmin, async (req, res) => {
+    try {
+      // Validate vendor exists
+      const vendor = await storage.getUserProfileByUserId(req.params.userId);
+      if (!vendor) {
+        return res.status(404).json({ error: "Vendor not found" });
+      }
+      
+      const commission = await storage.getVendorCommission(req.params.userId);
+      res.json(commission);
+    } catch (error) {
+      console.error("Error fetching vendor commission:", error);
+      res.status(500).json({ error: "Failed to fetch commission" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/vendors/{userId}/commission:
+   *   put:
+   *     tags: [Admin Vendors]
+   *     summary: Set vendor's custom commission rate
+   *     description: Sets a custom commission percentage for a specific vendor
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: userId
+   *         required: true
+   *         schema: { type: string }
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [percent]
+   *             properties:
+   *               percent: { type: string, description: "Commission percentage, e.g. 15 for 15%" }
+   *     responses:
+   *       200:
+   *         description: Vendor commission updated
+   */
+  app.put("/api/admin/vendors/:userId/commission", requireAdmin, async (req, res) => {
+    try {
+      const { percent } = req.body;
+      
+      if (!percent) {
+        return res.status(400).json({ error: "Percent is required" });
+      }
+      
+      // Validate vendor exists before attempting to update
+      const vendor = await storage.getUserProfileByUserId(req.params.userId);
+      if (!vendor) {
+        return res.status(404).json({ error: "Vendor not found" });
+      }
+      
+      // Get current commission for logging the previous value
+      const currentCommission = await storage.getVendorCommission(req.params.userId);
+      
+      const profile = await storage.setVendorCommission(req.params.userId, percent);
+      
+      if (!profile) {
+        return res.status(500).json({ error: "Failed to update commission" });
+      }
+      
+      await storage.createAdminActionLog({
+        adminId: req.user!.id,
+        actionType: 'settings_changed',
+        targetType: 'vendor_commission',
+        targetId: req.params.userId,
+        previousValue: currentCommission.percent,
+        newValue: percent,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+      });
+      
+      res.json({
+        percent: profile.commissionPercent,
+        isCustom: true,
+      });
+    } catch (error) {
+      console.error("Error updating vendor commission:", error);
+      res.status(500).json({ error: "Failed to update commission" });
+    }
+  });
+
+  // ===== SUPPORT TICKET SYSTEM =====
+
+  /**
+   * @swagger
+   * tags:
+   *   - name: Support Tickets - Customer
+   *     description: Customer-facing ticket operations
+   *   - name: Support Tickets - Admin
+   *     description: Admin ticket management
+   */
+
+  /**
+   * @swagger
+   * /tickets:
+   *   post:
+   *     tags: [Support Tickets - Customer]
+   *     summary: Create a support ticket
+   *     description: Customer creates a new support ticket for an order
+   *     security:
+   *       - bearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [orderId, subject, message]
+   *             properties:
+   *               orderId: { type: string, description: "Order ID the ticket is about" }
+   *               subject: { type: string, description: "Ticket subject/title" }
+   *               message: { type: string, description: "Initial message describing the issue" }
+   *               priority: { type: string, enum: [low, medium, high, urgent], default: medium }
+   *     responses:
+   *       201:
+   *         description: Ticket created successfully
+   *       400:
+   *         description: Invalid request
+   *       404:
+   *         description: Order not found
+   */
+  app.post("/api/tickets", async (req, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+      
+      const { orderId, subject, message, priority } = req.body;
+      
+      if (!orderId || !subject || !message) {
+        return res.status(400).json({ error: "orderId, subject, and message are required" });
+      }
+      
+      const order = await storage.getOrderById(orderId);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      
+      if (order.userId !== req.user!.id) {
+        return res.status(403).json({ error: "You can only create tickets for your own orders" });
+      }
+      
+      const ticket = await storage.createTicket({
+        orderId,
+        customerId: req.user!.id,
+        subject,
+        priority: priority || 'medium',
+        status: 'open',
+      }, message);
+      
+      res.status(201).json(ticket);
+    } catch (error) {
+      console.error("Error creating ticket:", error);
+      res.status(500).json({ error: "Failed to create ticket" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /tickets:
+   *   get:
+   *     tags: [Support Tickets - Customer]
+   *     summary: List customer's tickets
+   *     description: Returns all tickets created by the authenticated customer
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: query
+   *         name: status
+   *         schema: { type: string, enum: [open, in_progress, waiting_customer, resolved, closed] }
+   *       - in: query
+   *         name: page
+   *         schema: { type: integer, default: 1 }
+   *       - in: query
+   *         name: limit
+   *         schema: { type: integer, default: 10 }
+   *     responses:
+   *       200:
+   *         description: List of customer tickets
+   */
+  app.get("/api/tickets", async (req, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+      
+      const { status, page, limit } = req.query;
+      
+      const result = await storage.getCustomerTickets(req.user.id, {
+        status: status as string,
+        page: page ? parseInt(page as string) : undefined,
+        limit: limit ? parseInt(limit as string) : undefined,
+      });
+      
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching tickets:", error);
+      res.status(500).json({ error: "Failed to fetch tickets" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /tickets/{ticketId}:
+   *   get:
+   *     tags: [Support Tickets - Customer]
+   *     summary: Get ticket details
+   *     description: Returns full ticket details including messages (excludes internal admin notes)
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: ticketId
+   *         required: true
+   *         schema: { type: string }
+   *     responses:
+   *       200:
+   *         description: Ticket details with messages
+   *       404:
+   *         description: Ticket not found
+   */
+  app.get("/api/tickets/:ticketId", async (req, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+      
+      const ticket = await storage.getTicketById(req.params.ticketId);
+      
+      if (!ticket) {
+        return res.status(404).json({ error: "Ticket not found" });
+      }
+      
+      const isAdmin = req.user.userType === 'admin' || req.user.userType === 'super_admin';
+      
+      if (!isAdmin && ticket.customerId !== req.user.id) {
+        return res.status(403).json({ error: "You can only view your own tickets" });
+      }
+      
+      if (!isAdmin) {
+        ticket.messages = ticket.messages.filter(m => !m.isInternal);
+      }
+      
+      res.json(ticket);
+    } catch (error) {
+      console.error("Error fetching ticket:", error);
+      res.status(500).json({ error: "Failed to fetch ticket" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /tickets/{ticketId}/messages:
+   *   post:
+   *     tags: [Support Tickets - Customer]
+   *     summary: Reply to a ticket
+   *     description: Customer adds a reply message to their ticket
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: ticketId
+   *         required: true
+   *         schema: { type: string }
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [message]
+   *             properties:
+   *               message: { type: string, description: "Reply message content" }
+   *     responses:
+   *       201:
+   *         description: Message added successfully
+   *       400:
+   *         description: Invalid request
+   *       403:
+   *         description: Cannot reply to closed ticket
+   *       404:
+   *         description: Ticket not found
+   */
+  app.post("/api/tickets/:ticketId/messages", async (req, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+      
+      const { message } = req.body;
+      
+      if (!message) {
+        return res.status(400).json({ error: "Message is required" });
+      }
+      
+      const ticket = await storage.getTicketById(req.params.ticketId);
+      
+      if (!ticket) {
+        return res.status(404).json({ error: "Ticket not found" });
+      }
+      
+      if (ticket.customerId !== req.user.id) {
+        return res.status(403).json({ error: "You can only reply to your own tickets" });
+      }
+      
+      if (ticket.status === 'closed') {
+        return res.status(403).json({ error: "Cannot reply to a closed ticket" });
+      }
+      
+      const newMessage = await storage.addTicketMessage({
+        ticketId: req.params.ticketId,
+        senderId: req.user.id,
+        senderType: 'customer',
+        message,
+        isInternal: false,
+      });
+      
+      res.status(201).json(newMessage);
+    } catch (error) {
+      console.error("Error adding message:", error);
+      res.status(500).json({ error: "Failed to add message" });
+    }
+  });
+
+  // ===== ADMIN TICKET MANAGEMENT =====
+
+  /**
+   * @swagger
+   * /admin/tickets:
+   *   get:
+   *     tags: [Support Tickets - Admin]
+   *     summary: List all tickets
+   *     description: Returns all support tickets with filtering options
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: query
+   *         name: status
+   *         schema: { type: string, enum: [open, in_progress, waiting_customer, resolved, closed] }
+   *       - in: query
+   *         name: priority
+   *         schema: { type: string, enum: [low, medium, high, urgent] }
+   *       - in: query
+   *         name: assignedToId
+   *         schema: { type: string, description: "Filter by assigned admin ID" }
+   *       - in: query
+   *         name: page
+   *         schema: { type: integer, default: 1 }
+   *       - in: query
+   *         name: limit
+   *         schema: { type: integer, default: 10 }
+   *     responses:
+   *       200:
+   *         description: List of all tickets
+   */
+  app.get("/api/admin/tickets", requireAdmin, async (req, res) => {
+    try {
+      const { status, priority, assignedToId, page, limit } = req.query;
+      
+      const result = await storage.getAllTickets({
+        status: status as string,
+        priority: priority as string,
+        assignedToId: assignedToId as string,
+        page: page ? parseInt(page as string) : undefined,
+        limit: limit ? parseInt(limit as string) : undefined,
+      });
+      
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching tickets:", error);
+      res.status(500).json({ error: "Failed to fetch tickets" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/tickets/{ticketId}:
+   *   get:
+   *     tags: [Support Tickets - Admin]
+   *     summary: Get ticket details (admin view)
+   *     description: Returns full ticket details including internal notes
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: ticketId
+   *         required: true
+   *         schema: { type: string }
+   *     responses:
+   *       200:
+   *         description: Ticket details with all messages
+   *       404:
+   *         description: Ticket not found
+   */
+  app.get("/api/admin/tickets/:ticketId", requireAdmin, async (req, res) => {
+    try {
+      const ticket = await storage.getTicketById(req.params.ticketId);
+      
+      if (!ticket) {
+        return res.status(404).json({ error: "Ticket not found" });
+      }
+      
+      res.json(ticket);
+    } catch (error) {
+      console.error("Error fetching ticket:", error);
+      res.status(500).json({ error: "Failed to fetch ticket" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/tickets/{ticketId}/assign:
+   *   post:
+   *     tags: [Support Tickets - Admin]
+   *     summary: Assign ticket to admin
+   *     description: Assigns a ticket to an admin user for handling
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: ticketId
+   *         required: true
+   *         schema: { type: string }
+   *     requestBody:
+   *       required: false
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               adminId: { type: string, description: "Admin ID to assign (defaults to current admin)" }
+   *     responses:
+   *       200:
+   *         description: Ticket assigned successfully
+   *       404:
+   *         description: Ticket not found
+   */
+  app.post("/api/admin/tickets/:ticketId/assign", requireAdmin, async (req, res) => {
+    try {
+      const { adminId } = req.body;
+      const assignToId = adminId || req.user!.id;
+      
+      const ticket = await storage.getTicketById(req.params.ticketId);
+      if (!ticket) {
+        return res.status(404).json({ error: "Ticket not found" });
+      }
+      
+      const updated = await storage.assignTicket(req.params.ticketId, assignToId);
+      
+      await storage.createAdminActionLog({
+        adminId: req.user!.id,
+        actionType: 'ticket_assigned',
+        targetType: 'ticket',
+        targetId: req.params.ticketId,
+        newValue: JSON.stringify({ assignedTo: assignToId }),
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+      });
+      
+      res.json(updated);
+    } catch (error) {
+      console.error("Error assigning ticket:", error);
+      res.status(500).json({ error: "Failed to assign ticket" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/tickets/{ticketId}/status:
+   *   put:
+   *     tags: [Support Tickets - Admin]
+   *     summary: Update ticket status
+   *     description: Updates the status of a ticket
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: ticketId
+   *         required: true
+   *         schema: { type: string }
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [status]
+   *             properties:
+   *               status: { type: string, enum: [open, in_progress, waiting_customer, resolved, closed] }
+   *     responses:
+   *       200:
+   *         description: Status updated successfully
+   *       400:
+   *         description: Invalid status
+   *       404:
+   *         description: Ticket not found
+   */
+  app.put("/api/admin/tickets/:ticketId/status", requireAdmin, async (req, res) => {
+    try {
+      const { status } = req.body;
+      
+      if (!status) {
+        return res.status(400).json({ error: "Status is required" });
+      }
+      
+      const validStatuses = ['open', 'in_progress', 'waiting_customer', 'resolved', 'closed'];
+      if (!validStatuses.includes(status)) {
+        return res.status(400).json({ error: "Invalid status" });
+      }
+      
+      const ticket = await storage.getTicketById(req.params.ticketId);
+      if (!ticket) {
+        return res.status(404).json({ error: "Ticket not found" });
+      }
+      
+      const previousStatus = ticket.status;
+      const updated = await storage.updateTicketStatus(req.params.ticketId, status);
+      
+      await storage.createAdminActionLog({
+        adminId: req.user!.id,
+        actionType: 'ticket_status_changed',
+        targetType: 'ticket',
+        targetId: req.params.ticketId,
+        previousValue: previousStatus,
+        newValue: status,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+      });
+      
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating ticket status:", error);
+      res.status(500).json({ error: "Failed to update status" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/tickets/{ticketId}/priority:
+   *   put:
+   *     tags: [Support Tickets - Admin]
+   *     summary: Update ticket priority
+   *     description: Updates the priority of a ticket
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: ticketId
+   *         required: true
+   *         schema: { type: string }
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [priority]
+   *             properties:
+   *               priority: { type: string, enum: [low, medium, high, urgent] }
+   *     responses:
+   *       200:
+   *         description: Priority updated successfully
+   *       400:
+   *         description: Invalid priority
+   *       404:
+   *         description: Ticket not found
+   */
+  app.put("/api/admin/tickets/:ticketId/priority", requireAdmin, async (req, res) => {
+    try {
+      const { priority } = req.body;
+      
+      if (!priority) {
+        return res.status(400).json({ error: "Priority is required" });
+      }
+      
+      const validPriorities = ['low', 'medium', 'high', 'urgent'];
+      if (!validPriorities.includes(priority)) {
+        return res.status(400).json({ error: "Invalid priority" });
+      }
+      
+      const ticket = await storage.getTicketById(req.params.ticketId);
+      if (!ticket) {
+        return res.status(404).json({ error: "Ticket not found" });
+      }
+      
+      const previousPriority = ticket.priority;
+      const updated = await storage.updateTicketPriority(req.params.ticketId, priority);
+      
+      await storage.createAdminActionLog({
+        adminId: req.user!.id,
+        actionType: 'ticket_priority_changed',
+        targetType: 'ticket',
+        targetId: req.params.ticketId,
+        previousValue: previousPriority,
+        newValue: priority,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+      });
+      
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating ticket priority:", error);
+      res.status(500).json({ error: "Failed to update priority" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/tickets/{ticketId}/messages:
+   *   post:
+   *     tags: [Support Tickets - Admin]
+   *     summary: Reply to ticket (admin)
+   *     description: Admin adds a reply or internal note to a ticket
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: ticketId
+   *         required: true
+   *         schema: { type: string }
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [message]
+   *             properties:
+   *               message: { type: string, description: "Reply message content" }
+   *               isInternal: { type: boolean, default: false, description: "If true, message is only visible to admins" }
+   *     responses:
+   *       201:
+   *         description: Message added successfully
+   *       400:
+   *         description: Invalid request
+   *       404:
+   *         description: Ticket not found
+   */
+  app.post("/api/admin/tickets/:ticketId/messages", requireAdmin, async (req, res) => {
+    try {
+      const { message, isInternal } = req.body;
+      
+      if (!message) {
+        return res.status(400).json({ error: "Message is required" });
+      }
+      
+      const ticket = await storage.getTicketById(req.params.ticketId);
+      if (!ticket) {
+        return res.status(404).json({ error: "Ticket not found" });
+      }
+      
+      const newMessage = await storage.addTicketMessage({
+        ticketId: req.params.ticketId,
+        senderId: req.user!.id,
+        senderType: 'admin',
+        message,
+        isInternal: isInternal || false,
+      });
+      
+      if (!isInternal && ticket.status !== 'waiting_customer') {
+        await storage.updateTicketStatus(req.params.ticketId, 'waiting_customer');
+      }
+      
+      res.status(201).json(newMessage);
+    } catch (error) {
+      console.error("Error adding message:", error);
+      res.status(500).json({ error: "Failed to add message" });
     }
   });
 

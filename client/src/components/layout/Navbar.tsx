@@ -66,11 +66,12 @@ export default function Navbar() {
   // Check localStorage for auth state on mount and when location changes
   useEffect(() => {
     const checkAuth = () => {
-      const storedUser = localStorage.getItem('user');
+      const storedAuth = localStorage.getItem('armoredmart_auth');
       const token = getAccessToken();
-      if (storedUser && token) {
+      if (storedAuth && token) {
         try {
-          setUser(JSON.parse(storedUser));
+          const parsed = JSON.parse(storedAuth);
+          setUser(parsed.user);
         } catch {
           setUser(null);
         }
@@ -93,11 +94,13 @@ export default function Navbar() {
       // Ignore errors
     }
     clearTokens();
+    localStorage.removeItem('armoredmart_auth');
     setUser(null);
     setLocation('/');
   };
   
   const isVendor = user?.userType === 'vendor';
+  const isAdmin = user?.userType === 'admin' || user?.userType === 'super_admin';
 
   // New darker Green theme matching Figma
   const NAV_BG = "bg-white"; 
@@ -200,9 +203,23 @@ export default function Navbar() {
             </div>
 
             {isVendor && (
-              <Link href="/seller/dashboard">
-                <Button className={`${TOP_BAR_BG} text-white hover:bg-[#2A3324] font-bold text-xs uppercase h-9 rounded-full px-6`}>
+              <Link href="/vendor/supplier-zone">
+                <Button 
+                  className={`${TOP_BAR_BG} text-white hover:bg-[#2A3324] font-bold text-xs uppercase h-9 rounded-full px-6`}
+                  data-testid="button-supplier-zone"
+                >
                   Supplier Zone
+                </Button>
+              </Link>
+            )}
+            
+            {isAdmin && (
+              <Link href="/admin">
+                <Button 
+                  className="bg-red-700 text-white hover:bg-red-800 font-bold text-xs uppercase h-9 rounded-full px-6"
+                  data-testid="button-admin-zone"
+                >
+                  Admin Zone
                 </Button>
               </Link>
             )}

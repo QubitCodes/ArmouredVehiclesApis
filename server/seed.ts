@@ -1,10 +1,26 @@
 import { db } from "./db";
-import { categories, products } from "@shared/schema";
+import { 
+  categories, 
+  products, 
+  refNatureOfBusiness, 
+  refEndUseMarkets, 
+  refLicenseTypes, 
+  refCountries,
+  refVendorCategories,
+  refCurrencies,
+  refPaymentMethods,
+  refFinancialInstitutions,
+  refProofTypes,
+  refVerificationMethods
+} from "@shared/schema";
 
 export async function seedDatabase() {
   console.log("Seeding database...");
 
   try {
+    // Seed reference tables
+    await seedReferenceTables();
+    
     // Check if categories already exist
     const existingCategories = await db.select().from(categories);
     
@@ -205,5 +221,204 @@ export async function seedDatabase() {
   } catch (error) {
     console.error("Error seeding database:", error);
     throw error;
+  }
+}
+
+async function seedReferenceTables() {
+  // Seed Nature of Business
+  const existingNob = await db.select().from(refNatureOfBusiness);
+  if (existingNob.length === 0) {
+    await db.insert(refNatureOfBusiness).values([
+      { name: "Manufacturer", displayOrder: 1 },
+      { name: "OEM Dealer", displayOrder: 2 },
+      { name: "Wholesaler / Distributor", displayOrder: 3 },
+      { name: "Retailer", displayOrder: 4 },
+      { name: "E-commerce Seller", displayOrder: 5 },
+      { name: "Importer / Exporter", displayOrder: 6 },
+      { name: "Trading Company", displayOrder: 7 },
+      { name: "Service Provider", displayOrder: 8 },
+      { name: "Defense Supplier", displayOrder: 9 },
+      { name: "Vehicle Armoring", displayOrder: 10 },
+      { name: "Government Agency", displayOrder: 11 },
+      { name: "Contractor / Subcontractor", displayOrder: 12 },
+      { name: "Logistics / Freight Services", displayOrder: 13 },
+      { name: "Construction / Engineering", displayOrder: 14 },
+      { name: "Technology / IT Solutions Provider", displayOrder: 15 },
+      { name: "Healthcare / Medical Supplier", displayOrder: 16 },
+      { name: "Education / Training Provider", displayOrder: 17 },
+      { name: "Financial / Consulting Services", displayOrder: 18 },
+      { name: "Nonprofit / NGO", displayOrder: 19 },
+      { name: "Other", displayOrder: 20 },
+    ]);
+    console.log("✓ Seeded ref_nature_of_business");
+  }
+
+  // Seed End Use Markets
+  const existingMarkets = await db.select().from(refEndUseMarkets);
+  if (existingMarkets.length === 0) {
+    await db.insert(refEndUseMarkets).values([
+      { name: "Civilian", displayOrder: 1 },
+      { name: "Military", displayOrder: 2 },
+      { name: "Law Enforcement", displayOrder: 3 },
+      { name: "Government", displayOrder: 4 },
+      { name: "Export", displayOrder: 5 },
+    ]);
+    console.log("✓ Seeded ref_end_use_markets");
+  }
+
+  // Seed License Types
+  const existingLicenses = await db.select().from(refLicenseTypes);
+  if (existingLicenses.length === 0) {
+    await db.insert(refLicenseTypes).values([
+      { name: "MOD License", displayOrder: 1 },
+      { name: "EOCN Approval", displayOrder: 2 },
+      { name: "ITAR Registration", displayOrder: 3 },
+      { name: "Local approval from authorities", displayOrder: 4 },
+      { name: "None", displayOrder: 5 },
+    ]);
+    console.log("✓ Seeded ref_license_types");
+  }
+
+  // Seed Countries
+  const existingCountries = await db.select().from(refCountries);
+  if (existingCountries.length === 0) {
+    await db.insert(refCountries).values([
+      { code: "AE", name: "United Arab Emirates", flag: "🇦🇪", phoneCode: "+971", displayOrder: 1 },
+      { code: "SA", name: "Saudi Arabia (KSA)", flag: "🇸🇦", phoneCode: "+966", displayOrder: 2 },
+      { code: "QA", name: "Qatar", flag: "🇶🇦", phoneCode: "+974", displayOrder: 3 },
+      { code: "OM", name: "Oman", flag: "🇴🇲", phoneCode: "+968", displayOrder: 4 },
+      { code: "KW", name: "Kuwait", flag: "🇰🇼", phoneCode: "+965", displayOrder: 5 },
+      { code: "BH", name: "Bahrain", flag: "🇧🇭", phoneCode: "+973", displayOrder: 6 },
+      { code: "IN", name: "India", flag: "🇮🇳", phoneCode: "+91", displayOrder: 7 },
+      { code: "ID", name: "Indonesia", flag: "🇮🇩", phoneCode: "+62", displayOrder: 8 },
+      { code: "IR", name: "Iran", flag: "🇮🇷", phoneCode: "+98", displayOrder: 9 },
+      { code: "IQ", name: "Iraq", flag: "🇮🇶", phoneCode: "+964", displayOrder: 10 },
+      { code: "IE", name: "Ireland", flag: "🇮🇪", phoneCode: "+353", displayOrder: 11 },
+      { code: "IL", name: "Israel", flag: "🇮🇱", phoneCode: "+972", displayOrder: 12 },
+      { code: "IT", name: "Italy", flag: "🇮🇹", phoneCode: "+39", displayOrder: 13 },
+      { code: "JO", name: "Jordan", flag: "🇯🇴", phoneCode: "+962", displayOrder: 14 },
+      { code: "EG", name: "Egypt", flag: "🇪🇬", phoneCode: "+20", displayOrder: 15 },
+      { code: "PK", name: "Pakistan", flag: "🇵🇰", phoneCode: "+92", displayOrder: 16 },
+      { code: "TR", name: "Turkey", flag: "🇹🇷", phoneCode: "+90", displayOrder: 17 },
+      { code: "US", name: "United States", flag: "🇺🇸", phoneCode: "+1", displayOrder: 18 },
+      { code: "GB", name: "United Kingdom", flag: "🇬🇧", phoneCode: "+44", displayOrder: 19 },
+      { code: "DE", name: "Germany", flag: "🇩🇪", phoneCode: "+49", displayOrder: 20 },
+      { code: "FR", name: "France", flag: "🇫🇷", phoneCode: "+33", displayOrder: 21 },
+      { code: "AU", name: "Australia", flag: "🇦🇺", phoneCode: "+61", displayOrder: 22 },
+      { code: "SG", name: "Singapore", flag: "🇸🇬", phoneCode: "+65", displayOrder: 23 },
+      { code: "MY", name: "Malaysia", flag: "🇲🇾", phoneCode: "+60", displayOrder: 24 },
+      { code: "TH", name: "Thailand", flag: "🇹🇭", phoneCode: "+66", displayOrder: 25 },
+      { code: "ZA", name: "South Africa", flag: "🇿🇦", phoneCode: "+27", displayOrder: 26 },
+      { code: "NG", name: "Nigeria", flag: "🇳🇬", phoneCode: "+234", displayOrder: 27 },
+      { code: "KE", name: "Kenya", flag: "🇰🇪", phoneCode: "+254", displayOrder: 28 },
+      { code: "BR", name: "Brazil", flag: "🇧🇷", phoneCode: "+55", displayOrder: 29 },
+      { code: "MX", name: "Mexico", flag: "🇲🇽", phoneCode: "+52", displayOrder: 30 },
+    ]);
+    console.log("✓ Seeded ref_countries");
+  }
+
+  // Seed Vendor Categories (for Step 4 - categories vendors can sell in)
+  const existingVendorCategories = await db.select().from(refVendorCategories);
+  if (existingVendorCategories.length === 0) {
+    await db.insert(refVendorCategories).values([
+      { name: "Engine Systems", displayOrder: 1 },
+      { name: "Transmission & Drivetrain", displayOrder: 2 },
+      { name: "Chassis & Suspension", displayOrder: 3 },
+      { name: "Electrical Systems", isControlled: true, controlNote: "Controlled if Mil Standard", displayOrder: 4 },
+      { name: "Runflat & Tire Systems", displayOrder: 5 },
+      { name: "Surveillance & Monitoring", displayOrder: 6 },
+      { name: "Turrets & Mounts", isControlled: true, controlNote: "Controlled item MOD/EOCN", displayOrder: 7 },
+      { name: "Lighting Systems", isControlled: true, controlNote: "Controlled if Mil Standard", displayOrder: 8 },
+      { name: "HVAC & Thermal Management", displayOrder: 9 },
+      { name: "Ballistic Protection", isControlled: true, controlNote: "Controlled item MOD/EOCN", displayOrder: 10 },
+      { name: "Body & Structure Reinforcements", displayOrder: 11 },
+      { name: "Braking Systems", displayOrder: 12 },
+      { name: "Gunports, Hinges & Weapon-Mount Interfaces", isControlled: true, controlNote: "Controlled item MOD/EOCN", displayOrder: 13 },
+      { name: "Countermeasures", displayOrder: 14 },
+      { name: "Fuel & Water Systems", displayOrder: 15 },
+      { name: "Communication Equipment", isControlled: true, controlNote: "Controlled Items", displayOrder: 16 },
+      { name: "Interior Kits", displayOrder: 17 },
+      { name: "Fabrication & Integration", isControlled: true, controlNote: "Controlled Item MOD/ITAR-Design Control", displayOrder: 18 },
+      { name: "Drive-Side Conversion Components", controlNote: "LHD ↔ RHD", displayOrder: 19 },
+      { name: "Exterior Accessories", displayOrder: 20 },
+      { name: "OEM Components", displayOrder: 21 },
+      { name: "Value-Oriented OEM Chassis", displayOrder: 22 },
+      { name: "Military & Tactical Chassis Suppliers", isControlled: true, controlNote: "Controlled - End User declaration", displayOrder: 23 },
+      { name: "Recovery & Mobility", displayOrder: 24 },
+    ]);
+    console.log("✓ Seeded ref_vendor_categories");
+  }
+
+  // Seed Currencies
+  const existingCurrencies = await db.select().from(refCurrencies);
+  if (existingCurrencies.length === 0) {
+    await db.insert(refCurrencies).values([
+      { code: "AED", name: "UAE Dirham", symbol: "د.إ", displayOrder: 1 },
+      { code: "USD", name: "US Dollar", symbol: "$", displayOrder: 2 },
+      { code: "EUR", name: "Euro", symbol: "€", displayOrder: 3 },
+      { code: "GBP", name: "British Pound", symbol: "£", displayOrder: 4 },
+      { code: "SAR", name: "Saudi Riyal", symbol: "﷼", displayOrder: 5 },
+      { code: "INR", name: "Indian Rupee", symbol: "₹", displayOrder: 6 },
+    ]);
+    console.log("✓ Seeded ref_currencies");
+  }
+
+  // Seed Payment Methods
+  const existingPaymentMethods = await db.select().from(refPaymentMethods);
+  if (existingPaymentMethods.length === 0) {
+    await db.insert(refPaymentMethods).values([
+      { name: "Credit or debit card", icon: "credit-card", displayOrder: 1 },
+      { name: "Tamara", icon: "tamara", displayOrder: 2 },
+      { name: "Tabby", icon: "tabby", displayOrder: 3 },
+      { name: "Apple Pay", icon: "apple-pay", displayOrder: 4 },
+      { name: "PayPal", icon: "paypal", displayOrder: 5 },
+    ]);
+    console.log("✓ Seeded ref_payment_methods");
+  }
+
+  // Seed Financial Institutions (UAE Banks)
+  const existingBanks = await db.select().from(refFinancialInstitutions);
+  if (existingBanks.length === 0) {
+    await db.insert(refFinancialInstitutions).values([
+      { name: "Emirates NBD", countryCode: "AE", swiftCode: "EABORABI", displayOrder: 1 },
+      { name: "Abu Dhabi Commercial Bank", countryCode: "AE", swiftCode: "ADCBAEAA", displayOrder: 2 },
+      { name: "First Abu Dhabi Bank", countryCode: "AE", swiftCode: "NBADAEAA", displayOrder: 3 },
+      { name: "Dubai Islamic Bank", countryCode: "AE", swiftCode: "DUIBAEAD", displayOrder: 4 },
+      { name: "Mashreq Bank", countryCode: "AE", swiftCode: "BOMLAEAD", displayOrder: 5 },
+      { name: "RAKBANK", countryCode: "AE", swiftCode: "NABORAKA", displayOrder: 6 },
+      { name: "Commercial Bank of Dubai", countryCode: "AE", swiftCode: "CBDUAEAD", displayOrder: 7 },
+      { name: "HSBC UAE", countryCode: "AE", swiftCode: "BBABORAB", displayOrder: 8 },
+      { name: "State Bank of India (UAE)", countryCode: "AE", displayOrder: 9 },
+      { name: "ICICI Bank (UAE)", countryCode: "AE", displayOrder: 10 },
+      { name: "HDFC Bank (India)", countryCode: "IN", swiftCode: "HDFCINBB", displayOrder: 11 },
+      { name: "State Bank of India", countryCode: "IN", swiftCode: "SBININBB", displayOrder: 12 },
+      { name: "ICICI Bank", countryCode: "IN", swiftCode: "ABORINBB", displayOrder: 13 },
+      { name: "Axis Bank", countryCode: "IN", swiftCode: "AXISINBB", displayOrder: 14 },
+      { name: "Kotak Mahindra Bank", countryCode: "IN", swiftCode: "ABORINBB", displayOrder: 15 },
+    ]);
+    console.log("✓ Seeded ref_financial_institutions");
+  }
+
+  // Seed Proof Types
+  const existingProofTypes = await db.select().from(refProofTypes);
+  if (existingProofTypes.length === 0) {
+    await db.insert(refProofTypes).values([
+      { name: "Bank Statement", displayOrder: 1 },
+      { name: "Cancelled Cheque", displayOrder: 2 },
+      { name: "Bank Letter", displayOrder: 3 },
+      { name: "Account Confirmation Letter", displayOrder: 4 },
+    ]);
+    console.log("✓ Seeded ref_proof_types");
+  }
+
+  // Seed Verification Methods
+  const existingVerificationMethods = await db.select().from(refVerificationMethods);
+  if (existingVerificationMethods.length === 0) {
+    await db.insert(refVerificationMethods).values([
+      { name: "Over a Live Video Call", description: "Join a secure video call from any location at your preferred date and time to complete your identity verification. We may also send a postcard with a one-time passcode and additional instructions to your registered address for address verification.", isAvailable: true, displayOrder: 1 },
+      { name: "Verification at Your Location", description: "An Armored Mart representative will visit your business address at a scheduled date and time to help you complete the verification process.", isAvailable: false, displayOrder: 2 },
+      { name: "Meet at a Local Verification Center", description: "You can visit a nearby Armored Mart verification center and meet with one of our associates to complete your verification.", isAvailable: false, displayOrder: 3 },
+    ]);
+    console.log("✓ Seeded ref_verification_methods");
   }
 }

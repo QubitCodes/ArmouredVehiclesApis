@@ -17,7 +17,12 @@ import OrderDetailsPage from "@/pages/account/order-details";
 import RefundDetailsPage from "@/pages/account/refund-details";
 import UserProfilePage from "@/pages/account/user-profile";
 import LoginPage from "@/pages/auth/user-login";
+import OtpLoginPage from "@/pages/auth/otp-login";
 import RegisterPage from "@/pages/auth/register";
+import SupplierRegisterPage from "@/pages/auth/supplier-register";
+import VerifyEmailPage from "@/pages/auth/verify-email";
+import AddPhonePage from "@/pages/auth/add-phone";
+import VerifyPhonePage from "@/pages/auth/verify-phone";
 import ProfilePage from "@/pages/account/profile";
 
 import VendorDashboard from "@/pages/vendor/dashboard";
@@ -26,6 +31,14 @@ import VendorOrders from "@/pages/vendor/orders";
 import VendorCustomers from "@/pages/vendor/customers";
 import VendorAnalytics from "@/pages/vendor/analytics";
 import VendorSettings from "@/pages/vendor/settings";
+import OnboardingStep0 from "@/pages/vendor/onboarding/step0";
+import OnboardingStep1 from "@/pages/vendor/onboarding/step1";
+import OnboardingStep2 from "@/pages/vendor/onboarding/step2";
+import OnboardingStep3 from "@/pages/vendor/onboarding/step3";
+import OnboardingStep4 from "@/pages/vendor/onboarding/step4";
+import OnboardingStep5 from "@/pages/vendor/onboarding/step5";
+import IdentityVerification from "@/pages/vendor/onboarding/identity-verification";
+import SupplierZonePage from "@/pages/vendor/supplier-zone";
 
 function Router() {
   return (
@@ -41,9 +54,24 @@ function Router() {
       <Route path="/account/orders/:id/details" component={OrderDetailsPage} />
       <Route path="/account/refunds/:id" component={RefundDetailsPage} />
       <Route path="/account/profile/edit" component={UserProfilePage} />
-      <Route path="/auth/login" component={LoginPage} />
+      <Route path="/auth/login" component={OtpLoginPage} />
+      <Route path="/auth/login-password" component={LoginPage} />
       <Route path="/auth/register" component={RegisterPage} />
+      <Route path="/auth/supplier-register" component={SupplierRegisterPage} />
+      <Route path="/auth/verify-email" component={VerifyEmailPage} />
+      <Route path="/auth/add-phone" component={AddPhonePage} />
+      <Route path="/auth/verify-phone" component={VerifyPhonePage} />
       <Route path="/account/profile" component={ProfilePage} />
+      
+      {/* Vendor Onboarding Routes */}
+      <Route path="/vendor/supplier-zone" component={SupplierZonePage} />
+      <Route path="/vendor/onboarding/step0" component={OnboardingStep0} />
+      <Route path="/vendor/onboarding/step1" component={OnboardingStep1} />
+      <Route path="/vendor/onboarding/step2" component={OnboardingStep2} />
+      <Route path="/vendor/onboarding/step3" component={OnboardingStep3} />
+      <Route path="/vendor/onboarding/step4" component={OnboardingStep4} />
+      <Route path="/vendor/onboarding/step5" component={OnboardingStep5} />
+      <Route path="/vendor/onboarding/identity-verification" component={IdentityVerification} />
       
       {/* Vendor Routes */}
       <Route path="/vendor/dashboard" component={VendorDashboard} />

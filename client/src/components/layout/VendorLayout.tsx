@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import Layout from "@/components/layout/Layout";
 import { Button } from "@/components/ui/button";
 import { 
@@ -7,10 +8,13 @@ import {
   Users, 
   BarChart3, 
   Settings,
-  LogOut
+  LogOut,
+  Loader2
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { api, clearTokens } from "@/lib/api";
+import { apiRequest } from "@/lib/queryClient";
+import { useAuth } from "@/hooks/use-auth";
 
 interface VendorLayoutProps {
   children: React.ReactNode;
@@ -30,6 +34,72 @@ const navItems = [
 
 export default function VendorLayout({ children, title, subtitle, actions }: VendorLayoutProps) {
   const [location, setLocation] = useLocation();
+  const { isAuthenticated, isLoading: authLoading, accessToken } = useAuth();
+  const [isCheckingOnboarding, setIsCheckingOnboarding] = useState(true);
+
+  useEffect(() => {
+    const checkOnboardingStatus = async () => {
+      if (authLoading) return;
+      
+      if (!isAuthenticated || !accessToken) {
+        setLocation("/auth/login");
+        return;
+      }
+
+      try {
+        const response = await apiRequest("GET", "/api/vendor/onboarding/profile");
+        const data = await response.json();
+
+        if (!response.ok) {
+          setLocation("/vendor/onboarding/step0");
+          return;
+        }
+
+        const profile = data.profile;
+        const user = data.user;
+
+        if (user?.userType && user.userType !== 'vendor') {
+          setLocation("/");
+          return;
+        }
+
+        // Check if onboarding is complete - only allow access if status is pending_verification, under_review, or approved
+        if (!profile) {
+          setLocation("/vendor/onboarding/step0");
+          return;
+        }
+        
+        if (profile.onboardingStatus === 'pending_verification' || profile.onboardingStatus === 'under_review' || profile.onboardingStatus === 'approved') {
+          // Onboarding complete, allow access
+          setIsCheckingOnboarding(false);
+        } else {
+          // Redirect to appropriate onboarding step
+          if (profile.currentStep === 0 || !profile.currentStep) {
+            setLocation("/vendor/onboarding/step0");
+          } else if (profile.currentStep === 1) {
+            setLocation("/vendor/onboarding/step1");
+          } else if (profile.currentStep === 2) {
+            setLocation("/vendor/onboarding/step2");
+          } else if (profile.currentStep === 3) {
+            setLocation("/vendor/onboarding/step3");
+          } else if (profile.currentStep === 4) {
+            setLocation("/vendor/onboarding/step4");
+          } else if (profile.currentStep === 5) {
+            setLocation("/vendor/onboarding/step5");
+          } else if (profile.currentStep === 6) {
+            setLocation("/vendor/onboarding/identity-verification");
+          } else {
+            setLocation("/vendor/onboarding/step0");
+          }
+        }
+      } catch (error) {
+        console.error("Error checking onboarding status:", error);
+        setLocation("/vendor/onboarding/step0");
+      }
+    };
+
+    checkOnboardingStatus();
+  }, [authLoading, isAuthenticated, accessToken, setLocation]);
 
   const handleLogout = async () => {
     try {
@@ -42,6 +112,20 @@ export default function VendorLayout({ children, title, subtitle, actions }: Ven
       setLocation('/auth/login');
     }
   };
+
+  // Show loading while checking onboarding status
+  if (isCheckingOnboarding || authLoading) {
+    return (
+      <Layout>
+        <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+          <div className="flex flex-col items-center gap-4">
+            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            <p className="text-slate-500">Loading...</p>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>

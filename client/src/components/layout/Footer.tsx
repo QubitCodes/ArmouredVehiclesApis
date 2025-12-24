@@ -22,8 +22,8 @@ export default function Footer() {
           <div>
             <h4 className="font-display font-bold text-white mb-4">Platform</h4>
             <ul className="space-y-2 text-sm">
-              <li><a href="#" className="hover:text-primary transition-colors">Marketplace</a></li>
-              <li><a href="#" className="hover:text-primary transition-colors">Sell on Platform</a></li>
+              <li><a href="/" className="hover:text-primary transition-colors">Marketplace</a></li>
+              <li><a href="/auth/supplier-register" className="hover:text-primary transition-colors" data-testid="link-supplier-register">Become a Supplier</a></li>
               <li><a href="#" className="hover:text-primary transition-colors">Vendor Directory</a></li>
               <li><a href="#" className="hover:text-primary transition-colors">Bulk Orders</a></li>
             </ul>
