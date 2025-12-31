@@ -5,6 +5,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { seedDatabase } from "./seed";
 import { setupSwagger } from "./swagger";
+import cors from "cors";
 
 const app = express();
 const httpServer = createServer(app);
@@ -14,6 +15,12 @@ declare module "http" {
     rawBody: unknown;
   }
 }
+
+// Enable CORS for all routes
+app.use(cors({
+  origin: true,
+  credentials: true,
+}));
 
 app.use(
   express.json({
@@ -79,6 +86,11 @@ app.use((req, res, next) => {
 
     res.status(status).json({ message });
     throw err;
+  });
+
+  // Return JSON 404 for any unmatched API routes to avoid SPA fallback
+  app.use("/api", (req: Request, res: Response) => {
+    res.status(404).json({ error: "Not Found", path: req.path });
   });
 
   // importantly only setup vite in development and after

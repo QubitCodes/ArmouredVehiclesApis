@@ -7,6 +7,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { sendOtpEmail } from "./email";
+// Multer and CSV parser are loaded dynamically to avoid type issues before install
 
 // JWT Secret - in production use a proper secret from environment
 const JWT_SECRET = process.env.JWT_SECRET || 'armoredmart-jwt-secret-key-2024';
@@ -24,6 +25,10 @@ interface JWTPayload {
   sessionId: string;
   tokenVersion: number;
   type: 'access' | 'refresh';
+}
+
+function isVendorOrAdmin(user: Request["user"] | undefined): boolean {
+  return !!user && (user.userType === 'vendor' || user.userType === 'admin' || user.userType === 'super_admin');
 }
 
 // Extend Express Request type to include user and session
@@ -54,7 +59,7 @@ function generateAccessToken(user: { id: string; email: string; name: string; us
       type: 'access',
     } as JWTPayload,
     JWT_SECRET,
-    { expiresIn: ACCESS_TOKEN_EXPIRY }
+    { expiresIn: '6d' }
   );
 }
 
@@ -423,28 +428,9 @@ export async function registerRoutes(
         expiresAt,
       });
 
-      // Send OTP via Resend
-      const isDev = process.env.NODE_ENV === 'development';
+      // Send OTP via centralized Resend helper
       try {
-        const resendApiKey = process.env.RESEND_API_KEY;
-        if (resendApiKey) {
-          const { Resend } = await import('resend');
-          const resend = new Resend(resendApiKey);
-          await resend.emails.send({
-            from: 'ArmoredMart <onboarding@resend.dev>',
-            to: email,
-            subject: 'Your ArmoredMart Login Code',
-            html: `
-              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                <h2 style="color: #3D4736;">ArmoredMart Login</h2>
-                <p>Your verification code is:</p>
-                <h1 style="color: #D97706; font-size: 32px; letter-spacing: 8px;">${otpCode}</h1>
-                <p>This code expires in 10 minutes.</p>
-                <p style="color: #666;">If you didn't request this code, please ignore this email.</p>
-              </div>
-            `,
-          });
-        }
+        await sendOtpEmail(email, otpCode, user.name || 'there');
       } catch (emailError) {
         console.error("Failed to send login OTP email:", emailError);
       }
@@ -452,9 +438,9 @@ export async function registerRoutes(
       console.log(`[OTP] Login OTP for ${email}: ${otpCode}`);
 
       res.json({
-        message: isDev ? "OTP generated (check console)" : "Verification code sent to your email",
+        message: "Verification code sent to your email",
         expiresIn: 600,
-        ...(isDev && { debugOtp: otpCode }),
+        debugOtp: otpCode,
       });
     } catch (error) {
       console.error("OTP login start error:", error);
@@ -733,7 +719,7 @@ export async function registerRoutes(
       const emailSent = await sendOtpEmail(email, otpCode, user.name);
       
       // In development or if email fails, include OTP in response for testing
-      const isDev = process.env.NODE_ENV === 'development';
+      // const isDev = process.env.NODE_ENV === 'development' || process.env.DEBUG === 'true';
       
       res.status(resumingRegistration ? 200 : 201).json({
         message: resumingRegistration 
@@ -745,7 +731,7 @@ export async function registerRoutes(
         username: user.username,
         resuming: resumingRegistration,
         expiresIn: 600,
-        ...((!emailSent || isDev) && { debugOtp: otpCode }),
+        debugOtp: otpCode,
       });
     } catch (error) {
       console.error("OTP registration start error:", error);
@@ -929,12 +915,12 @@ export async function registerRoutes(
       const emailSent = await sendOtpEmail(email, otpCode, userName);
       
       // In development or if email fails, include OTP in response for testing
-      const isDev = process.env.NODE_ENV === 'development';
+      // const isDev = process.env.NODE_ENV === 'development' || process.env.DEBUG === 'true';
 
       res.json({
         message: emailSent ? "OTP resent to email" : "OTP generated (email not configured)",
         expiresIn: 600,
-        ...((!emailSent || isDev) && { debugOtp: otpCode }),
+        debugOtp: otpCode,
       });
     } catch (error) {
       console.error("Email OTP resend error:", error);
@@ -1010,12 +996,12 @@ export async function registerRoutes(
       console.log(`[OTP] Phone OTP for ${fullPhone}: ${otpCode}`);
       
       // In development mode, include OTP in response for testing
-      const isDev = process.env.NODE_ENV === 'development';
+      // const isDev = process.env.NODE_ENV === 'development' || process.env.DEBUG === 'true';
 
       res.json({
-        message: isDev ? "OTP generated (SMS not configured)" : "OTP sent to phone",
+        message: "OTP sent to phone",
         expiresIn: 600,
-        ...(isDev && { debugOtp: otpCode }),
+        debugOtp: otpCode,
       });
     } catch (error) {
       console.error("Set phone error:", error);
@@ -1075,7 +1061,11 @@ export async function registerRoutes(
     try {
       const { userId, phone, code, firebaseUid } = req.body;
 
-      if (!phone) {
+      // Prefer the phone stored on the user (includes country code) for OTP lookup
+      const userRecord = userId ? await storage.getUser(userId) : undefined;
+      const identifierPhone = userRecord?.phone || phone;
+
+      if (!identifierPhone) {
         return res.status(400).json({ error: "Phone is required" });
       }
 
@@ -1083,10 +1073,11 @@ export async function registerRoutes(
       // Otherwise, fall back to backend OTP verification
       if (firebaseUid) {
         // Firebase has already verified the phone number
-        console.log(`[OTP] Phone verified via Firebase for ${phone}, UID: ${firebaseUid}`);
+        console.log(`[OTP] Phone verified via Firebase for ${identifierPhone}, UID: ${firebaseUid}`);
       } else if (code) {
         // Fallback to backend OTP verification
-        const otpRecord = await storage.getOtpVerification(phone, 'phone', 'verify_phone');
+        const otpRecord = await storage.getOtpVerification(identifierPhone, 'phone', 'verify_phone');
+        console.log("OTP Record:", otpRecord);
         if (!otpRecord) {
           return res.status(400).json({ error: "No pending verification found" });
         }
@@ -1225,12 +1216,12 @@ export async function registerRoutes(
       console.log(`[OTP] Resent Phone OTP for ${phone}: ${otpCode}`);
       
       // In development mode, include OTP in response for testing
-      const isDev = process.env.NODE_ENV === 'development';
+      // const isDev = process.env.NODE_ENV === 'development' || process.env.DEBUG === 'true';
 
       res.json({
-        message: isDev ? "OTP generated (SMS not configured)" : "OTP resent to phone",
+        message: "OTP resent to phone",
         expiresIn: 600,
-        ...(isDev && { debugOtp: otpCode }),
+        debugOtp: otpCode,
       });
     } catch (error) {
       console.error("Phone OTP resend error:", error);
@@ -1309,6 +1300,8 @@ export async function registerRoutes(
         email: user.email,
         name: user.name,
         userType: user.userType,
+        phone: user.phone,
+        countryCode: user.countryCode,
         completionPercentage: user.completionPercentage || 80
       });
     } catch (error) {
@@ -1459,7 +1452,8 @@ export async function registerRoutes(
    *               companyName: { type: string }
    *               companyEmail: { type: string, format: email }
    *               companyPhone: { type: string }
-   *               companyPhoneCountryCode: { type: string, example: "+971" }
+    *               companyPhoneCountryCode: { type: string, example: "+971" }
+    *               typeOfBuyer: { type: string, nullable: true, enum: ['individual', 'business', 'government', 'reseller', 'manufacturer', 'distributor', 'other'], description: 'Optional - type of buyer (nullable). Applicable for customers.' }
    *     responses:
    *       200:
    *         description: Store created/updated successfully
@@ -1486,7 +1480,9 @@ export async function registerRoutes(
     }
 
     try {
-      const { country, companyName, companyEmail, companyPhone, companyPhoneCountryCode } = req.body;
+      const { country, companyName, companyEmail, companyPhone, companyPhoneCountryCode, typeOfBuyer } = req.body;
+      // typeOfBuyer is only applicable for customers; ensure it's nullable
+      const typeOfBuyerValue = req.user?.userType === 'customer' ? (typeOfBuyer ?? null) : null;
       
       // Check if profile exists
       let profile = await storage.getUserProfile(req.user.id);
@@ -1499,6 +1495,7 @@ export async function registerRoutes(
           companyEmail,
           companyPhone,
           companyPhoneCountryCode,
+          typeOfBuyer: typeOfBuyerValue,
           currentStep: 1,
           onboardingStatus: 'in_progress',
         });
@@ -1511,6 +1508,7 @@ export async function registerRoutes(
           companyEmail,
           companyPhone,
           companyPhoneCountryCode,
+          typeOfBuyer: typeOfBuyerValue,
           currentStep: 1,
           onboardingStatus: 'in_progress',
         });
@@ -2185,6 +2183,34 @@ export async function registerRoutes(
 
   /**
    * @swagger
+   * /reference/type-of-buyer:
+   *   get:
+   *     tags: [Reference Data]
+   *     summary: Get Type of Buyer options
+   *     description: Returns the allowed values for the `type_of_buyer` enum used in user profiles.
+   *     responses:
+   *       200:
+   *         description: Enum values
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: array
+   *               items:
+   *                 type: string
+   */
+  app.get("/api/reference/type-of-buyer", async (req, res) => {
+    try {
+      // Importing lazily to avoid circular import issues in some build setups
+      const { TYPE_OF_BUYER_VALUES } = await import("@shared/schema");
+      res.json(Array.from(TYPE_OF_BUYER_VALUES));
+    } catch (error) {
+      console.error("Error fetching type of buyer enum:", error);
+      res.status(500).json({ error: "Failed to fetch data" });
+    }
+  });
+
+  /**
+   * @swagger
    * /reference/end-use-markets:
    *   get:
    *     tags: [Reference Data]
@@ -2558,12 +2584,12 @@ export async function registerRoutes(
    *     description: |
    *       Returns a list of products, optionally filtered by category, search term, or price range.
    *       
-   *       ## Pages / Sections Used
-   *       - **Products Page** (`/products`)
-   *         - Product Grid - main product listing with filter/sort
-   *         - Search Suggestions - autocomplete dropdown
-   *       - **Wishlist Page** (`/account/wishlist`)
-   *         - Wishlist Grid - fetches product details for saved items
+  *       ## Pages / Sections Used
+  *       - **Products Page** (`/products`)
+  *         - Product Grid - main product listing with filter/sort
+  *         - Search Suggestions - autocomplete dropdown
+  *       - **Wishlist Page** (`/account/wishlist`)
+  *         - Wishlist Grid - fetches product details for saved items
    *     parameters:
    *       - in: query
    *         name: categoryId
@@ -2626,7 +2652,9 @@ export async function registerRoutes(
   app.get("/api/products/featured", async (req, res) => {
     try {
       const products = await storage.getProducts({});
-      res.json(products.slice(0, 3));
+      console.log(products.length)
+      const featured = products.filter((p: any) => p?.is_featured === true || p?.isFeatured === true);
+      res.json(featured);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch featured products" });
     }
@@ -2786,9 +2814,9 @@ export async function registerRoutes(
    *     description: |
    *       Creates a new product listing. Requires vendor authentication.
    *       
-   *       ## Pages / Sections Used
-   *       - **Vendor Dashboard** (`/vendor/products`) - _Not yet implemented in frontend_
-   *         - Add Product Form - create new product listing
+  *       ## Pages / Sections Used
+  *       - **Vendor Dashboard** (`/products`) - _Not yet implemented in frontend_
+  *         - Add Product Form - create new product listing
    *     security:
    *       - bearerAuth: []
    *     requestBody:
@@ -2822,6 +2850,280 @@ export async function registerRoutes(
       }
       console.error("Error creating product:", error);
       res.status(500).json({ error: "Failed to create product" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /products/bulk/csv:
+   *   post:
+   *     tags: [Products]
+   *     summary: Bulk create products via CSV upload
+   *     description: |
+   *       Upload a CSV file and create multiple products. Vendors can only create for themselves. Admins can set a single `vendorId` query param or leave it empty to create admin-owned products. If `vendorId` is null/omitted and caller is admin, products are admin-owned.
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: query
+   *         name: vendorId
+   *         schema: { type: string, nullable: true, format: uuid }
+   *         description: Vendor UUID. Admin only. If omitted/null, products are admin-owned.
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         multipart/form-data:
+   *           schema:
+   *             type: object
+   *             required: [file]
+   *             properties:
+   *               file:
+   *                 type: string
+   *                 format: binary
+   *                 description: CSV file with headers
+   *     responses:
+   *       201:
+   *         description: Products created from CSV
+   *       400:
+   *         description: Validation or parsing error
+   *       403:
+   *         description: Requires vendor or admin access
+   */
+  // Lazy middleware that loads multer at runtime
+  const csvUploadMiddleware = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const multerMod: any = await import("multer");
+      const upload = multerMod.default ? multerMod.default : multerMod;
+      const mw = upload({ storage: upload.memoryStorage() }).single("file");
+      mw(req, res, next);
+    } catch (e) {
+      next(e);
+    }
+  };
+
+  app.post("/api/products/bulk/csv", csvUploadMiddleware as any, async (req, res) => {
+    try {
+      if (!isVendorOrAdmin(req.user)) {
+        return res.status(403).json({ error: "Only vendors or admins can bulk create products" });
+      }
+
+      const file: any = (req as any).file;
+      if (!file || !file.buffer) {
+        return res.status(400).json({ error: "CSV file is required in 'file' field" });
+      }
+
+      // Determine final vendor ownership
+      let finalVendorId: string | null | undefined = undefined;
+      const vendorIdQuery = (req.query.vendorId as string | undefined) ?? undefined;
+
+      if (req.user!.userType === 'vendor') {
+        finalVendorId = req.user!.id;
+      } else {
+        if (vendorIdQuery === undefined || vendorIdQuery === null || vendorIdQuery === 'null' || vendorIdQuery === '') {
+          finalVendorId = null; // admin-owned
+        } else {
+          const targetVendor = await storage.getUser(vendorIdQuery);
+          if (!targetVendor || targetVendor.userType !== 'vendor') {
+            return res.status(400).json({ error: "Provided vendorId is invalid or not a vendor" });
+          }
+          finalVendorId = vendorIdQuery;
+        }
+      }
+
+      // Parse CSV
+      const text = file.buffer.toString('utf8');
+      const csvSync: any = await import("csv-parse/sync");
+      const parseCsv = csvSync.parse || csvSync.default?.parse || csvSync.default;
+      const records = parseCsv(text, {
+        columns: true,
+        skip_empty_lines: true,
+        trim: true,
+      }) as Record<string, string>[];
+
+      if (!records.length) {
+        return res.status(400).json({ error: "CSV contains no rows" });
+      }
+
+      // Helper coercers
+      const toInt = (v?: string) => (v && v.trim() !== '' ? parseInt(v, 10) : undefined);
+      const toFloatStr = (v?: string) => (v && v.trim() !== '' ? String(parseFloat(v)) : undefined);
+      const toBool = (v?: string) => (v ? /^(true|1|yes)$/i.test(v) : undefined);
+      const toStr = (v?: string) => (v && v.trim() !== '' ? v : undefined);
+      const toArr = (v?: string) => (v && v.trim() !== '' ? v.split(/\s*[|,]\s*/).filter(Boolean) : undefined);
+
+      // Map CSV rows to InsertProduct objects. Accepts common headers; extra columns are ignored.
+      const mapped = records.map((r) => {
+        const p: any = {
+          name: toStr(r.name),
+          sku: toStr(r.sku),
+          description: toStr(r.description),
+          image: toStr(r.image),
+          gallery: toArr(r.gallery),
+          price: toFloatStr(r.price),
+          originalPrice: toFloatStr(r.originalPrice),
+          currency: toStr(r.currency) || 'USD',
+          stock: toInt(r.stock),
+          status: toStr(r.status) as any,
+          mainCategoryId: toInt(r.mainCategoryId as any),
+          categoryId: toInt(r.categoryId as any),
+          subCategoryId: toInt(r.subCategoryId as any),
+          condition: toStr(r.condition) as any,
+          vehicleCompatibility: toStr(r.vehicleCompatibility),
+          certifications: toStr(r.certifications),
+          countryOfOrigin: toStr(r.countryOfOrigin),
+          controlledItemType: toStr(r.controlledItemType),
+          dimensionLength: toFloatStr(r.dimensionLength),
+          dimensionWidth: toFloatStr(r.dimensionWidth),
+          dimensionHeight: toFloatStr(r.dimensionHeight),
+          dimensionUnit: toStr(r.dimensionUnit),
+          materials: toArr(r.materials),
+          features: toArr(r.features),
+          performance: toArr(r.performance),
+          technicalDescription: toStr(r.technicalDescription),
+          driveTypes: toArr(r.driveTypes),
+          sizes: toArr(r.sizes),
+          thickness: toArr(r.thickness),
+          colors: toArr(r.colors),
+          weightValue: toFloatStr(r.weightValue),
+          weightUnit: toStr(r.weightUnit),
+          packingLength: toFloatStr(r.packingLength),
+          packingWidth: toFloatStr(r.packingWidth),
+          packingHeight: toFloatStr(r.packingHeight),
+          packingDimensionUnit: toStr(r.packingDimensionUnit),
+          packingWeight: toFloatStr(r.packingWeight),
+          packingWeightUnit: toStr(r.packingWeightUnit),
+          minOrderQuantity: toInt(r.minOrderQuantity),
+          basePrice: toFloatStr(r.basePrice),
+          pricingTerms: toArr(r.pricingTerms),
+          productionLeadTime: toInt(r.productionLeadTime),
+          readyStockAvailable: toBool(r.readyStockAvailable),
+          manufacturingSource: toStr(r.manufacturingSource),
+          manufacturingSourceName: toStr(r.manufacturingSourceName),
+          requiresExportLicense: toBool(r.requiresExportLicense),
+          hasWarranty: toBool(r.hasWarranty),
+          warrantyDuration: toInt(r.warrantyDuration),
+          warrantyDurationUnit: toStr(r.warrantyDurationUnit),
+          warrantyTerms: toStr(r.warrantyTerms),
+          complianceConfirmed: toBool(r.complianceConfirmed),
+          supplierSignature: toStr(r.supplierSignature),
+          make: toStr(r.make),
+          model: toStr(r.model),
+          year: toInt(r.year),
+          vehicleFitment: toStr(r.vehicleFitment),
+          warranty: toStr(r.warranty),
+          actionType: toStr(r.actionType) as any,
+          isFeatured: toBool(r.isFeatured),
+        };
+        return p;
+      });
+
+      // Validate each with Zod and collect
+      const valid: any[] = [];
+      const errors: any[] = [];
+      mapped.forEach((p, idx) => {
+        try {
+          const parsed = insertProductSchema.parse(p);
+          valid.push({ ...parsed, vendorId: finalVendorId ?? null });
+        } catch (e) {
+          errors.push({ row: idx + 2, error: e instanceof z.ZodError ? e.errors : String(e) }); // +2 accounts for header row
+        }
+      });
+
+      if (!valid.length) {
+        return res.status(400).json({ error: "No valid rows found", details: errors });
+      }
+
+      const created = await storage.createProductsBulk(valid as any);
+      res.status(201).json({ count: created.length, products: created, errors });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors });
+      }
+      console.error("Error bulk creating products via CSV:", error);
+      res.status(500).json({ error: "Failed to bulk create products from CSV" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /products/bulk:
+   *   post:
+   *     tags: [Products]
+   *     summary: Bulk create products (vendors and admins)
+   *     description: |
+   *       Create multiple products in a single request.
+   *       - Vendors: products will be created under the authenticated vendor's account.
+   *       - Admins: pass `vendorId` as a UUID to assign to a vendor, or `null` to create admin-owned products.
+   *
+   *       Note: If `vendorId` is null, it is treated as admin adding products.
+   *     security:
+   *       - bearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [products]
+   *             properties:
+   *               vendorId:
+   *                 type: string
+   *                 nullable: true
+   *                 description: "Vendor UUID. If null or omitted and caller is admin, products are admin-owned. Ignored for vendors."
+   *               products:
+   *                 type: array
+   *                 minItems: 1
+   *                 items:
+   *                   $ref: '#/components/schemas/Product'
+   *     responses:
+   *       201:
+   *         description: Products created
+   *       400:
+   *         description: Validation error
+   *       403:
+   *         description: Requires vendor or admin access
+   */
+  app.post("/api/products/bulk", async (req, res) => {
+    try {
+      if (!isVendorOrAdmin(req.user)) {
+        return res.status(403).json({ error: "Only vendors or admins can bulk create products" });
+      }
+
+      const bulkSchema = z.object({
+        vendorId: z.string().uuid().nullable().optional(),
+        products: z.array(insertProductSchema).min(1),
+      });
+
+      const parsed = bulkSchema.parse(req.body);
+
+      let finalVendorId: string | null | undefined = undefined;
+
+      if (req.user!.userType === 'vendor') {
+        finalVendorId = req.user!.id; // enforce self-ownership for vendors
+      } else {
+        // admin/super_admin
+        finalVendorId = parsed.vendorId ?? null; // null means admin-owned
+
+        if (finalVendorId) {
+          const targetVendor = await storage.getUser(finalVendorId);
+          if (!targetVendor || targetVendor.userType !== 'vendor') {
+            return res.status(400).json({ error: "Provided vendorId is invalid or not a vendor" });
+          }
+        }
+      }
+
+      const toInsert = parsed.products.map((p: any) => ({
+        ...p,
+        vendorId: finalVendorId ?? null,
+      }));
+
+      const created = await storage.createProductsBulk(toInsert);
+      res.status(201).json({ count: created.length, products: created });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors });
+      }
+      console.error("Error bulk creating products:", error);
+      res.status(500).json({ error: "Failed to bulk create products" });
     }
   });
 
@@ -2859,6 +3161,546 @@ export async function registerRoutes(
       res.json(categories);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch categories" });
+    }
+  });
+
+  /**
+   * @swagger
+  * /categories/main:
+   *   get:
+   *     tags: [Categories]
+   *     summary: Get all main categories (level 0)
+   *     description: Returns all categories with no parent (parentId is null)
+  *     responses:
+  *       200:
+  *         description: List of main categories
+  *         content:
+  *           application/json:
+  *             schema:
+  *               type: array
+  *               items:
+  *                 $ref: '#/components/schemas/Category'
+  *       500:
+  *         description: Server error
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Error'
+   */
+  app.get("/api/categories/main", async (req, res) => {
+    try {
+      const mainCategories = await storage.getCategoriesByLevel(0);
+      res.json(mainCategories);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch main categories" });
+    }
+  });
+
+  /**
+   * @swagger
+  * /categories/by-parent/{parentId}:
+   *   get:
+   *     tags: [Categories]
+   *     summary: Get subcategories by parent ID
+   *     description: Returns all categories that have the specified parent ID
+   *     parameters:
+   *       - in: path
+   *         name: parentId
+   *         required: true
+   *         schema: { type: integer }
+  *     responses:
+  *       200:
+  *         description: List of subcategories
+  *         content:
+  *           application/json:
+  *             schema:
+  *               type: array
+  *               items:
+  *                 $ref: '#/components/schemas/Category'
+  *       400:
+  *         description: Invalid parent id
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Error'
+  *       500:
+  *         description: Server error
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Error'
+   */
+  app.get("/api/categories/by-parent/:parentId", async (req, res) => {
+    try {
+      const parentId = parseInt(req.params.parentId);
+      if (isNaN(parentId)) {
+        return res.status(400).json({ error: "Invalid parent ID" });
+      }
+      const subcategories = await storage.getCategoriesByParentId(parentId);
+      res.json(subcategories);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch subcategories" });
+    }
+  });
+
+  /**
+   * @swagger
+  * /categories/search:
+   *   get:
+   *     tags: [Categories]
+   *     summary: Search categories by name
+   *     description: Search for categories by name with optional parent ID filter
+   *     parameters:
+   *       - in: query
+   *         name: name
+   *         required: true
+   *         schema: { type: string }
+   *       - in: query
+   *         name: parentId
+   *         required: false
+   *         schema: { type: integer }
+  *     responses:
+  *       200:
+  *         description: List of matching categories
+  *         content:
+  *           application/json:
+  *             schema:
+  *               type: array
+  *               items:
+  *                 $ref: '#/components/schemas/Category'
+  *       400:
+  *         description: Missing or invalid query
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Error'
+  *       500:
+  *         description: Server error
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Error'
+   */
+  app.get("/api/categories/search", async (req, res) => {
+    try {
+      const { name, parentId } = req.query;
+      if (!name || typeof name !== 'string') {
+        return res.status(400).json({ error: "Name query parameter is required" });
+      }
+      
+      const parentIdNum = parentId ? parseInt(parentId as string) : undefined;
+      if (parentId && isNaN(parentIdNum!)) {
+        return res.status(400).json({ error: "Invalid parent ID" });
+      }
+      
+      const categories = await storage.searchCategoriesByName(name, parentIdNum);
+      res.json(categories);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to search categories" });
+    }
+  });
+
+  /**
+   * @swagger
+  * /categories/{id}:
+   *   get:
+   *     tags: [Categories]
+   *     summary: Get category by ID
+   *     description: Returns a single category with its parent and children
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: integer }
+  *     responses:
+  *       200:
+  *         description: Category details
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Category'
+  *       404:
+  *         description: Category not found
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Error'
+  *       400:
+  *         description: Invalid category id
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Error'
+   */
+  app.get("/api/categories/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ error: "Invalid category ID" });
+      }
+      
+      const category = await storage.getCategoryById(id);
+      if (!category) {
+        return res.status(404).json({ error: "Category not found" });
+      }
+      
+      res.json(category);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch category" });
+    }
+  });
+
+  /**
+   * @swagger
+  * /categories/{id}/hierarchy:
+   *   get:
+   *     tags: [Categories]
+   *     summary: Get category hierarchy path
+   *     description: Returns the full path from main category to the specified category
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: integer }
+  *     responses:
+  *       200:
+  *         description: Category hierarchy path
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/CategoryHierarchy'
+  *       400:
+  *         description: Invalid category id
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Error'
+  *       500:
+  *         description: Server error
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Error'
+   */
+  app.get("/api/categories/:id/hierarchy", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ error: "Invalid category ID" });
+      }
+      
+      const hierarchy = await storage.getCategoryHierarchy(id);
+      res.json(hierarchy);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch category hierarchy" });
+    }
+  });
+
+  /**
+   * @swagger
+  * /categories:
+   *   post:
+   *     tags: [Categories]
+   *     summary: Create a new category
+   *     description: |
+   *       Create a new category. Supports up to 2 levels of nesting:
+   *       - Level 0: Main category (parentId is null)
+   *       - Level 1: Category (parentId references main category)
+   *       - Level 2: Subcategory (parentId references category)
+  *     requestBody:
+  *       required: true
+  *       content:
+  *         application/json:
+  *           schema:
+  *             $ref: '#/components/schemas/CategoryInput'
+  *     responses:
+  *       201:
+  *         description: Category created successfully
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Category'
+  *       400:
+  *         description: Invalid input or max nesting level exceeded
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Error'
+  *       401:
+  *         description: Authentication required
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Error'
+  *       403:
+  *         description: Forbidden - admin only
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Error'
+  *       500:
+  *         description: Server error
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Error'
+   */
+  app.post("/api/categories", async (req, res) => {
+    try {
+      // Check if user is authenticated
+      if (!req.user) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+      
+      // Check if user is admin
+      if (req.user.userType !== 'admin' && req.user.userType !== 'super_admin') {
+        return res.status(403).json({ error: "Only admins can create categories" });
+      }
+
+      const { name, image, description, parentId } = req.body;
+
+      if (!name || !image) {
+        return res.status(400).json({ error: "Name and image are required" });
+      }
+
+      // Validate nesting level (max 2 levels deep)
+      if (parentId) {
+        const level = await storage.getCategoryLevel(parentId);
+        if (level >= 2) {
+          return res.status(400).json({ 
+            error: "Maximum nesting level reached. Categories can only go 2 levels deep (main category > category > subcategory)" 
+          });
+        }
+      }
+
+      const category = await storage.createCategory({
+        name,
+        image,
+        description: description || null,
+        parentId: parentId || null,
+      });
+
+      res.status(201).json(category);
+    } catch (error) {
+      console.error("Create category error:", error);
+      res.status(500).json({ error: "Failed to create category" });
+    }
+  });
+
+  /**
+   * @swagger
+  * /categories/{id}:
+   *   put:
+   *     tags: [Categories]
+   *     summary: Update a category
+   *     description: Update category details. Cannot change parentId if it would exceed max nesting level
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: integer }
+  *     requestBody:
+  *       required: true
+  *       content:
+  *         application/json:
+  *           schema:
+  *             $ref: '#/components/schemas/CategoryInput'
+  *     responses:
+  *       200:
+  *         description: Category updated successfully
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Category'
+  *       400:
+  *         description: Bad request / validation error
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Error'
+  *       401:
+  *         description: Authentication required
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Error'
+  *       403:
+  *         description: Forbidden - admin only
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Error'
+  *       404:
+  *         description: Category not found
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Error'
+  *       500:
+  *         description: Server error
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Error'
+   */
+  app.put("/api/categories/:id", async (req, res) => {
+    try {
+      // Check if user is authenticated
+      if (!req.user) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+      
+      // Check if user is admin
+      if (req.user.userType !== 'admin' && req.user.userType !== 'super_admin') {
+        return res.status(403).json({ error: "Only admins can update categories" });
+      }
+
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ error: "Invalid category ID" });
+      }
+
+      const { name, image, description, parentId } = req.body;
+
+      // Check if category exists
+      const existing = await storage.getCategoryById(id);
+      if (!existing) {
+        return res.status(404).json({ error: "Category not found" });
+      }
+
+      // Validate nesting level if parentId is being changed
+      if (parentId !== undefined && parentId !== existing.parentId) {
+        if (parentId !== null) {
+          const level = await storage.getCategoryLevel(parentId);
+          if (level >= 2) {
+            return res.status(400).json({ 
+              error: "Maximum nesting level reached. Categories can only go 2 levels deep" 
+            });
+          }
+        }
+
+        // Check if this category has children - if so, verify the new structure won't exceed limits
+        const children = await storage.getCategoriesByParentId(id);
+        if (children.length > 0 && parentId !== null) {
+          const newParentLevel = await storage.getCategoryLevel(parentId);
+          if (newParentLevel >= 1) {
+            return res.status(400).json({ 
+              error: "Cannot move this category - it has subcategories and moving would exceed nesting limit" 
+            });
+          }
+        }
+      }
+
+      const updated = await storage.updateCategory(id, {
+        name: name !== undefined ? name : existing.name,
+        image: image !== undefined ? image : existing.image,
+        description: description !== undefined ? description : existing.description,
+        parentId: parentId !== undefined ? parentId : existing.parentId,
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Update category error:", error);
+      res.status(500).json({ error: "Failed to update category" });
+    }
+  });
+
+  /**
+   * @swagger
+  * /categories/{id}:
+   *   delete:
+   *     tags: [Categories]
+   *     summary: Delete a category
+   *     description: Delete a category. Cannot delete if it has subcategories or products
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: integer }
+  *     responses:
+  *       200:
+  *         description: Category deleted successfully
+  *         content:
+  *           application/json:
+  *             schema:
+  *               type: object
+  *               properties:
+  *                 message: { type: string }
+  *       400:
+  *         description: Cannot delete - has subcategories or products
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Error'
+  *       401:
+  *         description: Authentication required
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Error'
+  *       403:
+  *         description: Forbidden - admin only
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Error'
+  *       404:
+  *         description: Category not found
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Error'
+  *       500:
+  *         description: Server error
+  *         content:
+  *           application/json:
+  *             schema:
+  *               $ref: '#/components/schemas/Error'
+   */
+  app.delete("/api/categories/:id", async (req, res) => {
+    try {
+      // Check if user is authenticated
+      if (!req.user) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+      
+      // Check if user is admin
+      if (req.user.userType !== 'admin' && req.user.userType !== 'super_admin') {
+        return res.status(403).json({ error: "Only admins can delete categories" });
+      }
+
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ error: "Invalid category ID" });
+      }
+
+      // Check if category exists
+      const existing = await storage.getCategoryById(id);
+      if (!existing) {
+        return res.status(404).json({ error: "Category not found" });
+      }
+
+      // Check if category has children
+      const children = await storage.getCategoriesByParentId(id);
+      if (children.length > 0) {
+        return res.status(400).json({ 
+          error: "Cannot delete category - it has subcategories. Delete subcategories first." 
+        });
+      }
+
+      // Check if category has products
+      const hasProducts = await storage.categoryHasProducts(id);
+      if (hasProducts) {
+        return res.status(400).json({ 
+          error: "Cannot delete category - it has associated products. Move or delete products first." 
+        });
+      }
+
+      await storage.deleteCategory(id);
+      res.json({ message: "Category deleted successfully" });
+    } catch (error) {
+      console.error("Delete category error:", error);
+      res.status(500).json({ error: "Failed to delete category" });
     }
   });
 
@@ -3801,24 +4643,28 @@ export async function registerRoutes(
    *     tags: [Vendor]
    *     summary: Get vendor's products
    *     description: |
-   *       Returns all products created by the authenticated vendor.
-   *       
-   *       ## Pages / Sections Used
-   *       - **Vendor Dashboard** (`/vendor/products`) - _Not yet implemented in frontend_
-   *         - Products Table - manage listings, inventory, pricing
+    *       Returns all products created by the authenticated vendor.
+    *       Admins and super admins can also use this endpoint
+    *       to view any vendor's products.
+    *       
+    *       ## Pages / Sections Used
+    *       - **Vendor Dashboard** (`/products`) - _Not yet implemented in frontend_
+    *         - Products Table - manage listings, inventory, pricing
    *     security:
    *       - bearerAuth: []
    *     responses:
    *       200:
    *         description: List of vendor's products
+  *       403:
+  *         description: Authentication required (vendor, admin or super_admin)
    */
   app.get("/api/vendor/products", async (req, res) => {
     try {
-      if (!req.user || req.user.userType !== 'vendor') {
+      if (!isVendorOrAdmin(req.user)) {
         return res.status(403).json({ error: "Vendor access required" });
       }
 
-      const products = await storage.getProducts({ vendorId: req.user.id });
+      const products = await storage.getProducts({ vendorId: req.user!.id });
       res.json(products);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch vendor products" });
@@ -3828,13 +4674,13 @@ export async function registerRoutes(
   // Create a new product (vendor)
   app.post("/api/vendor/products", async (req, res) => {
     try {
-      if (!req.user || req.user.userType !== 'vendor') {
+      if (!isVendorOrAdmin(req.user)) {
         return res.status(403).json({ error: "Vendor access required" });
       }
 
       const productData = {
         ...req.body,
-        vendorId: req.user.id,
+        vendorId: req.user!.id,
       };
       
       const validated = insertProductSchema.parse(productData);
@@ -3852,18 +4698,18 @@ export async function registerRoutes(
   // Update a product (vendor)
   app.put("/api/vendor/products/:id", async (req, res) => {
     try {
-      if (!req.user || req.user.userType !== 'vendor') {
-        return res.status(403).json({ error: "Vendor access required" });
-      }
-
       const productId = parseInt(req.params.id);
       const existing = await storage.getProductById(productId);
       
       if (!existing) {
         return res.status(404).json({ error: "Product not found" });
       }
-      
-      if (existing.vendorId !== req.user.id) {
+
+      if (!isVendorOrAdmin(req.user)) {
+        return res.status(403).json({ error: "Vendor access required" });
+      }
+
+      if (existing.vendorId !== req.user!.id && req.user!.userType === 'vendor') {
         return res.status(403).json({ error: "Not authorized to edit this product" });
       }
 
@@ -3878,13 +4724,23 @@ export async function registerRoutes(
   // Delete a product (vendor)
   app.delete("/api/vendor/products/:id", async (req, res) => {
     try {
-      if (!req.user || req.user.userType !== 'vendor') {
+      if (!isVendorOrAdmin(req.user)) {
         return res.status(403).json({ error: "Vendor access required" });
       }
 
       const productId = parseInt(req.params.id);
-      const deleted = await storage.deleteProduct(productId, req.user.id);
-      
+      const product = await storage.getProductById(productId);
+
+      if (!product) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+
+      if (product.vendorId !== req.user!.id && req.user!.userType === 'vendor') {
+        return res.status(403).json({ error: "Not authorized to delete this product" });
+      }
+
+      const deleted = await storage.deleteProduct(productId, product.vendorId!);
+
       if (!deleted) {
         return res.status(404).json({ error: "Product not found or not authorized" });
       }
@@ -4509,6 +5365,64 @@ export async function registerRoutes(
 
   /**
    * @swagger
+   * /admin/vendors:
+   *   get:
+   *     tags: [Admin - Vendors]
+   *     summary: Get all vendors with filters and pagination
+   *     description: Returns a paginated list of vendors with their profiles and stats
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: query
+   *         name: status
+   *         schema:
+   *           type: string
+   *           enum: [pending, in_progress, pending_verification, under_review, approved, rejected]
+   *         description: Filter by onboarding status
+   *       - in: query
+   *         name: search
+   *         schema:
+   *           type: string
+   *         description: Search by name, email, or username
+   *       - in: query
+   *         name: page
+   *         schema:
+   *           type: integer
+   *           default: 1
+   *       - in: query
+   *         name: limit
+   *         schema:
+   *           type: integer
+   *           default: 20
+   *       - in: query
+   *         name: sortOrder
+   *         schema:
+   *           type: string
+   *           enum: [asc, desc]
+   *           default: desc
+   *     responses:
+   *       200:
+   *         description: Paginated list of vendors
+   */
+  app.get("/api/admin/vendors", requireAdmin, async (req, res) => {
+    try {
+      const { status, search, page, limit, sortOrder } = req.query;
+      const result = await storage.getAllSellers({
+        status: status as string,
+        search: search as string,
+        page: page ? parseInt(page as string) : 1,
+        limit: limit ? parseInt(limit as string) : 20,
+        sortOrder: (sortOrder as 'asc' | 'desc') || 'desc',
+      });
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching vendors:", error);
+      res.status(500).json({ error: "Failed to fetch vendors" });
+    }
+  });
+
+  /**
+   * @swagger
    * /admin/sellers/{id}:
    *   get:
    *     tags: [Admin - Sellers]
@@ -4540,6 +5454,40 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching seller details:", error);
       res.status(500).json({ error: "Failed to fetch seller details" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/vendors/{id}:
+   *   get:
+   *     tags: [Admin - Vendors]
+   *     summary: Get vendor details
+   *     description: Returns detailed information about a specific vendor
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema:
+   *           type: string
+   *     responses:
+   *       200:
+   *         description: Vendor details with profile, stats, and recent orders
+   *       404:
+   *         description: Vendor not found
+   */
+  app.get("/api/admin/vendors/:id", requireAdmin, async (req, res) => {
+    try {
+      const vendor = await storage.getSellerDetails(req.params.id);
+      if (!vendor) {
+        return res.status(404).json({ error: "Vendor not found" });
+      }
+      res.json(vendor);
+    } catch (error) {
+      console.error("Error fetching vendor details:", error);
+      res.status(500).json({ error: "Failed to fetch vendor details" });
     }
   });
 
@@ -4631,6 +5579,82 @@ export async function registerRoutes(
 
   /**
    * @swagger
+   * /admin/vendors/{id}/status:
+   *   patch:
+   *     tags: [Admin - Vendors]
+   *     summary: Update vendor status
+   *     description: Approve, reject, or update vendor onboarding status
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema:
+   *           type: string
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [status]
+   *             properties:
+   *               status:
+   *                 type: string
+   *                 enum: [approved, rejected, pending_verification, under_review]
+   *               note:
+   *                 type: string
+   *               rejectionReason:
+   *                 type: string
+   *     responses:
+   *       200:
+   *         description: Updated vendor profile
+   */
+  app.patch("/api/admin/vendors/:id/status", requireAdmin, async (req, res) => {
+    try {
+      const { status, note, rejectionReason } = req.body;
+      const validStatuses = ['approved', 'rejected', 'pending_verification', 'under_review'];
+      if (!status || !validStatuses.includes(status)) {
+        return res.status(400).json({ error: "Invalid status. Must be one of: " + validStatuses.join(', ') });
+      }
+      if (status === 'rejected' && !rejectionReason) {
+        return res.status(400).json({ error: "Rejection reason is required when rejecting a vendor" });
+      }
+      const vendorBefore = await storage.getSellerDetails(req.params.id);
+      if (!vendorBefore) {
+        return res.status(404).json({ error: "Vendor not found" });
+      }
+      const updated = await storage.updateSellerStatus(
+        req.params.id,
+        status,
+        req.user!.id,
+        note,
+        rejectionReason
+      );
+      if (!updated) {
+        return res.status(404).json({ error: "Vendor profile not found" });
+      }
+      const actionType = status === 'approved' ? 'seller_approved' : 
+                        status === 'rejected' ? 'seller_rejected' : 'settings_changed';
+      await storage.createAdminActionLog({
+        adminId: req.user!.id,
+        actionType: actionType as any,
+        targetType: 'user',
+        targetId: req.params.id,
+        previousValue: JSON.stringify({ status: vendorBefore.userProfile?.onboardingStatus }),
+        newValue: JSON.stringify({ status, note, rejectionReason }),
+        ipAddress: req.ip || (req.headers['x-forwarded-for'] as string) || 'unknown',
+      });
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating vendor status:", error);
+      res.status(500).json({ error: "Failed to update vendor status" });
+    }
+  });
+
+  /**
+   * @swagger
    * /admin/sellers/{id}/suspend:
    *   post:
    *     tags: [Admin - Sellers]
@@ -4690,6 +5714,59 @@ export async function registerRoutes(
 
   /**
    * @swagger
+   * /admin/vendors/{id}/suspend:
+   *   post:
+   *     tags: [Admin - Vendors]
+   *     summary: Suspend a vendor account
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema:
+   *           type: string
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [reason]
+   *             properties:
+   *               reason:
+   *                 type: string
+   *     responses:
+   *       200:
+   *         description: Vendor suspended
+   */
+  app.post("/api/admin/vendors/:id/suspend", requireAdmin, async (req, res) => {
+    try {
+      const { reason } = req.body;
+      if (!reason) {
+        return res.status(400).json({ error: "Suspension reason is required" });
+      }
+      const suspended = await storage.suspendUser(req.params.id, req.user!.id, reason);
+      if (!suspended) {
+        return res.status(404).json({ error: "Vendor not found" });
+      }
+      await storage.createAdminActionLog({
+        adminId: req.user!.id,
+        actionType: 'seller_suspended',
+        targetType: 'user',
+        targetId: req.params.id,
+        newValue: JSON.stringify({ reason }),
+        ipAddress: req.ip || (req.headers['x-forwarded-for'] as string) || 'unknown',
+      });
+      res.json({ success: true, user: suspended });
+    } catch (error) {
+      console.error("Error suspending vendor:", error);
+      res.status(500).json({ error: "Failed to suspend vendor" });
+    }
+  });
+
+  /**
+   * @swagger
    * /admin/sellers/{id}/activate:
    *   post:
    *     tags: [Admin - Sellers]
@@ -4727,6 +5804,44 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error activating seller:", error);
       res.status(500).json({ error: "Failed to activate seller" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/vendors/{id}/activate:
+   *   post:
+   *     tags: [Admin - Vendors]
+   *     summary: Activate a suspended vendor account
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema:
+   *           type: string
+   *     responses:
+   *       200:
+   *         description: Vendor activated
+   */
+  app.post("/api/admin/vendors/:id/activate", requireAdmin, async (req, res) => {
+    try {
+      const activated = await storage.activateUser(req.params.id, req.user!.id);
+      if (!activated) {
+        return res.status(404).json({ error: "Vendor not found" });
+      }
+      await storage.createAdminActionLog({
+        adminId: req.user!.id,
+        actionType: 'seller_activated',
+        targetType: 'user',
+        targetId: req.params.id,
+        ipAddress: req.ip || (req.headers['x-forwarded-for'] as string) || 'unknown',
+      });
+      res.json({ success: true, user: activated });
+    } catch (error) {
+      console.error("Error activating vendor:", error);
+      res.status(500).json({ error: "Failed to activate vendor" });
     }
   });
 
@@ -4817,7 +5932,7 @@ export async function registerRoutes(
    *   post:
    *     tags: [Admin]
    *     summary: Create a new admin user
-   *     description: Only super_admin can create new admin users
+   *     description: Admins and super_admin can create new admin users
    *     security:
    *       - bearerAuth: []
    *     requestBody:
@@ -4839,10 +5954,6 @@ export async function registerRoutes(
    */
   app.post("/api/admin/admins", requireAdmin, async (req, res) => {
     try {
-      // Only super_admin can create new admins
-      if (req.user!.userType !== 'super_admin') {
-        return res.status(403).json({ error: "Only super admins can create new admin users" });
-      }
       
       const { name, email, password } = req.body;
       
@@ -4931,9 +6042,12 @@ export async function registerRoutes(
    *   get:
    *     tags: [Vendor Products]
    *     summary: List vendor's products
-   *     description: Returns paginated list of vendor's products with optional filters
-   *     security:
-   *       - bearerAuth: []
+    *     description: |
+    *       Returns paginated list of vendor's products with optional filters.
+    *       Accessible by vendors for their own products and by admins/super_admins
+    *       to inspect vendor-created products.
+    *     security:
+    *       - bearerAuth: []
    *     parameters:
    *       - in: query
    *         name: status
@@ -4951,18 +6065,18 @@ export async function registerRoutes(
    *         schema: { type: integer, default: 20 }
    *     responses:
    *       200:
-   *         description: Paginated list of vendor products
-   *       401:
-   *         description: Not authenticated
+  *         description: Paginated list of vendor products
+  *       401:
+  *         description: Not authenticated
    */
   app.get("/api/vendor/products", async (req, res) => {
-    if (!req.user || req.user.userType !== 'vendor') {
+    if (!isVendorOrAdmin(req.user)) {
       return res.status(401).json({ error: "Vendor authentication required" });
     }
-    
+
     try {
       const { status, search, page, limit } = req.query;
-      const result = await storage.getVendorProducts(req.user.id, {
+      const result = await storage.getVendorProducts(req.user!.id, {
         status: status as string,
         search: search as string,
         page: page ? parseInt(page as string) : undefined,
@@ -4982,11 +6096,92 @@ export async function registerRoutes(
    *     tags: [Vendor Products]
    *     summary: Create a new product draft
    *     description: |
-   *       Creates a new product in draft status for the authenticated vendor.
-   *       This initializes an empty product that can be populated through PATCH updates.
-   *       Use the returned product ID to update product data via PATCH /vendor/products/{id}.
+  *       Creates a new product in draft status for the authenticated vendor.
+  *       Admins and super admins may also call this endpoint to create
+  *       drafts on behalf of a vendor account.
+  *       This initializes an empty product that can be populated through PATCH updates.
+  *       Use the returned product ID to update product data via PATCH /vendor/products/{id}.
    *     security:
    *       - bearerAuth: []
+    *     requestBody:
+    *       required: false
+    *       description: Optional initial data for the product. Any fields from VendorProductInput can be provided.
+    *       content:
+    *         application/json:
+    *           schema:
+    *             $ref: '#/components/schemas/VendorProductInput'
+    *           examples:
+    *             basicInfo:
+    *               summary: Minimal basic information to start a product
+    *               value:
+    *                 name: "Armored Door Panel - Level 4"
+    *                 sku: "ADP-L4-2024"
+    *                 mainCategoryId: 1
+    *                 categoryId: 5
+    *                 countryOfOrigin: "USA"
+    *                 condition: "new"
+    *             fullCreate:
+    *               summary: More complete product creation payload
+    *               value:
+    *                 name: "Armored Door Panel - Level 4"
+    *                 sku: "ADP-L4-2024"
+    *                 mainCategoryId: 1
+    *                 categoryId: 5
+    *                 subCategoryId: 12
+    *                 vehicleCompatibility: "Land Cruiser 200 Series (2008-2021)"
+    *                 certifications: "NIJ Level IV, VPAM BRV 2009"
+    *                 countryOfOrigin: "USA"
+    *                 controlledItemType: "Ballistic Protection"
+    *                 dimensionLength: 120.5
+    *                 dimensionWidth: 80.3
+    *                 dimensionHeight: 5.2
+    *                 dimensionUnit: "cm"
+    *                 materials: ["Hardened Steel", "Kevlar Composite", "Ceramic Plates"]
+    *                 features: ["Blast Resistant", "Corrosion Protected", "Lightweight Design"]
+    *                 performance: ["Stops 7.62x51mm NATO", "Multi-hit Capable", "Fragmentation Protection"]
+    *                 technicalDescription: "Advanced composite armor door panel designed for high-threat environments..."
+    *                 driveTypes: ["4WD", "AWD"]
+    *                 sizes: ["Standard", "Extended"]
+    *                 thickness: ["25mm", "30mm", "35mm"]
+    *                 colors: ["Black", "Gray", "Tan"]
+    *                 weightValue: 45.5
+    *                 weightUnit: "kg"
+    *                 packingLength: 130
+    *                 packingWidth: 90
+    *                 packingHeight: 15
+    *                 packingDimensionUnit: "cm"
+    *                 packingWeight: 50
+    *                 packingWeightUnit: "kg"
+    *                 basePrice: 4599.99
+    *                 currency: "USD"
+    *                 stock: 25
+    *                 minOrderQuantity: 2
+    *                 condition: "new"
+    *                 make: "Toyota"
+    *                 model: "Land Cruiser"
+    *                 year: 2024
+    *                 readyStockAvailable: true
+    *                 pricingTerms: ["FOB", "CIF"]
+    *                 productionLeadTime: 45
+    *                 manufacturingSource: "OEM"
+    *                 manufacturingSourceName: "ArmorTech Industries"
+    *                 requiresExportLicense: true
+    *                 hasWarranty: true
+    *                 warrantyDuration: 24
+    *                 warrantyDurationUnit: "months"
+    *                 warrantyTerms: "Full coverage against manufacturing defects. Installation warranty separate."
+    *                 complianceConfirmed: true
+    *                 supplierSignature: "John Doe - 2024-12-23"
+    *                 vehicleFitment: "Front left door, armored variant"
+    *                 specifications: "STANAG Level 2, multi-hit protection, blast-resistant hinges"
+    *                 description: "Premium armored door panel for military and VIP vehicles"
+    *                 warranty: "5 years against armor failure, 1 year hardware"
+    *                 actionType: "buy_now"
+    *                 isFeatured: false
+    *                 image: "https://cdn.armoredmart.com/products/adp-l4/main.jpg"
+    *                 gallery:
+    *                   - "https://cdn.armoredmart.com/products/adp-l4/main.jpg"
+    *                   - "https://cdn.armoredmart.com/products/adp-l4/detail-1.jpg"
    *     responses:
    *       201:
    *         description: Product draft created successfully
@@ -4994,18 +6189,18 @@ export async function registerRoutes(
    *           application/json:
    *             schema:
    *               $ref: '#/components/schemas/VendorProduct'
-   *       401:
-   *         description: Not authenticated or not a vendor
+  *       401:
+  *         description: Not authenticated or not authorized (vendor or admin required)
    *         content:
    *           application/json:
    *             schema:
    *               $ref: '#/components/schemas/Error'
    */
   app.post("/api/vendor/products", async (req, res) => {
-    if (!req.user || req.user.userType !== 'vendor') {
+    if (!isVendorOrAdmin(req.user)) {
       return res.status(401).json({ error: "Vendor authentication required" });
     }
-    
+
     try {
       const product = await storage.createProductDraft(req.user.id);
       res.status(201).json(product);
@@ -5021,7 +6216,10 @@ export async function registerRoutes(
    *   get:
    *     tags: [Vendor Products]
    *     summary: Get product details
-   *     description: Returns full product details including media and pricing tiers
+  *     description: |
+  *       Returns full product details including media and pricing tiers.
+  *       Vendors can access only their own products; admins/super_admins can
+  *       access any vendor-created product.
    *     security:
    *       - bearerAuth: []
    *     parameters:
@@ -5036,16 +6234,16 @@ export async function registerRoutes(
    *         description: Product not found
    */
   app.get("/api/vendor/products/:id", async (req, res) => {
-    if (!req.user || req.user.userType !== 'vendor') {
+    if (!isVendorOrAdmin(req.user)) {
       return res.status(401).json({ error: "Vendor authentication required" });
     }
-    
+
     try {
       const product = await storage.getProductWithDetails(parseInt(req.params.id));
       if (!product) {
         return res.status(404).json({ error: "Product not found" });
       }
-      if (product.vendorId !== req.user.id) {
+      if (product.vendorId !== req.user!.id && req.user!.userType === 'vendor') {
         return res.status(403).json({ error: "Access denied" });
       }
       res.json(product);
@@ -5062,9 +6260,11 @@ export async function registerRoutes(
    *     tags: [Vendor Products]
    *     summary: Update product data
    *     description: |
-   *       Updates product fields (auto-saves as draft). Submit any combination of product fields.
-   *       The product remains in draft status until explicitly submitted for review.
-   *       See VendorProductInput schema for all available fields organized by tabs.
+  *       Updates product fields (auto-saves as draft). Submit any combination of product fields.
+  *       The product remains in draft status until explicitly submitted for review.
+  *       See VendorProductInput schema for all available fields organized by tabs.
+  *       Vendors may update only their own products; admins/super_admins may
+  *       update any vendor-created product.
    *     security:
    *       - bearerAuth: []
    *     parameters:
@@ -5141,16 +6341,16 @@ export async function registerRoutes(
    *         description: Access denied - not your product
    */
   app.patch("/api/vendor/products/:id", async (req, res) => {
-    if (!req.user || req.user.userType !== 'vendor') {
+    if (!isVendorOrAdmin(req.user)) {
       return res.status(401).json({ error: "Vendor authentication required" });
     }
-    
+
     try {
       const product = await storage.getProductById(parseInt(req.params.id));
       if (!product) {
         return res.status(404).json({ error: "Product not found" });
       }
-      if (product.vendorId !== req.user.id) {
+      if (product.vendorId !== req.user!.id && req.user!.userType === 'vendor') {
         return res.status(403).json({ error: "Access denied" });
       }
       
@@ -5185,7 +6385,10 @@ export async function registerRoutes(
    *   post:
    *     tags: [Vendor Products]
    *     summary: Submit product for review
-   *     description: Submits a draft product for admin review
+  *     description: |
+  *       Submits a draft product for admin review.
+  *       Vendors may submit only their own drafts; admins/super_admins may
+  *       submit any vendor-created draft for review.
    *     security:
    *       - bearerAuth: []
    *     parameters:
@@ -5200,16 +6403,16 @@ export async function registerRoutes(
    *         description: Product not ready for submission
    */
   app.post("/api/vendor/products/:id/submit", async (req, res) => {
-    if (!req.user || req.user.userType !== 'vendor') {
+    if (!isVendorOrAdmin(req.user)) {
       return res.status(401).json({ error: "Vendor authentication required" });
     }
-    
+
     try {
       const product = await storage.getProductById(parseInt(req.params.id));
       if (!product) {
         return res.status(404).json({ error: "Product not found" });
       }
-      if (product.vendorId !== req.user.id) {
+      if (product.vendorId !== req.user!.id && req.user!.userType === 'vendor') {
         return res.status(403).json({ error: "Access denied" });
       }
       if (product.status !== 'draft' && product.status !== 'rejected') {
@@ -5230,7 +6433,10 @@ export async function registerRoutes(
    *   delete:
    *     tags: [Vendor Products]
    *     summary: Delete a product
-   *     description: Deletes a product (only drafts can be deleted)
+  *     description: |
+  *       Deletes a product (only drafts can be deleted).
+  *       Vendors can delete only their own draft products, while admins/super_admins
+  *       can delete any vendor-created draft product.
    *     security:
    *       - bearerAuth: []
    *     parameters:
@@ -5245,23 +6451,23 @@ export async function registerRoutes(
    *         description: Cannot delete non-draft product
    */
   app.delete("/api/vendor/products/:id", async (req, res) => {
-    if (!req.user || req.user.userType !== 'vendor') {
+    if (!isVendorOrAdmin(req.user)) {
       return res.status(401).json({ error: "Vendor authentication required" });
     }
-    
+
     try {
       const product = await storage.getProductById(parseInt(req.params.id));
       if (!product) {
         return res.status(404).json({ error: "Product not found" });
       }
-      if (product.vendorId !== req.user.id) {
+      if (product.vendorId !== req.user!.id && req.user!.userType === 'vendor') {
         return res.status(403).json({ error: "Access denied" });
       }
       if (product.status !== 'draft') {
         return res.status(400).json({ error: "Only draft products can be deleted" });
       }
       
-      await storage.deleteProduct(parseInt(req.params.id), req.user.id);
+      await storage.deleteProduct(parseInt(req.params.id), product.vendorId!);
       res.status(204).send();
     } catch (error) {
       console.error("Error deleting product:", error);
@@ -5275,7 +6481,10 @@ export async function registerRoutes(
    *   post:
    *     tags: [Vendor Products]
    *     summary: Add product media
-   *     description: Adds an image or file to the product
+  *     description: |
+  *       Adds an image or file to the product.
+  *       Vendors can modify media only for their own products; admins/super_admins
+  *       can modify media for any vendor-created product.
    *     security:
    *       - bearerAuth: []
    *     parameters:
@@ -5303,16 +6512,16 @@ export async function registerRoutes(
    *         description: Media added
    */
   app.post("/api/vendor/products/:id/media", async (req, res) => {
-    if (!req.user || req.user.userType !== 'vendor') {
+    if (!isVendorOrAdmin(req.user)) {
       return res.status(401).json({ error: "Vendor authentication required" });
     }
-    
+
     try {
       const product = await storage.getProductById(parseInt(req.params.id));
       if (!product) {
         return res.status(404).json({ error: "Product not found" });
       }
-      if (product.vendorId !== req.user.id) {
+      if (product.vendorId !== req.user!.id && req.user!.userType === 'vendor') {
         return res.status(403).json({ error: "Access denied" });
       }
       
@@ -5344,21 +6553,21 @@ export async function registerRoutes(
    *         name: mediaId
    *         required: true
    *         schema: { type: integer }
-   *     responses:
-   *       204:
-   *         description: Media deleted
+  *     responses:
+  *       204:
+  *         description: Media deleted
    */
   app.delete("/api/vendor/products/:id/media/:mediaId", async (req, res) => {
-    if (!req.user || req.user.userType !== 'vendor') {
+    if (!isVendorOrAdmin(req.user)) {
       return res.status(401).json({ error: "Vendor authentication required" });
     }
-    
+
     try {
       const product = await storage.getProductById(parseInt(req.params.id));
       if (!product) {
         return res.status(404).json({ error: "Product not found" });
       }
-      if (product.vendorId !== req.user.id) {
+      if (product.vendorId !== req.user!.id && req.user!.userType === 'vendor') {
         return res.status(403).json({ error: "Access denied" });
       }
       
@@ -5376,7 +6585,10 @@ export async function registerRoutes(
    *   post:
    *     tags: [Vendor Products]
    *     summary: Set cover image
-   *     description: Sets a media item as the product cover image
+  *     description: |
+  *       Sets a media item as the product cover image.
+  *       Vendors can do this only for their own products; admins/super_admins
+  *       can do this for any vendor-created product.
    *     security:
    *       - bearerAuth: []
    *     parameters:
@@ -5393,16 +6605,16 @@ export async function registerRoutes(
    *         description: Cover image set
    */
   app.post("/api/vendor/products/:id/media/:mediaId/cover", async (req, res) => {
-    if (!req.user || req.user.userType !== 'vendor') {
+    if (!isVendorOrAdmin(req.user)) {
       return res.status(401).json({ error: "Vendor authentication required" });
     }
-    
+
     try {
       const product = await storage.getProductById(parseInt(req.params.id));
       if (!product) {
         return res.status(404).json({ error: "Product not found" });
       }
-      if (product.vendorId !== req.user.id) {
+      if (product.vendorId !== req.user!.id && req.user!.userType === 'vendor') {
         return res.status(403).json({ error: "Access denied" });
       }
       
@@ -5420,7 +6632,10 @@ export async function registerRoutes(
    *   put:
    *     tags: [Vendor Products]
    *     summary: Set pricing tiers
-   *     description: Replaces all pricing tiers for a product
+  *     description: |
+  *       Replaces all pricing tiers for a product.
+  *       Vendors can manage pricing tiers only for their own products; admins/super_admins
+  *       can manage pricing tiers for any vendor-created product.
    *     security:
    *       - bearerAuth: []
    *     parameters:
@@ -5449,16 +6664,16 @@ export async function registerRoutes(
    *         description: Pricing tiers updated
    */
   app.put("/api/vendor/products/:id/pricing-tiers", async (req, res) => {
-    if (!req.user || req.user.userType !== 'vendor') {
+    if (!isVendorOrAdmin(req.user)) {
       return res.status(401).json({ error: "Vendor authentication required" });
     }
-    
+
     try {
       const product = await storage.getProductById(parseInt(req.params.id));
       if (!product) {
         return res.status(404).json({ error: "Product not found" });
       }
-      if (product.vendorId !== req.user.id) {
+      if (product.vendorId !== req.user!.id && req.user!.userType === 'vendor') {
         return res.status(403).json({ error: "Access denied" });
       }
       
@@ -5529,6 +6744,63 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching products for admin:", error);
       res.status(500).json({ error: "Failed to fetch products" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /admin/products/vendors:
+   *   get:
+   *     tags: [Admin Products]
+   *     summary: List all vendor-created products
+   *     description: |
+   *       Returns a paginated list of products that were created by vendors.
+   *       A product is considered vendor-created if it has a non-null vendorId.
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: query
+   *         name: status
+   *         schema:
+   *           type: string
+   *           enum: [draft, pending_review, approved, rejected, suspended]
+   *       - in: query
+   *         name: vendorId
+   *         schema: { type: string }
+   *         description: Optional filter to show products for a specific vendor
+   *       - in: query
+   *         name: search
+   *         schema: { type: string }
+   *       - in: query
+   *         name: isFeatured
+   *         schema: { type: boolean }
+   *       - in: query
+   *         name: page
+   *         schema: { type: integer, default: 1 }
+   *       - in: query
+   *         name: limit
+   *         schema: { type: integer, default: 20 }
+   *     responses:
+   *       200:
+   *         description: Paginated list of vendor-created products
+   *       401:
+   *         description: Not authenticated
+   */
+  app.get("/api/admin/products/vendors", requireAdmin, async (req, res) => {
+    try {
+      const { status, vendorId, search, isFeatured, page, limit } = req.query;
+      const result = await storage.getProductsForAdmin({
+        status: status as string,
+        vendorId: vendorId as string,
+        search: search as string,
+        isFeatured: isFeatured === 'true' ? true : isFeatured === 'false' ? false : undefined,
+        page: page ? parseInt(page as string) : undefined,
+        limit: limit ? parseInt(limit as string) : undefined,
+      });
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching vendor-created products for admin:", error);
+      res.status(500).json({ error: "Failed to fetch vendor-created products" });
     }
   });
 
@@ -5890,7 +7162,10 @@ export async function registerRoutes(
    *   get:
    *     tags: [Vendor Products]
    *     summary: Get admin feedback on a product
-   *     description: Returns admin notes/feedback visible to the seller
+  *     description: |
+  *       Returns admin notes/feedback visible to the seller.
+  *       Vendors see notes on their own products; admins/super_admins can
+  *       view notes for any vendor-created product.
    *     security:
    *       - bearerAuth: []
    *     parameters:
@@ -5903,16 +7178,16 @@ export async function registerRoutes(
    *         description: List of visible review notes
    */
   app.get("/api/vendor/products/:id/notes", async (req, res) => {
-    if (!req.user || req.user.userType !== 'vendor') {
+    if (!isVendorOrAdmin(req.user)) {
       return res.status(401).json({ error: "Vendor authentication required" });
     }
-    
+
     try {
       const product = await storage.getProductById(parseInt(req.params.id));
       if (!product) {
         return res.status(404).json({ error: "Product not found" });
       }
-      if (product.vendorId !== req.user.id) {
+      if (product.vendorId !== req.user!.id && req.user!.userType === 'vendor') {
         return res.status(403).json({ error: "Access denied" });
       }
       
@@ -6458,9 +7733,10 @@ export async function registerRoutes(
     }
     
     try {
-      const { status, dateFrom, dateTo, page, limit } = req.query;
+      const { status, vendorId, dateFrom, dateTo, page, limit } = req.query;
       const result = await storage.getOrdersForVendor(req.user.id, {
         status: status as string,
+        vendorId: vendorId as string,
         dateFrom: dateFrom ? new Date(dateFrom as string) : undefined,
         dateTo: dateTo ? new Date(dateTo as string) : undefined,
         page: page ? parseInt(page as string) : undefined,

@@ -1,53 +1,24 @@
-// Integration: connection:conn_resend_01KD38MQ44HNEPMVRGJFBP0XEF
 import { Resend } from 'resend';
 
-let connectionSettings: any;
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const RESEND_FROM_EMAIL =
+  process.env.RESEND_FROM_EMAIL || 'ArmoredMart <noreply@armoredmart.com>';
 
-async function getCredentials() {
-  const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
-  const xReplitToken = process.env.REPL_IDENTITY 
-    ? 'repl ' + process.env.REPL_IDENTITY 
-    : process.env.WEB_REPL_RENEWAL 
-    ? 'depl ' + process.env.WEB_REPL_RENEWAL 
-    : null;
+const resendClient = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 
-  if (!xReplitToken) {
-    throw new Error('X_REPLIT_TOKEN not found for repl/depl');
+export async function sendOtpEmail(
+  to: string,
+  otpCode: string,
+  name: string
+): Promise<boolean> {
+  if (!resendClient) {
+    console.error('[Email] RESEND_API_KEY is not configured');
+    return false;
   }
 
-  connectionSettings = await fetch(
-    'https://' + hostname + '/api/v2/connection?include_secrets=true&connector_names=resend',
-    {
-      headers: {
-        'Accept': 'application/json',
-        'X_REPLIT_TOKEN': xReplitToken
-      }
-    }
-  ).then(res => res.json()).then(data => data.items?.[0]);
-
-  if (!connectionSettings || (!connectionSettings.settings.api_key)) {
-    throw new Error('Resend not connected');
-  }
-  return {
-    apiKey: connectionSettings.settings.api_key,
-    fromEmail: connectionSettings.settings.from_email
-  };
-}
-
-async function getResendClient() {
-  const { apiKey, fromEmail } = await getCredentials();
-  return {
-    client: new Resend(apiKey),
-    fromEmail
-  };
-}
-
-export async function sendOtpEmail(to: string, otpCode: string, name: string): Promise<boolean> {
   try {
-    const { client, fromEmail } = await getResendClient();
-    
-    const result = await client.emails.send({
-      from: fromEmail || 'ArmoredMart <noreply@armoredmart.com>',
+    await resendClient.emails.send({
+      from: RESEND_FROM_EMAIL,
       to: [to],
       subject: 'Your ArmoredMart Verification Code',
       html: `

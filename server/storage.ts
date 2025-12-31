@@ -47,7 +47,16 @@ export interface IStorage {
 
   // Categories
   getCategories(): Promise<Category[]>;
+  getCategoriesByLevel(level: number): Promise<Category[]>;
+  getCategoriesByParentId(parentId: number): Promise<Category[]>;
+  getCategoryById(id: number): Promise<Category | undefined>;
+  getCategoryLevel(categoryId: number): Promise<number>;
+  getCategoryHierarchy(categoryId: number): Promise<Category[]>;
+  searchCategoriesByName(name: string, parentId?: number): Promise<Category[]>;
   createCategory(category: InsertCategory): Promise<Category>;
+  updateCategory(id: number, category: Partial<InsertCategory>): Promise<Category>;
+  deleteCategory(id: number): Promise<void>;
+  categoryHasProducts(categoryId: number): Promise<boolean>;
 
   // Products
   getProducts(filters?: {
@@ -60,6 +69,7 @@ export interface IStorage {
   getProductById(id: number): Promise<Product | undefined>;
   createProduct(product: InsertProduct): Promise<Product>;
   updateProduct(id: number, product: Partial<InsertProduct>): Promise<Product | undefined>;
+  createProductsBulk(products: InsertProduct[]): Promise<Product[]>;
   
   // Reviews
   getReviewsByProductId(productId: number): Promise<(Review & { user: User })[]>;
@@ -290,9 +300,114 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(categories);
   }
 
+  async getCategoriesByLevel(level: number): Promise<Category[]> {
+    // Level 0: Main categories (no parent)
+    // Level 1: Categories (parent is main category)
+    // Level 2: Subcategories (parent is category)
+    if (level === 0) {
+      return await db.select().from(categories).where(isNull(categories.parentId));
+    }
+    
+    // For level 1 and 2, we need to find categories whose parent is at the previous level
+    const parentCategories = await this.getCategoriesByLevel(level - 1);
+    const parentIds = parentCategories.map(cat => cat.id);
+    
+    if (parentIds.length === 0) {
+      return [];
+    }
+    
+    return await db.select().from(categories).where(inArray(categories.parentId, parentIds));
+  }
+
+  async getCategoriesByParentId(parentId: number): Promise<Category[]> {
+    return await db.select().from(categories).where(eq(categories.parentId, parentId));
+  }
+
+  async getCategoryById(id: number): Promise<Category | undefined> {
+    const [category] = await db.select().from(categories).where(eq(categories.id, id));
+    return category;
+  }
+
+  async getCategoryLevel(categoryId: number): Promise<number> {
+    const category = await this.getCategoryById(categoryId);
+    if (!category) {
+      throw new Error("Category not found");
+    }
+    
+    if (category.parentId === null) {
+      return 0; // Main category
+    }
+    
+    // Recursively get parent's level
+    const parentLevel = await this.getCategoryLevel(category.parentId);
+    return parentLevel + 1;
+  }
+
+  async getCategoryHierarchy(categoryId: number): Promise<Category[]> {
+    const hierarchy: Category[] = [];
+    let currentId: number | null = categoryId;
+    
+    while (currentId !== null) {
+      const category = await this.getCategoryById(currentId);
+      if (!category) break;
+      
+      hierarchy.unshift(category); // Add to beginning to get root-to-leaf order
+      currentId = category.parentId;
+    }
+    
+    return hierarchy;
+  }
+
+  async searchCategoriesByName(name: string, parentId?: number): Promise<Category[]> {
+    if (parentId !== undefined) {
+      return await db
+        .select()
+        .from(categories)
+        .where(
+          and(
+            ilike(categories.name, `%${name}%`),
+            eq(categories.parentId, parentId)
+          )
+        );
+    }
+    
+    return await db
+      .select()
+      .from(categories)
+      .where(ilike(categories.name, `%${name}%`));
+  }
+
   async createCategory(category: InsertCategory): Promise<Category> {
     const [newCategory] = await db.insert(categories).values(category as any).returning();
     return newCategory;
+  }
+
+  async updateCategory(id: number, category: Partial<InsertCategory>): Promise<Category> {
+    const [updated] = await db
+      .update(categories)
+      .set(category as any)
+      .where(eq(categories.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteCategory(id: number): Promise<void> {
+    await db.delete(categories).where(eq(categories.id, id));
+  }
+
+  async categoryHasProducts(categoryId: number): Promise<boolean> {
+    const result = await db
+      .select({ count: count() })
+      .from(products)
+      .where(
+        or(
+          eq(products.mainCategoryId, categoryId),
+          eq(products.categoryId, categoryId),
+          eq(products.subCategoryId, categoryId)
+        )
+      );
+    
+    return result[0].count > 0;
   }
 
   async validateCategoryIds(categoryIds: number[]): Promise<number[]> {
@@ -361,6 +476,12 @@ export class DatabaseStorage implements IStorage {
       .where(eq(products.id, id))
       .returning();
     return updated || undefined;
+  }
+
+  async createProductsBulk(items: InsertProduct[]): Promise<Product[]> {
+    if (!items || items.length === 0) return [];
+    const inserted = await db.insert(products).values(items as any).returning();
+    return inserted;
   }
 
   // Reviews
@@ -2106,6 +2227,7 @@ export class DatabaseStorage implements IStorage {
   // ===== VENDOR ORDERS MANAGEMENT =====
   async getOrdersForVendor(vendorId: string, filters: {
     status?: string;
+    vendorId?: string;
     search?: string;
     dateFrom?: Date;
     dateTo?: Date;
@@ -2116,11 +2238,14 @@ export class DatabaseStorage implements IStorage {
     const limit = filters.limit || 20;
     const offset = (page - 1) * limit;
 
+    // Use filtered vendorId if provided, otherwise use the logged-in vendor's ID
+    const targetVendorId = filters.vendorId || vendorId;
+
     // Get order IDs that contain items from this vendor
     const vendorOrderItems = await db
       .select({ orderId: orderItems.orderId })
       .from(orderItems)
-      .where(eq(orderItems.vendorId, vendorId));
+      .where(eq(orderItems.vendorId, targetVendorId));
 
     const vendorOrderIds = [...new Set(vendorOrderItems.map(i => i.orderId))];
 
@@ -2164,7 +2289,7 @@ export class DatabaseStorage implements IStorage {
       .from(orderItems)
       .where(and(
         inArray(orderItems.orderId, ordersList.map(o => o.orders.id)),
-        eq(orderItems.vendorId, vendorId)
+        eq(orderItems.vendorId, targetVendorId)
       ));
 
     const ordersWithItems = ordersList.map(o => ({

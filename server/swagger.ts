@@ -65,7 +65,24 @@ const options: swaggerJsdoc.Options = {
             name: { type: 'string' },
             image: { type: 'string' },
             description: { type: 'string', nullable: true },
+            parentId: { type: 'integer', nullable: true, description: 'Parent category id (null for main categories)' },
+            children: { type: 'array', items: { $ref: '#/components/schemas/Category' }, nullable: true, description: 'Immediate child categories' },
           },
+        },
+        CategoryInput: {
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            image: { type: 'string' },
+            description: { type: 'string', nullable: true },
+            parentId: { type: 'integer', nullable: true, description: 'Parent category id (null for main categories). Max depth enforced server-side.' },
+          },
+          required: ['name', 'image'],
+        },
+        CategoryHierarchy: {
+          type: 'array',
+          items: { $ref: '#/components/schemas/Category' },
+          description: 'Array of categories from root (main) to the specified category',
         },
         CartItem: {
           type: 'object',
@@ -121,8 +138,9 @@ const options: swaggerJsdoc.Options = {
             userId: { type: 'string' },
             typeOfBuyer: { 
               type: 'string',
+              nullable: true,
               enum: ['individual', 'business', 'government', 'reseller', 'manufacturer', 'distributor', 'other'],
-              description: 'Type of buyer/user'
+              description: 'Type of buyer/user (nullable)'
             },
             complianceRegistration: { 
               type: 'string',
@@ -311,6 +329,23 @@ const options: swaggerJsdoc.Options = {
             make: { type: 'string', example: 'Toyota' },
             model: { type: 'string', example: 'Land Cruiser' },
             year: { type: 'integer', example: 2024 },
+            // Additional optional fields
+            vehicleFitment: { type: 'string', example: 'Front left door, armored variant' },
+            specifications: { type: 'string', example: 'STANAG Level 2, multi-hit protection, blast-resistant hinges' },
+            warranty: { type: 'string', example: '5 years against armor failure, 1 year hardware' },
+            actionType: { type: 'string', example: 'buy_now' },
+            isFeatured: { type: 'boolean', example: false },
+            image: { type: 'string', example: 'https://cdn.armoredmart.com/products/adp-l4/main.jpg' },
+            gallery: {
+              type: 'array',
+              items: { type: 'string' },
+              example: [
+                'https://cdn.armoredmart.com/products/adp-l4/main.jpg',
+                'https://cdn.armoredmart.com/products/adp-l4/detail-1.jpg'
+              ],
+            },
+            price: { type: 'number', example: 4599.99, description: 'Legacy/computed price field; prefer basePrice where possible' },
+            originalPrice: { type: 'number', example: 4999.99, description: 'Legacy original list price (before discount)' },
           },
         },
       },
@@ -329,6 +364,8 @@ const options: swaggerJsdoc.Options = {
       { name: 'Vendor Products', description: 'Vendor product creation, management and submission for review' },
       { name: 'Reference Data', description: 'Dropdown values for forms (countries, currencies, banks, categories, etc.)' },
       { name: 'Filters', description: 'Product filter options - Used by Products page' },
+      { name: 'Admin - Vendors', description: 'Admin management of vendor accounts (list, detail, status, suspend, activate)' },
+      { name: 'Admin - Sellers', description: 'Alias of Admin - Vendors for backwards compatibility' },
     ],
   },
   apis: ['./server/routes.ts'],
@@ -337,18 +374,26 @@ const options: swaggerJsdoc.Options = {
 const swaggerSpec = swaggerJsdoc(options);
 
 export function setupSwagger(app: Express) {
-  app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  // Serve Swagger UI outside the /api path to avoid double-prefix resolution
+  app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
     customCss: '.swagger-ui .topbar { display: none }',
     customSiteTitle: 'ArmoredMart API Documentation',
   }));
-  
-  // Alias /api/doc to redirect to /api/docs
-  app.get('/api/doc', (req, res) => {
-    res.redirect('/api/docs');
-  });
-  
-  app.get('/api/docs.json', (req, res) => {
+
+  // JSON spec endpoint
+  app.get('/docs.json', (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.send(swaggerSpec);
+  });
+
+  // Backwards-compatible redirects from old paths under /api
+  app.get('/api/doc', (req, res) => {
+    res.redirect('/docs');
+  });
+  app.get('/api/docs', (req, res) => {
+    res.redirect('/docs');
+  });
+  app.get('/api/docs.json', (req, res) => {
+    res.redirect('/docs.json');
   });
 }

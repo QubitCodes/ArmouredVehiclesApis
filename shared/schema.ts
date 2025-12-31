@@ -235,6 +235,7 @@ export const categories = pgTable("categories", {
   name: text("name").notNull(),
   image: text("image").notNull(),
   description: text("description"),
+  parentId: integer("parent_id").references((): any => categories.id),
 });
 
 // Product status enum
@@ -243,7 +244,7 @@ export const productStatusEnum = pgEnum('product_status', ['draft', 'pending_rev
 // Products table - Extended for multi-step product creation
 export const products = pgTable("products", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
-  vendorId: varchar("vendor_id").notNull().references(() => users.id),
+  vendorId: varchar("vendor_id").references(() => users.id),
   status: productStatusEnum("status").notNull().default('draft'),
   
   // Tab 1: Basic Information
@@ -530,6 +531,8 @@ export const vendorOnboardingStatusEnum = pgEnum('vendor_onboarding_status', ['p
 
 // Type of buyer enum
 export const typeOfBuyerEnum = pgEnum('type_of_buyer', ['individual', 'business', 'government', 'reseller', 'manufacturer', 'distributor', 'other']);
+// Export values for use in APIs/UI without touching DB
+export const TYPE_OF_BUYER_VALUES = ['individual', 'business', 'government', 'reseller', 'manufacturer', 'distributor', 'other'] as const;
 
 // User Profiles table for supplier onboarding
 export const userProfiles = pgTable("user_profiles", {  
@@ -815,8 +818,16 @@ export const ticketAttachmentsRelations = relations(ticketAttachments, ({ one })
   }),
 }));
 
-export const categoriesRelations = relations(categories, ({ many }) => ({
+export const categoriesRelations = relations(categories, ({ one, many }) => ({
   products: many(products),
+  parent: one(categories, {
+    fields: [categories.parentId],
+    references: [categories.id],
+    relationName: 'categoryHierarchy',
+  }),
+  children: many(categories, {
+    relationName: 'categoryHierarchy',
+  }),
 }));
 
 export const productsRelations = relations(products, ({ one, many }) => ({
