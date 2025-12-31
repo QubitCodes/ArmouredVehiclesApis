@@ -139,4 +139,7 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .DS_Store
 server/public
+
+
 vite.config.ts.*
+*.tar.gz
