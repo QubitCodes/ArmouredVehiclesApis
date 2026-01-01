@@ -675,7 +675,7 @@ export async function registerRoutes(
             name: existingEmail.name,
             username: existingEmail.username,
             continueToPhone: true,
-            onboardingStep: existingEmail.onboardingStep || 2,
+            onboardingStep: existingEmail.onboardingStep || 0,
           });
         }
         // If both email and phone are verified, they're fully registered
@@ -2117,6 +2117,7 @@ export async function registerRoutes(
    *               properties:
    *                 message: { type: string }
    *                 profile: { $ref: '#/components/schemas/UserProfile' }
+   *                 nextStep: { type: string, example: "dashboard" }
    *       400:
    *         description: Verification method not selected
    *         content:
@@ -2150,12 +2151,14 @@ export async function registerRoutes(
         verificationMethod,
         submittedForApproval: true,
         submittedAt: new Date(),
+        currentStep: null,
         onboardingStatus: 'pending_verification',
       });
 
       res.json({
         message: "Application submitted for verification",
         profile,
+        nextStep: 'dashboard',
       });
     } catch (error) {
       console.error("Error submitting verification:", error);

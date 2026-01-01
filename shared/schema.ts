@@ -207,7 +207,7 @@ export const users = pgTable("users", {
   phoneVerified: boolean("phone_verified").default(false),
   completionPercentage: integer("completion_percentage").default(0),
   tokenVersion: integer("token_version").default(0),
-  onboardingStep: integer("onboarding_step").default(1),
+  onboardingStep: integer("onboarding_step").default(0),
   isActive: boolean("is_active").default(true),
   suspendedAt: timestamp("suspended_at"),
   suspendedBy: varchar("suspended_by"),
