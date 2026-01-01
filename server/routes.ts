@@ -108,6 +108,16 @@ function parseUserAgent(userAgent: string | undefined): string {
   return `${browser} on ${device}`;
 }
 
+// Get IP address from request, handling x-forwarded-for header
+function getClientIp(req: Request): string {
+  const xForwardedFor = req.headers['x-forwarded-for'];
+  const ip = req.ip || 
+    (typeof xForwardedFor === 'string' ? xForwardedFor : 
+     Array.isArray(xForwardedFor) ? xForwardedFor[0] : 
+     'unknown');
+  return ip || 'unknown';
+}
+
 // Auth middleware - validates JWT access tokens
 async function authMiddleware(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
@@ -305,7 +315,7 @@ export async function registerRoutes(
       }
 
       const user = await storage.getUserByEmail(email);
-      if (!user) {
+      if (!user || !user.password) {
         return res.status(401).json({ error: "Invalid email or password" });
       }
 
@@ -317,7 +327,7 @@ export async function registerRoutes(
       // Create session in database
       const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
       const userAgent = req.headers['user-agent'];
-      const ipAddress = req.ip || req.headers['x-forwarded-for'] as string || 'unknown';
+      const ipAddress = getClientIp(req);
       
       const session = await storage.createSession({
         userId: user.id,
@@ -4014,9 +4024,13 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Cart is empty" });
       }
 
-      // Calculate order total
-      const total = cartItems.reduce((sum, item) => 
-        sum + (parseFloat(item.product.price) * item.quantity), 0);
+      // Calculate order total with shipping and tax
+      const subtotal = cartItems.reduce((sum, item) => 
+        sum + (parseFloat(item.product.price || '0') * item.quantity), 0);
+      
+      const shipping = subtotal > 500 ? 0 : 40;
+      const tax = subtotal * 0.05;
+      const total = subtotal + shipping + tax;
 
       // Create order items from cart
       const orderItems = cartItems.map(item => ({
@@ -4044,58 +4058,196 @@ export async function registerRoutes(
 
       // Try to get Stripe client
       try {
-        const { getUncachableStripeClient } = await import("./stripeClient");
-        const stripe = await getUncachableStripeClient();
+        const { getStripeClient } = await import("./stripeClient");
+        const stripe = await getStripeClient();
 
         // Build line items from cart
-        const lineItems = cartItems.map(item => ({
+        const lineItems: any[] = cartItems.map(item => ({
           price_data: {
             currency: 'aed',
             product_data: {
               name: item.product.name,
-              images: [item.product.image],
+              images: item.product.gallery && item.product.gallery.length > 0 
+                ? item.product.gallery 
+                : [item.product.image],
               metadata: {
                 productId: item.product.id.toString(),
-                sku: item.product.sku,
+                sku: item.product.sku || 'N/A',
               },
             },
-            unit_amount: Math.round(parseFloat(item.product.price) * 100),
+            unit_amount: Math.round(parseFloat(item.product.price || '0') * 100),
           },
           quantity: item.quantity,
         }));
 
-        // Create checkout session
+        // Add shipping line item if applicable
+        if (shipping > 0) {
+          lineItems.push({
+            price_data: {
+              currency: 'aed',
+              product_data: {
+                name: 'Shipping',
+                description: 'Standard Shipping (3-5 business days)',
+              },
+              unit_amount: Math.round(shipping * 100),
+            },
+            quantity: 1,
+          });
+        }
+
+        // Add tax line item
+        lineItems.push({
+          price_data: {
+            currency: 'aed',
+            product_data: {
+              name: 'VAT (5%)',
+              description: 'Value Added Tax',
+            },
+            unit_amount: Math.round(tax * 100),
+          },
+          quantity: 1,
+        });
+
+        // Determine base URL for redirects
         const replitDomain = process.env.REPLIT_DOMAINS?.split(',')[0];
         const baseUrl = replitDomain 
           ? `https://${replitDomain}` 
-          : (req.headers.origin || `${req.protocol}://${req.get('host')}`);
-        
+          : process.env.APP_URL || (req.headers.origin || `${req.protocol}://${req.get('host')}`);
+
+        // Create Stripe checkout session
         const session = await stripe.checkout.sessions.create({
           payment_method_types: ['card'],
           line_items: lineItems,
           mode: 'payment',
           success_url: `${baseUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}&order_id=${order.id}`,
-          cancel_url: `${baseUrl}/cart`,
+          cancel_url: `${baseUrl}/cart?cancelled=true`,
           customer_email: req.user.email,
+          client_reference_id: order.id,
           metadata: {
             userId: req.user.id,
             orderId: order.id,
           },
+          // Add billing and shipping address fields
+          billing_address_collection: 'required',
+          shipping_address_collection: {
+            allowed_countries: ['AE', 'SA', 'OM', 'KW', 'QA', 'BH', 'US', 'GB', 'CA', 'AU'],
+          },
         });
 
-        res.json({ url: session.url, orderId: order.id });
-      } catch (stripeError: any) {
-        console.log("Stripe not configured, using test mode:", stripeError.message);
-        // Stripe not configured - return test mode response with order info
+        // Log successful session creation
+        console.log(`Stripe session created: ${session.id} for order ${order.id}`);
+
         res.json({ 
-          testMode: true,
+          url: session.url, 
           orderId: order.id,
-          message: "Order created successfully. Stripe is not configured - payments would work with valid Stripe credentials."
+          sessionId: session.id 
         });
+      } catch (stripeError: any) {
+        console.log("Stripe error or not configured:", stripeError.message);
+        
+        // Check if it's a configuration error vs other error
+        if (stripeError.message?.includes('credentials') || 
+            stripeError.message?.includes('not found') ||
+            stripeError.message?.includes('STRIPE')) {
+          // Stripe not configured - return test mode response with order info
+          console.log("Stripe credentials not available - using test mode");
+          res.json({ 
+            testMode: true,
+            orderId: order.id,
+            message: "Order created successfully. To process payments, configure Stripe credentials.",
+            tip: "Set STRIPE_SECRET_KEY and STRIPE_PUBLISHABLE_KEY environment variables or configure Stripe in Replit Connectors."
+          });
+        } else {
+          // Real Stripe API error
+          throw stripeError;
+        }
       }
     } catch (error) {
       console.error("Checkout error:", error);
       res.status(500).json({ error: "Failed to create checkout session" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /checkout/webhook:
+   *   post:
+   *     tags: [Checkout]
+   *     summary: Stripe webhook handler
+   *     description: |
+   *       Handles Stripe webhook events for payment processing.
+   *       Updates order status when payment is completed or fails.
+   *     responses:
+   *       200:
+   *         description: Webhook processed successfully
+   *       400:
+   *         description: Invalid webhook signature
+   */
+  app.post("/api/checkout/webhook", async (req, res) => {
+    const sig = req.headers['stripe-signature'];
+
+    if (!sig) {
+      return res.status(400).json({ error: "Missing stripe-signature header" });
+    }
+
+    try {
+      const { getStripeClient, getStripeSecretKey } = await import("./stripeClient");
+      const stripe = await getStripeClient();
+      const secretKey = await getStripeSecretKey();
+      const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+      if (!webhookSecret) {
+        console.warn("STRIPE_WEBHOOK_SECRET not configured - webhook signature validation skipped");
+        // Continue processing without signature validation in development
+      } else {
+        // Verify webhook signature
+        const event = stripe.webhooks.constructEvent(
+          (req.rawBody as string | Buffer) || JSON.stringify(req.body),
+          sig as string,
+          webhookSecret
+        );
+
+        // Handle different event types
+        switch (event.type) {
+          case 'checkout.session.completed':
+            const session = event.data.object as any;
+            
+            // Update order status to processing
+            const orderId = session.metadata?.orderId || session.client_reference_id;
+            if (orderId) {
+              await storage.updateOrderStatus(orderId, 'processing', 'stripe_webhook', 'Payment confirmed via Stripe');
+              console.log(`Order ${orderId} payment completed`);
+            }
+            break;
+
+          case 'payment_intent.payment_failed':
+            const failedIntent = event.data.object as any;
+            
+            // Update order status to cancelled
+            if (failedIntent.metadata?.orderId) {
+              await storage.updateOrderStatus(failedIntent.metadata.orderId, 'cancelled', 'stripe_webhook', 'Payment failed');
+              console.log(`Order ${failedIntent.metadata.orderId} payment failed`);
+            }
+            break;
+
+          case 'charge.refunded':
+            const refundedCharge = event.data.object as any;
+            
+            // Handle refund
+            if (refundedCharge.metadata?.orderId) {
+              console.log(`Order ${refundedCharge.metadata.orderId} has been refunded`);
+            }
+            break;
+
+          default:
+            console.log(`Unhandled event type: ${event.type}`);
+        }
+      }
+
+      res.json({ received: true });
+    } catch (error: any) {
+      console.error("Webhook error:", error.message);
+      res.status(400).json({ error: `Webhook Error: ${error.message}` });
     }
   });
 
@@ -5567,7 +5719,7 @@ export async function registerRoutes(
         targetId: req.params.id,
         previousValue: JSON.stringify({ status: sellerBefore.userProfile?.onboardingStatus }),
         newValue: JSON.stringify({ status, note, rejectionReason }),
-        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+        ipAddress: getClientIp(req),
       });
       
       res.json(updated);
@@ -5702,7 +5854,7 @@ export async function registerRoutes(
         targetType: 'user',
         targetId: req.params.id,
         newValue: JSON.stringify({ reason }),
-        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+        ipAddress: getClientIp(req),
       });
       
       res.json({ success: true, user: suspended });
@@ -5797,7 +5949,7 @@ export async function registerRoutes(
         actionType: 'seller_activated',
         targetType: 'user',
         targetId: req.params.id,
-        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+        ipAddress: getClientIp(req),
       });
       
       res.json({ success: true, user: activated });
@@ -5988,7 +6140,7 @@ export async function registerRoutes(
         targetType: 'user',
         targetId: admin.id,
         newValue: JSON.stringify({ name, email }),
-        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+        ipAddress: getClientIp(req),
       });
       
       res.status(201).json({
@@ -6202,6 +6354,9 @@ export async function registerRoutes(
     }
 
     try {
+      if (!req.user) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
       const product = await storage.createProductDraft(req.user.id);
       res.status(201).json(product);
     } catch (error) {
@@ -6878,7 +7033,7 @@ export async function registerRoutes(
         targetId: req.params.id,
         newValue: 'approved',
         note,
-        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+        ipAddress: getClientIp(req),
       });
       
       res.json(product);
@@ -6936,7 +7091,7 @@ export async function registerRoutes(
         targetId: req.params.id,
         newValue: 'rejected',
         note: reason,
-        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+        ipAddress: getClientIp(req),
       });
       
       res.json(product);
@@ -6995,7 +7150,7 @@ export async function registerRoutes(
         previousValue: 'approved',
         newValue: 'suspended',
         note: reason,
-        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+        ipAddress: getClientIp(req),
       });
       
       res.json(product);
@@ -7052,7 +7207,7 @@ export async function registerRoutes(
         targetType: 'product',
         targetId: req.params.id,
         newValue: featured ? 'featured' : 'unfeatured',
-        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+        ipAddress: getClientIp(req),
       });
       
       res.json(product);
@@ -7118,7 +7273,7 @@ export async function registerRoutes(
         targetType: 'product',
         targetId: req.params.id,
         note: message.substring(0, 100),
-        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+        ipAddress: getClientIp(req),
       });
       
       res.status(201).json(note);
@@ -7327,7 +7482,7 @@ export async function registerRoutes(
         targetId: req.params.userId,
         newValue: 'approved',
         note,
-        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+        ipAddress: getClientIp(req),
       });
       
       res.json(profile);
@@ -7386,7 +7541,7 @@ export async function registerRoutes(
         targetId: req.params.userId,
         newValue: 'rejected',
         note: reason,
-        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+        ipAddress: getClientIp(req),
       });
       
       res.json(profile);
@@ -7445,7 +7600,7 @@ export async function registerRoutes(
         previousValue: 'approved',
         newValue: 'suspended',
         note: reason,
-        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+        ipAddress: getClientIp(req),
       });
       
       res.json(profile);
@@ -7497,7 +7652,7 @@ export async function registerRoutes(
         previousValue: 'suspended',
         newValue: 'approved',
         note,
-        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+        ipAddress: getClientIp(req),
       });
       
       res.json(profile);
@@ -7684,7 +7839,7 @@ export async function registerRoutes(
         targetId: req.params.orderId,
         newValue: status,
         note,
-        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+        ipAddress: getClientIp(req),
       });
       
       res.json(order);
@@ -7981,7 +8136,7 @@ export async function registerRoutes(
         targetId: req.params.refundId,
         newValue: 'approved',
         note,
-        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+        ipAddress: getClientIp(req),
       });
       
       res.json(refund);
@@ -8040,7 +8195,7 @@ export async function registerRoutes(
         targetId: req.params.refundId,
         newValue: 'rejected',
         note: reason,
-        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+        ipAddress: getClientIp(req),
       });
       
       res.json(refund);
@@ -8192,7 +8347,7 @@ export async function registerRoutes(
         targetType: 'setting',
         targetId: 'default_commission_percent',
         newValue: percent,
-        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+        ipAddress: getClientIp(req),
       });
       
       res.json({
@@ -8296,7 +8451,7 @@ export async function registerRoutes(
         targetId: req.params.userId,
         previousValue: currentCommission.percent,
         newValue: percent,
-        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+        ipAddress: getClientIp(req),
       });
       
       res.json({
@@ -8683,7 +8838,7 @@ export async function registerRoutes(
         targetType: 'ticket',
         targetId: req.params.ticketId,
         newValue: JSON.stringify({ assignedTo: assignToId }),
-        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+        ipAddress: getClientIp(req),
       });
       
       res.json(updated);
@@ -8752,7 +8907,7 @@ export async function registerRoutes(
         targetId: req.params.ticketId,
         previousValue: previousStatus,
         newValue: status,
-        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+        ipAddress: getClientIp(req),
       });
       
       res.json(updated);
@@ -8821,7 +8976,7 @@ export async function registerRoutes(
         targetId: req.params.ticketId,
         previousValue: previousPriority,
         newValue: priority,
-        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || 'unknown',
+        ipAddress: getClientIp(req),
       });
       
       res.json(updated);
@@ -8947,12 +9102,13 @@ export async function registerRoutes(
     try {
       const products = await storage.getProducts({});
       
-      const vendors = [...new Set(products.map(p => p.make))].filter(Boolean);
-      const departments = [...new Set(products.map(p => p.department))].filter(Boolean);
+      const vendors = [...new Set(products.map(p => p.make).filter(Boolean))];
+      // Note: getting unique category IDs
+      const categoryIds = [...new Set(products.map(p => p.categoryId).filter(Boolean))];
 
       res.json({
         brands: vendors,
-        departments,
+        categoryIds,
         productTypes: [
           { name: "Brake Pads", image: "https://images.unsplash.com/photo-1600706432502-76b1e601a746?auto=format&fit=crop&q=80&w=200" },
           { name: "Disc Brake Pad", image: "https://images.unsplash.com/photo-1616788494707-ec28f08d05a1?auto=format&fit=crop&q=80&w=200" },
