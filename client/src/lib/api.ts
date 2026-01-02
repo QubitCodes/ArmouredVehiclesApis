@@ -190,7 +190,7 @@ export const api = {
   // Checkout
   checkout: {
     createSession: () => 
-      fetchJson<{ url?: string; testMode?: boolean; error?: string }>("/checkout/create-session", {
+      fetchJson<{ url?: string; testMode?: boolean; error?: string }>("/api/checkout/create-session", {
         method: "POST",
       }),
   },

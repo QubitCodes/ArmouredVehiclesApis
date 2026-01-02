@@ -4027,6 +4027,15 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Cart is empty" });
       }
 
+      // Validate all items have prices
+      const itemsWithoutPrice = cartItems.filter(item => !item.product.price);
+      if (itemsWithoutPrice.length > 0) {
+        return res.status(400).json({ 
+          error: "Some items in your cart don't have prices set. Please remove them and try again.",
+          itemsWithoutPrice: itemsWithoutPrice.map(item => item.product.name)
+        });
+      }
+
       // Calculate order total with shipping and tax
       const subtotal = cartItems.reduce((sum, item) => 
         sum + (parseFloat(item.product.price || '0') * item.quantity), 0);
@@ -4040,7 +4049,7 @@ export async function registerRoutes(
         productId: item.product.id,
         name: item.product.name,
         image: item.product.image,
-        price: item.product.price,
+        price: item.product.price || '0',  // Fallback to 0 if price is null
         quantity: item.quantity,
       }));
 
