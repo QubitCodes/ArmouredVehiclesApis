@@ -1,7 +1,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertUserSchema, insertProductSchema, insertReviewSchema, insertCartItemSchema, insertOrderSchema, insertOrderItemSchema } from "@shared/schema";
+import { insertUserSchema, insertProductSchema, insertReviewSchema, insertCartItemSchema, insertOrderSchema, insertOrderItemSchema, insertSponsordAdSchema } from "@shared/schema";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
@@ -1438,6 +1438,77 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching vendor profile:", error);
       res.status(500).json({ error: "Failed to fetch vendor profile" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /vendor/onboarding/progress:
+   *   get:
+   *     tags: [Vendor - Onboarding]
+   *     summary: Get vendor onboarding progress
+   *     description: Returns remaining steps to complete onboarding and whether profile completion is achieved.
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: Onboarding progress information
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 status:
+   *                   type: string
+   *                   enum: [pending, in_progress, pending_verification, under_review, approved, rejected, suspended]
+   *                 currentStep:
+   *                   type: integer
+   *                   description: Current onboarding step number (0-6)
+   *                 totalSteps:
+   *                   type: integer
+   *                   description: Total number of steps in onboarding (excluding submission)
+   *                 remainingSteps:
+   *                   type: integer
+   *                   description: Steps remaining to reach the final step
+   *                 profileCompleted:
+   *                   type: boolean
+   *                   description: True if onboarding is submitted or approved (ready to access vendor portal)
+   *       401:
+   *         description: Authentication required
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 error: { type: string }
+   */
+  app.get("/api/vendor/onboarding/progress", async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+
+    try {
+      const profile = await storage.getUserProfile(req.user.id);
+
+      // Total onboarding steps in current flow:
+      // Step 0 -> 1, Step 1 -> 2, Step 2 -> 3, Step 3 -> 4, Step 4 -> 5, Step 5 -> 6
+      const totalSteps = 6;
+      const currentStep = profile?.currentStep ?? 0;
+      const remainingSteps = Math.max(totalSteps - currentStep, 0);
+
+      const status = profile?.onboardingStatus ?? 'pending';
+      const profileCompleted = status === 'pending_verification' || status === 'under_review' || status === 'approved';
+
+      return res.json({
+        status,
+        currentStep,
+        totalSteps,
+        remainingSteps,
+        profileCompleted,
+      });
+    } catch (error) {
+      console.error("Error fetching onboarding progress:", error);
+      res.status(500).json({ error: "Failed to fetch onboarding progress" });
     }
   });
 
@@ -3993,6 +4064,196 @@ export async function registerRoutes(
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Failed to remove cart item" });
+    }
+  });
+
+  // ===== SPONSORED ADS =====
+
+  /**
+   * @swagger
+   * /sponsored-ads:
+   *   get:
+   *     tags: [Sponsored Ads]
+   *     summary: List sponsored ads
+   *     description: Returns all sponsored ads for display in the sponsored section.
+   *     responses:
+   *       200:
+   *         description: List of sponsored ads
+   */
+  app.get("/api/sponsored-ads", async (req, res) => {
+    try {
+      const ads = await storage.getSponsoredAds();
+      res.json(ads);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch sponsored ads" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /sponsored-ads/{id}:
+   *   get:
+   *     tags: [Sponsored Ads]
+   *     summary: Get sponsored ad by ID
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: integer }
+   *     responses:
+   *       200:
+   *         description: Sponsored ad details
+   *       404:
+   *         description: Sponsored ad not found
+   */
+  app.get("/api/sponsored-ads/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ error: "Invalid ad ID" });
+      }
+      const ad = await storage.getSponsoredAdById(id);
+      if (!ad) {
+        return res.status(404).json({ error: "Sponsored ad not found" });
+      }
+      res.json(ad);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch sponsored ad" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /sponsored-ads:
+   *   post:
+   *     tags: [Sponsored Ads]
+   *     summary: Create a sponsored ad (admin only)
+   *     security:
+   *       - bearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             $ref: '#/components/schemas/SponsoredAdInput'
+   *     responses:
+   *       201:
+   *         description: Sponsored ad created
+   *       401:
+   *         description: Authentication required
+   *       403:
+   *         description: Admin only
+   */
+  app.post("/api/sponsored-ads", async (req, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+      if (req.user.userType !== 'admin' && req.user.userType !== 'super_admin') {
+        return res.status(403).json({ error: "Only admins can create sponsored ads" });
+      }
+      const validated = insertSponsordAdSchema.parse(req.body);
+      const ad = await storage.createSponsoredAd(validated);
+      res.status(201).json(ad);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors });
+      }
+      res.status(500).json({ error: "Failed to create sponsored ad" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /sponsored-ads/{id}:
+   *   put:
+   *     tags: [Sponsored Ads]
+   *     summary: Update a sponsored ad (admin only)
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: integer }
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             $ref: '#/components/schemas/SponsoredAdInput'
+   *     responses:
+   *       200:
+   *         description: Sponsored ad updated
+   *       404:
+   *         description: Not found
+   */
+  app.put("/api/sponsored-ads/:id", async (req, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+      if (req.user.userType !== 'admin' && req.user.userType !== 'super_admin') {
+        return res.status(403).json({ error: "Only admins can update sponsored ads" });
+      }
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ error: "Invalid ad ID" });
+      }
+      // Partial update allowed; validate fields but not require all
+      const partialSchema = insertSponsordAdSchema.partial();
+      const validated = partialSchema.parse(req.body);
+      const existing = await storage.getSponsoredAdById(id);
+      if (!existing) {
+        return res.status(404).json({ error: "Sponsored ad not found" });
+      }
+      const updated = await storage.updateSponsoredAd(id, validated);
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors });
+      }
+      res.status(500).json({ error: "Failed to update sponsored ad" });
+    }
+  });
+
+  /**
+   * @swagger
+   * /sponsored-ads/{id}:
+   *   delete:
+   *     tags: [Sponsored Ads]
+   *     summary: Delete a sponsored ad (admin only)
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: integer }
+   *     responses:
+   *       204:
+   *         description: Deleted
+   */
+  app.delete("/api/sponsored-ads/:id", async (req, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+      if (req.user.userType !== 'admin' && req.user.userType !== 'super_admin') {
+        return res.status(403).json({ error: "Only admins can delete sponsored ads" });
+      }
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ error: "Invalid ad ID" });
+      }
+      const existing = await storage.getSponsoredAdById(id);
+      if (!existing) {
+        return res.status(404).json({ error: "Sponsored ad not found" });
+      }
+      await storage.deleteSponsoredAd(id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete sponsored ad" });
     }
   });
 
