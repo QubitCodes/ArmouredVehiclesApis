@@ -320,6 +320,7 @@ export const products = pgTable("products", {
   warranty: text("warranty"),
   actionType: text("action_type").default('buy_now'),
   isFeatured: boolean("is_featured").default(false),
+  isTopSelling: boolean("is_top_selling").default(false),
   
   // Admin review fields
   reviewedBy: varchar("reviewed_by").references(() => users.id),

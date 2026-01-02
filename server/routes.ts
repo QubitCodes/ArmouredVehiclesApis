@@ -2694,7 +2694,9 @@ export async function registerRoutes(
   app.get("/api/products/top-selling", async (req, res) => {
     try {
       const products = await storage.getProducts({});
-      res.json(products.slice(3, 7));
+      const topSelling = products.filter((p: any) => p?.is_top_selling === true || p?.isTopSelling === true);
+      // Fallback to sample if none flagged yet
+      res.json(topSelling.length > 0 ? topSelling : products.slice(3, 9));
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch top selling products" });
     }
