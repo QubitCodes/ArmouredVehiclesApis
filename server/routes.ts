@@ -31,6 +31,21 @@ function isVendorOrAdmin(user: Request["user"] | undefined): boolean {
   return !!user && (user.userType === 'vendor' || user.userType === 'admin' || user.userType === 'super_admin');
 }
 
+// Helper: parse optional pricing tiers from request body
+const pricingTierItemSchema = z.object({
+  minQuantity: z.coerce.number().int().min(1),
+  maxQuantity: z.coerce.number().int().min(1).optional(),
+  price: z.coerce.number().min(0),
+});
+
+function parsePricingTiers(body: any): { minQuantity: number; maxQuantity?: number; price: number }[] | undefined {
+  const tiers = body?.pricingTiers;
+  if (!tiers) return undefined;
+  const parsed = z.array(pricingTierItemSchema).safeParse(tiers);
+  if (!parsed.success) return undefined;
+  return parsed.data;
+}
+
 // Extend Express Request type to include user and session
 declare global {
   namespace Express {
@@ -190,7 +205,7 @@ export async function registerRoutes(
    *     requestBody:
    *       required: true
    *       content:
-   *         application/json:
+  *         multipart/form-data:
    *           schema:
    *             type: object
    *             required: [name, email, password, userType]
@@ -289,7 +304,7 @@ export async function registerRoutes(
    *     requestBody:
    *       required: true
    *       content:
-   *         application/json:
+  *         multipart/form-data:
    *           schema:
    *             type: object
    *             required: [email, password]
@@ -371,7 +386,7 @@ export async function registerRoutes(
    *     requestBody:
    *       required: true
    *       content:
-   *         application/json:
+  *         multipart/form-data:
    *           schema:
    *             type: object
    *             required: [email]
@@ -1373,6 +1388,35 @@ export async function registerRoutes(
   });
 
   // ===== VENDOR ONBOARDING ROUTES =====
+  // Configure multer for vendor document uploads (PDF/JPEG/PNG)
+  const { default: multer } = await import("multer");
+  const { default: fs } = await import("fs");
+  const { default: path } = await import("path");
+
+  const uploadBaseDir = path.resolve(process.cwd(), "uploads", "vendor");
+  fs.mkdirSync(uploadBaseDir, { recursive: true });
+
+  const storageEngine = multer.diskStorage({
+    destination: (_req: any, _file: any, cb: any) => cb(null, uploadBaseDir),
+    filename: (_req: any, file: any, cb: any) => {
+      const ts = Date.now();
+      const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+      cb(null, `${ts}_${safe}`);
+    },
+  });
+
+  const allowedTypes = new Set([
+    "application/pdf",
+    "image/jpeg",
+    "image/png",
+  ]);
+
+  const fileFilter = (_req: any, file: any, cb: any) => {
+    if (allowedTypes.has(file.mimetype)) cb(null, true);
+    else cb(new Error("Invalid file type. Only PDF, JPEG, PNG allowed."));
+  };
+
+  const upload = multer({ storage: storageEngine, fileFilter, limits: { fileSize: 10 * 1024 * 1024 } });
 
   /**
    * @swagger
@@ -1524,12 +1568,12 @@ export async function registerRoutes(
    *     requestBody:
    *       required: true
    *       content:
-   *         application/json:
+  *         application/json:
    *           schema:
    *             type: object
-   *             required: [country, companyName, companyEmail, companyPhone]
+   *             required: [companyName, companyEmail, companyPhone]
    *             properties:
-   *               country: { type: string, description: ISO country code }
+   *               country: { type: string, description: ISO country code, nullable: true }
    *               companyName: { type: string }
    *               companyEmail: { type: string, format: email }
    *               companyPhone: { type: string }
@@ -1564,6 +1608,7 @@ export async function registerRoutes(
       const { country, companyName, companyEmail, companyPhone, companyPhoneCountryCode, typeOfBuyer } = req.body;
       // typeOfBuyer is only applicable for customers; ensure it's nullable
       const typeOfBuyerValue = req.user?.userType === 'customer' ? (typeOfBuyer ?? null) : null;
+      const countryValue = country ?? null;
       
       // Check if profile exists
       let profile = await storage.getUserProfile(req.user.id);
@@ -1571,7 +1616,7 @@ export async function registerRoutes(
       if (profile) {
         // Update existing profile
         profile = await storage.updateUserProfile(req.user.id, {
-          country,
+          country: countryValue,
           companyName,
           companyEmail,
           companyPhone,
@@ -1584,7 +1629,7 @@ export async function registerRoutes(
         // Create new profile
         profile = await storage.createUserProfile({
           userId: req.user.id,
-          country,
+          country: countryValue,
           companyName,
           companyEmail,
           companyPhone,
@@ -1618,28 +1663,28 @@ export async function registerRoutes(
    *     description: Saves company registration and legal entity information
    *     security:
    *       - bearerAuth: []
-   *     requestBody:
-   *       required: true
-   *       content:
-   *         application/json:
-   *           schema:
-   *             type: object
-   *             properties:
-   *               countryOfRegistration: { type: string }
-   *               registeredCompanyName: { type: string }
-   *               tradeBrandName: { type: string }
-   *               yearOfEstablishment: { type: integer }
-   *               legalEntityId: { type: string }
-   *               legalEntityIssueDate: { type: string, format: date }
-   *               legalEntityExpiryDate: { type: string, format: date }
-   *               cityOfficeAddress: { type: string }
-   *               officialWebsite: { type: string }
-   *               entityType: { type: string, enum: [manufacturer, distributor, wholesaler, retailer, importer, exporter, other] }
-   *               dunsNumber: { type: string }
-   *               vatCertificateUrl: { type: string }
-   *               taxVatNumber: { type: string }
-   *               taxIssuingDate: { type: string, format: date }
-   *               taxExpiryDate: { type: string, format: date }
+  *     requestBody:
+  *       required: true
+  *       content:
+  *         multipart/form-data:
+  *           schema:
+  *             type: object
+  *             properties:
+  *               countryOfRegistration: { type: string }
+  *               registeredCompanyName: { type: string }
+  *               tradeBrandName: { type: string }
+  *               yearOfEstablishment: { type: integer }
+  *               legalEntityId: { type: string }
+  *               legalEntityIssueDate: { type: string, format: date }
+  *               legalEntityExpiryDate: { type: string, format: date }
+  *               cityOfficeAddress: { type: string }
+  *               officialWebsite: { type: string }
+  *               entityType: { type: string, enum: [manufacturer, distributor, wholesaler, retailer, importer, exporter, other] }
+  *               dunsNumber: { type: string }
+  *               vatCertificateFile: { type: string, format: binary, description: 'Upload VAT certificate as a file (PDF/JPEG/PNG). Optional.' }
+  *               taxVatNumber: { type: string }
+  *               taxIssuingDate: { type: string, format: date }
+  *               taxExpiryDate: { type: string, format: date }
    *     responses:
    *       200:
    *         description: Step 1 saved successfully
@@ -1668,7 +1713,7 @@ export async function registerRoutes(
    *               properties:
    *                 error: { type: string }
    */
-  app.post("/api/vendor/onboarding/step1", async (req, res) => {
+  app.post("/api/vendor/onboarding/step1", upload.single("vatCertificateFile"), async (req, res) => {
     if (!req.user) {
       return res.status(401).json({ error: "Authentication required" });
     }
@@ -1686,11 +1731,16 @@ export async function registerRoutes(
         officialWebsite,
         entityType,
         dunsNumber,
-        vatCertificateUrl,
         taxVatNumber,
         taxIssuingDate,
         taxExpiryDate,
       } = req.body;
+      const vatFile = (req as any).file as any | undefined;
+      // Enforce that vatCertificateFile, when provided, must be a file upload
+      if (typeof (req.body as any)?.vatCertificateFile !== 'undefined' && !vatFile) {
+        return res.status(400).json({ error: "Invalid vatCertificateFile: upload as multipart/form-data file" });
+      }
+      const vatCertificateUrl = vatFile ? `/uploads/vendor/${vatFile.filename}` : undefined;
       
       // Check if profile exists
       let profile = await storage.getUserProfile(req.user.id);
@@ -1717,7 +1767,27 @@ export async function registerRoutes(
           onboardingStatus: 'in_progress',
         });
       } else {
-        return res.status(400).json({ error: "Please complete step 0 first" });
+        // Create a new profile if step 0 hasn't been completed yet
+        profile = await storage.createUserProfile({
+          userId: req.user.id,
+          countryOfRegistration,
+          registeredCompanyName,
+          tradeBrandName,
+          yearOfEstablishment: yearOfEstablishment ? parseInt(yearOfEstablishment) : null,
+          legalEntityId,
+          legalEntityIssueDate,
+          legalEntityExpiryDate,
+          cityOfficeAddress,
+          officialWebsite,
+          entityType,
+          dunsNumber,
+          vatCertificateUrl,
+          taxVatNumber,
+          taxIssuingDate,
+          taxExpiryDate,
+          currentStep: 2,
+          onboardingStatus: 'in_progress',
+        });
       }
 
       // Update user onboarding step
@@ -1743,21 +1813,21 @@ export async function registerRoutes(
    *     description: Saves authorized contact person information and terms acceptance
    *     security:
    *       - bearerAuth: []
-   *     requestBody:
-   *       required: true
-   *       content:
-   *         application/json:
-   *           schema:
-   *             type: object
-   *             required: [contactFullName, termsAccepted]
-   *             properties:
-   *               contactFullName: { type: string }
-   *               contactJobTitle: { type: string }
-   *               contactWorkEmail: { type: string, format: email }
-   *               contactIdDocumentUrl: { type: string }
-   *               contactMobile: { type: string }
-   *               contactMobileCountryCode: { type: string }
-   *               termsAccepted: { type: boolean }
+  *     requestBody:
+  *       required: true
+  *       content:
+  *         multipart/form-data:
+  *           schema:
+  *             type: object
+  *             required: [contactFullName, termsAccepted]
+  *             properties:
+  *               contactFullName: { type: string }
+  *               contactJobTitle: { type: string }
+  *               contactWorkEmail: { type: string, format: email }
+  *               contactIdDocumentFile: { type: string, format: binary, description: 'Upload contact ID document as a file (PDF/JPEG/PNG). Optional.' }
+  *               contactMobile: { type: string }
+  *               contactMobileCountryCode: { type: string }
+  *               termsAccepted: { type: boolean }
    *     responses:
    *       200:
    *         description: Step 2 saved successfully
@@ -1786,7 +1856,7 @@ export async function registerRoutes(
    *               properties:
    *                 error: { type: string }
    */
-  app.post("/api/vendor/onboarding/step2", async (req, res) => {
+  app.post("/api/vendor/onboarding/step2", upload.single("contactIdDocumentFile"), async (req, res) => {
     if (!req.user) {
       return res.status(401).json({ error: "Authentication required" });
     }
@@ -1796,13 +1866,19 @@ export async function registerRoutes(
         contactFullName,
         contactJobTitle,
         contactWorkEmail,
-        contactIdDocumentUrl,
         contactMobile,
         contactMobileCountryCode,
         termsAccepted,
       } = req.body;
+      const idDocFile = (req as any).file as any | undefined;
+      // Enforce that contactIdDocumentFile, when provided, must be a file upload
+      if (typeof (req.body as any)?.contactIdDocumentFile !== 'undefined' && !idDocFile) {
+        return res.status(400).json({ error: "Invalid contactIdDocumentFile: upload as multipart/form-data file" });
+      }
+      const contactIdDocumentUrl = idDocFile ? `/uploads/vendor/${idDocFile.filename}` : undefined;
+      const termsAcceptedBool = ["true", "1", "on", "yes"].includes(String(termsAccepted).toLowerCase());
 
-      if (!termsAccepted) {
+      if (!termsAcceptedBool) {
         return res.status(400).json({ error: "You must confirm the accuracy of information" });
       }
       
@@ -1839,13 +1915,13 @@ export async function registerRoutes(
    *     description: Saves business nature, compliance information, and required licenses
    *     security:
    *       - bearerAuth: []
-   *     requestBody:
-   *       required: true
-   *       content:
-   *         application/json:
-   *           schema:
-   *             type: object
-   *             required: [natureOfBusiness, endUseMarkets, businessLicenseUrl, complianceTermsAccepted]
+  *     requestBody:
+  *       required: true
+  *       content:
+  *         multipart/form-data:
+  *           schema:
+  *             type: object
+  *             required: [natureOfBusiness, endUseMarkets, businessLicenseFile, complianceTermsAccepted]
    *             properties:
    *               natureOfBusiness: { type: array, items: { type: string } }
    *               controlledDualUseItems: { type: string }
@@ -1853,9 +1929,13 @@ export async function registerRoutes(
    *               endUseMarkets: { type: array, items: { type: string } }
    *               operatingCountries: { type: array, items: { type: string } }
    *               isOnSanctionsList: { type: boolean }
-   *               businessLicenseUrl: { type: string }
-   *               defenseApprovalUrl: { type: string }
-   *               companyProfileUrl: { type: string }
+  *               businessLicenseFile: { type: string, format: binary }
+  *               defenseApprovalFile: { type: string, format: binary }
+  *               companyProfileFile: { type: string, format: binary }
+  *               modLicenseFile: { type: string, format: binary, description: 'File for MOD License' }
+  *               eocnApprovalFile: { type: string, format: binary, description: 'File for EOCN Approval' }
+  *               itarRegistrationFile: { type: string, format: binary, description: 'File for ITAR Registration' }
+  *               localAuthorityApprovalFile: { type: string, format: binary, description: 'File for Local approval from authorities' }
    *               complianceTermsAccepted: { type: boolean }
    *     responses:
    *       200:
@@ -1885,7 +1965,16 @@ export async function registerRoutes(
    *               properties:
    *                 error: { type: string }
    */
-  app.post("/api/vendor/onboarding/step3", async (req, res) => {
+  app.post("/api/vendor/onboarding/step3", upload.fields([
+    { name: "businessLicenseFile", maxCount: 1 },
+    { name: "defenseApprovalFile", maxCount: 1 },
+    { name: "companyProfileFile", maxCount: 1 },
+    // Additional license type files (one per type)
+    { name: "modLicenseFile", maxCount: 1 },
+    { name: "eocnApprovalFile", maxCount: 1 },
+    { name: "itarRegistrationFile", maxCount: 1 },
+    { name: "localAuthorityApprovalFile", maxCount: 1 },
+  ]), async (req, res) => {
     if (!req.user) {
       return res.status(401).json({ error: "Authentication required" });
     }
@@ -1898,21 +1987,75 @@ export async function registerRoutes(
         endUseMarkets,
         operatingCountries,
         isOnSanctionsList,
-        businessLicenseUrl,
-        defenseApprovalUrl,
-        companyProfileUrl,
         complianceTermsAccepted,
       } = req.body;
+      const files = (req as any).files as Record<string, any[]> | undefined;
+      // Helper to normalize array-like form fields which may arrive as:
+      // - a JSON string: '["a","b"]'
+      // - a comma-separated string: 'a,b'
+      // - multiple fields: ['a','b']
+      const parseStringArray = (val: unknown): string[] => {
+        if (Array.isArray(val)) return val as string[];
+        if (typeof val === 'string') {
+          const trimmed = val.trim();
+          if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+            try {
+              const parsed = JSON.parse(trimmed);
+              return Array.isArray(parsed) ? parsed.map(String) : [String(parsed)];
+            } catch {
+              // fall through to comma split
+            }
+          }
+          // Allow comma-separated fallback
+          if (trimmed.includes(',')) return trimmed.split(',').map(s => s.trim()).filter(Boolean);
+          return trimmed ? [trimmed] : [];
+        }
+        return [];
+      };
 
-      if (!complianceTermsAccepted) {
+      const natureOfBusinessArray = parseStringArray(natureOfBusiness);
+      const endUseMarketsArray = parseStringArray(endUseMarkets);
+      const operatingCountriesArray = parseStringArray(operatingCountries);
+      const businessLicenseUrl = files?.businessLicenseFile?.[0]
+        ? `/uploads/vendor/${files.businessLicenseFile[0].filename}`
+        : undefined;
+      const defenseApprovalUrl = files?.defenseApprovalFile?.[0]
+        ? `/uploads/vendor/${files.defenseApprovalFile[0].filename}`
+        : undefined;
+      const companyProfileUrl = files?.companyProfileFile?.[0]
+        ? `/uploads/vendor/${files.companyProfileFile[0].filename}`
+        : undefined;
+      const complianceAcceptedBool = ["true", "1", "on", "yes"].includes(String(complianceTermsAccepted).toLowerCase());
+      const sanctionsBool = ["true", "1", "on", "yes"].includes(String(isOnSanctionsList).toLowerCase());
+
+      // Normalize licenseTypes into a string array (handles JSON string, single value, or array)
+      let licenseTypesArray: string[] = [];
+      if (Array.isArray(licenseTypes)) {
+        licenseTypesArray = licenseTypes as string[];
+      } else if (typeof licenseTypes === 'string') {
+        try {
+          const parsed = JSON.parse(licenseTypes);
+          if (Array.isArray(parsed)) {
+            licenseTypesArray = parsed;
+          } else if (typeof parsed === 'string') {
+            licenseTypesArray = [parsed];
+          } else {
+            licenseTypesArray = [licenseTypes];
+          }
+        } catch {
+          licenseTypesArray = [licenseTypes];
+        }
+      }
+
+      if (!complianceAcceptedBool) {
         return res.status(400).json({ error: "You must accept the compliance terms" });
       }
 
-      if (!natureOfBusiness || natureOfBusiness.length === 0) {
+      if (!natureOfBusinessArray || natureOfBusinessArray.length === 0) {
         return res.status(400).json({ error: "Please select at least one nature of business" });
       }
 
-      if (!endUseMarkets || endUseMarkets.length === 0) {
+      if (!endUseMarketsArray || endUseMarketsArray.length === 0) {
         return res.status(400).json({ error: "Please select at least one end-use market" });
       }
 
@@ -1921,12 +2064,12 @@ export async function registerRoutes(
       }
       
       const profile = await storage.updateUserProfile(req.user.id, {
-        natureOfBusiness,
+        natureOfBusiness: natureOfBusinessArray,
         controlledDualUseItems,
-        licenseTypes,
-        endUseMarkets,
-        operatingCountries,
-        isOnSanctionsList: isOnSanctionsList === true,
+        licenseTypes: licenseTypesArray,
+        endUseMarkets: endUseMarketsArray,
+        operatingCountries: operatingCountriesArray,
+        isOnSanctionsList: sanctionsBool,
         businessLicenseUrl,
         defenseApprovalUrl,
         companyProfileUrl,
@@ -1935,6 +2078,27 @@ export async function registerRoutes(
         currentStep: 4,
         onboardingStatus: 'in_progress',
       });
+
+      // Persist additional license type files when provided
+      const licenseFieldToTypeMap: Record<string, string> = {
+        modLicenseFile: 'MOD License',
+        eocnApprovalFile: 'EOCN Approval',
+        itarRegistrationFile: 'ITAR Registration',
+        localAuthorityApprovalFile: 'Local approval from authorities',
+      };
+      for (const fieldName of Object.keys(licenseFieldToTypeMap)) {
+        const fileArr = files?.[fieldName];
+        if (fileArr && fileArr[0]) {
+          const f = fileArr[0];
+          const url = `/uploads/vendor/${f.filename}`;
+          const typeName = licenseFieldToTypeMap[fieldName];
+          try {
+            await storage.upsertUserLicenseFile(req.user.id, typeName, url, f.originalname);
+          } catch (e) {
+            console.warn(`Failed to save license file for ${typeName}:`, e);
+          }
+        }
+      }
 
       res.json({
         message: "Step 3 saved successfully",
@@ -2017,13 +2181,13 @@ export async function registerRoutes(
           return res.status(400).json({ error: "Please select at least one selling category" });
         }
 
-        if (!password) {
-          return res.status(400).json({ error: "Password is required" });
-        }
+        // if (!password) {
+        //   return res.status(400).json({ error: "Password is required" });
+        // }
 
-        if (password.length < 8) {
-          return res.status(400).json({ error: "Password must be at least 8 characters" });
-        }
+        // if (password.length < 8) {
+        //   return res.status(400).json({ error: "Password must be at least 8 characters" });
+        // }
       }
 
       const updateData: any = {
@@ -2065,17 +2229,17 @@ export async function registerRoutes(
    *     requestBody:
    *       required: true
    *       content:
-   *         application/json:
+    *         multipart/form-data:
    *           schema:
    *             type: object
    *             properties:
-   *               paymentMethod: { type: string, description: Selected payment method name }
+    *               paymentMethod: { type: string, description: Selected payment method name, nullable: true }
    *               bankCountry: { type: string, description: ISO country code }
    *               financialInstitution: { type: string, description: Bank name }
    *               swiftCode: { type: string, description: Auto-filled from bank selection }
    *               bankAccountNumber: { type: string }
    *               proofType: { type: string, enum: ["Bank Statement", "Cancelled Cheque", "Bank Letter", "Account Confirmation Letter"] }
-   *               bankProofUrl: { type: string }
+    *               bankProofFile: { type: string, format: binary, description: 'Upload bank proof document as a file (PDF/JPEG/PNG)' }
    *               isDraft: { type: boolean, description: If true, saves as draft without validation }
    *     responses:
    *       200:
@@ -2105,7 +2269,7 @@ export async function registerRoutes(
    *               properties:
    *                 error: { type: string }
    */
-  app.post("/api/vendor/onboarding/step5", async (req, res) => {
+  app.post("/api/vendor/onboarding/step5", upload.single("bankProofFile"), async (req, res) => {
     if (!req.user) {
       return res.status(401).json({ error: "Authentication required" });
     }
@@ -2118,15 +2282,16 @@ export async function registerRoutes(
         swiftCode,
         bankAccountNumber,
         proofType,
-        bankProofUrl,
         isDraft,
       } = req.body;
+      const bankProofFile = (req as any).file as any | undefined;
+      // Enforce that bankProofFile, when provided, must be a file upload
+      if (typeof (req.body as any)?.bankProofFile !== 'undefined' && !bankProofFile) {
+        return res.status(400).json({ error: "Invalid bankProofFile: upload as multipart/form-data file" });
+      }
+      const bankProofUrl = bankProofFile ? `/uploads/vendor/${bankProofFile.filename}` : undefined;
 
       if (!isDraft) {
-        if (!paymentMethod) {
-          return res.status(400).json({ error: "Please select a payment method" });
-        }
-
         if (!financialInstitution) {
           return res.status(400).json({ error: "Please select your bank" });
         }
@@ -2145,7 +2310,7 @@ export async function registerRoutes(
       }
 
       const profile = await storage.updateUserProfile(req.user.id, {
-        paymentMethod,
+        paymentMethod: paymentMethod ?? null,
         bankCountry,
         financialInstitution,
         swiftCode,
@@ -2899,6 +3064,8 @@ export async function registerRoutes(
    *     summary: Create a new product (vendor only)
    *     description: |
    *       Creates a new product listing. Requires vendor authentication.
+  *       Optionally, include `pricingTiers` to set tiered pricing during creation.
+  *       Format: [{ minQuantity: number; maxQuantity?: number; price: number }]
    *       
   *       ## Pages / Sections Used
   *       - **Vendor Dashboard** (`/products`) - _Not yet implemented in frontend_
@@ -2929,6 +3096,13 @@ export async function registerRoutes(
         vendorId: req.user.id,
       });
 
+      // Optional: create pricing tiers if provided
+      const tiers = parsePricingTiers(req.body);
+      if (tiers && tiers.length > 0) {
+        const tiersWithProductId = tiers.map(t => ({ ...t, productId: product.id }));
+        await storage.setProductPricingTiers(product.id, tiersWithProductId as any);
+      }
+
       res.status(201).json(product);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -2938,6 +3112,137 @@ export async function registerRoutes(
       res.status(500).json({ error: "Failed to create product" });
     }
   });
+
+  // Product media upload (cover image, gallery images, and PDFs)
+  const productUploadDir = path.resolve(process.cwd(), "uploads", "products");
+  fs.mkdirSync(productUploadDir, { recursive: true });
+
+  const productStorage = multer.diskStorage({
+    destination: (_req: any, _file: any, cb: any) => cb(null, productUploadDir),
+    filename: (_req: any, file: any, cb: any) => {
+      const ts = Date.now();
+      const safe = (file.originalname || "file").replace(/[^a-zA-Z0-9._-]/g, "_");
+      cb(null, `${ts}_${safe}`);
+    },
+  });
+
+  const productAllowedTypes = new Set([
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "application/pdf",
+  ]);
+
+  const productFileFilter = (_req: any, file: any, cb: any) => {
+    if (productAllowedTypes.has(file.mimetype)) cb(null, true);
+    else cb(new Error("Invalid file type. Only JPG, PNG, or PDF allowed."));
+  };
+
+  const productUpload = multer({
+    storage: productStorage,
+    fileFilter: productFileFilter,
+    limits: { fileSize: 10 * 1024 * 1024 },
+  });
+
+  /**
+   * @swagger
+   * /products/{id}/assets:
+   *   post:
+   *     tags: [Products]
+   *     summary: Upload product media (cover, gallery, PDFs)
+   *     description: Uploads the main cover image to `image`, gallery images to `gallery`, and optional PDFs to dedicated fields.
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: integer }
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         multipart/form-data:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               image: { type: string, format: binary, description: Cover image }
+   *               gallery: { type: array, items: { type: string, format: binary }, description: Gallery images }
+   *               cadFile: { type: string, format: binary }
+   *               certificateReport: { type: string, format: binary }
+   *               msdsSheet: { type: string, format: binary }
+   *               installationManual: { type: string, format: binary }
+   *     responses:
+   *       200:
+   *         description: Product media updated
+   *       400:
+   *         description: Validation error
+   *       403:
+   *         description: Requires vendor or admin access
+   */
+  app.post(
+    "/api/products/:id/assets",
+    productUpload.fields([
+      { name: "image", maxCount: 1 },
+      { name: "gallery", maxCount: 10 },
+      { name: "cadFile", maxCount: 1 },
+      { name: "certificateReport", maxCount: 1 },
+      { name: "msdsSheet", maxCount: 1 },
+      { name: "installationManual", maxCount: 1 },
+    ]) as any,
+    async (req, res) => {
+      try {
+        if (!isVendorOrAdmin(req.user)) {
+          return res.status(403).json({ error: "Only vendors or admins can upload product media" });
+        }
+
+        const productId = parseInt(req.params.id, 10);
+        if (!Number.isFinite(productId)) {
+          return res.status(400).json({ error: "Invalid product id" });
+        }
+
+        const product = await storage.getProductById(productId);
+        if (!product) {
+          return res.status(404).json({ error: "Product not found" });
+        }
+
+        // Vendors can only modify their own products
+        if (req.user!.userType === "vendor" && product.vendorId !== req.user!.id) {
+          return res.status(403).json({ error: "You do not own this product" });
+        }
+
+        const files = (req as any).files as Record<string, Array<{ filename: string }>> | undefined;
+        const imageFile = files?.image?.[0];
+        const galleryFiles = files?.gallery || [];
+        const cadFile = files?.cadFile?.[0];
+        const certificateFile = files?.certificateReport?.[0];
+        const msdsFile = files?.msdsSheet?.[0];
+        const manualFile = files?.installationManual?.[0];
+
+        const toUpdate: any = {};
+
+        if (imageFile) {
+          toUpdate.image = `/uploads/products/${imageFile.filename}`;
+        }
+
+        if (galleryFiles.length > 0) {
+          const galleryUrls = galleryFiles.map((f) => `/uploads/products/${f.filename}`);
+          const existing = Array.isArray(product.gallery) ? product.gallery : [];
+          toUpdate.gallery = [...existing, ...galleryUrls];
+        }
+
+        if (cadFile) toUpdate.cadFileUrl = `/uploads/products/${cadFile.filename}`;
+        if (certificateFile) toUpdate.certificateReportUrl = `/uploads/products/${certificateFile.filename}`;
+        if (msdsFile) toUpdate.msdsSheetUrl = `/uploads/products/${msdsFile.filename}`;
+        if (manualFile) toUpdate.installationManualUrl = `/uploads/products/${manualFile.filename}`;
+
+        const updated = await storage.updateProduct(productId, toUpdate);
+        return res.json({ product: updated, updatedFields: Object.keys(toUpdate) });
+      } catch (error) {
+        console.error("Error uploading product media:", error);
+        return res.status(500).json({ error: "Failed to upload product media" });
+      }
+    }
+  );
 
   /**
    * @swagger
@@ -5112,6 +5417,14 @@ export async function registerRoutes(
       
       const validated = insertProductSchema.parse(productData);
       const product = await storage.createProduct(validated);
+
+      // Optional: create pricing tiers if provided
+      const tiers = parsePricingTiers(req.body);
+      if (tiers && tiers.length > 0) {
+        const tiersWithProductId = tiers.map(t => ({ ...t, productId: product.id }));
+        await storage.setProductPricingTiers(product.id, tiersWithProductId as any);
+      }
+
       res.status(201).json(product);
     } catch (error) {
       console.error("Error creating product:", error);
@@ -5141,6 +5454,14 @@ export async function registerRoutes(
       }
 
       const product = await storage.updateProduct(productId, req.body);
+
+      // Optional: replace pricing tiers if provided
+      const tiers = parsePricingTiers(req.body);
+      if (tiers) {
+        const tiersWithProductId = tiers.map(t => ({ ...t, productId }));
+        await storage.setProductPricingTiers(productId, tiersWithProductId as any);
+      }
+
       res.json(product);
     } catch (error) {
       console.error("Error updating product:", error);
@@ -6623,22 +6944,73 @@ export async function registerRoutes(
    *             schema:
    *               $ref: '#/components/schemas/Error'
    */
-  app.post("/api/vendor/products", async (req, res) => {
-    if (!isVendorOrAdmin(req.user)) {
-      return res.status(401).json({ error: "Vendor authentication required" });
-    }
-
-    try {
-      if (!req.user) {
-        return res.status(401).json({ error: "Authentication required" });
+  app.post("/api/vendor/products",
+    // Accept optional multipart form-data with images/PDFs
+    (productUpload.fields([
+      { name: "image", maxCount: 1 },
+      { name: "gallery", maxCount: 10 },
+      { name: "cadFile", maxCount: 1 },
+      { name: "certificateReport", maxCount: 1 },
+      { name: "msdsSheet", maxCount: 1 },
+      { name: "installationManual", maxCount: 1 },
+    ]) as any),
+    async (req, res) => {
+      if (!isVendorOrAdmin(req.user)) {
+        return res.status(401).json({ error: "Vendor authentication required" });
       }
-      const product = await storage.createProductDraft(req.user.id);
-      res.status(201).json(product);
-    } catch (error) {
-      console.error("Error creating product draft:", error);
-      res.status(500).json({ error: "Failed to create product draft" });
+
+      try {
+        if (!req.user) {
+          return res.status(401).json({ error: "Authentication required" });
+        }
+
+        const files = (req as any).files as Record<string, Array<{ filename: string }>> | undefined;
+        const hasUploads = files && (files.image?.length || files.gallery?.length || files.cadFile?.length || files.certificateReport?.length || files.msdsSheet?.length || files.installationManual?.length);
+
+        // If there are uploaded assets or body fields, create with those values; else keep legacy "draft only" behavior
+        if (hasUploads || Object.keys(req.body || {}).length > 0) {
+          const imageFile = files?.image?.[0];
+          const galleryFiles = files?.gallery || [];
+          const cadFile = files?.cadFile?.[0];
+          const certificateFile = files?.certificateReport?.[0];
+          const msdsFile = files?.msdsSheet?.[0];
+          const manualFile = files?.installationManual?.[0];
+
+          const imageUrl = imageFile ? `/uploads/products/${imageFile.filename}` : undefined;
+          const galleryUrls = galleryFiles.map(f => `/uploads/products/${f.filename}`);
+
+          const baseData: any = {
+            vendorId: req.user.id,
+            status: 'draft',
+            image: imageUrl,
+            gallery: galleryUrls.length ? galleryUrls : undefined,
+            cadFileUrl: cadFile ? `/uploads/products/${cadFile.filename}` : undefined,
+            certificateReportUrl: certificateFile ? `/uploads/products/${certificateFile.filename}` : undefined,
+            msdsSheetUrl: msdsFile ? `/uploads/products/${msdsFile.filename}` : undefined,
+            installationManualUrl: manualFile ? `/uploads/products/${manualFile.filename}` : undefined,
+          };
+
+          // Merge a small safe subset of string fields from body if present
+          const stringFields = ["name", "sku", "description", "technicalDescription", "vehicleCompatibility", "certifications", "countryOfOrigin"] as const;
+          for (const key of stringFields) {
+            if (typeof (req.body as any)[key] === 'string' && (req.body as any)[key].length) {
+              baseData[key] = (req.body as any)[key];
+            }
+          }
+
+          const product = await storage.createProduct(baseData);
+          return res.status(201).json(product);
+        }
+
+        // Legacy behavior: create an empty draft
+        const product = await storage.createProductDraft(req.user.id);
+        res.status(201).json(product);
+      } catch (error) {
+        console.error("Error creating product draft:", error);
+        res.status(500).json({ error: "Failed to create product draft" });
+      }
     }
-  });
+  );
 
   /**
    * @swagger

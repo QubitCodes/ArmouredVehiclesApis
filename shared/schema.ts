@@ -309,6 +309,11 @@ export const products = pgTable("products", {
   image: text("image"),
   gallery: text("gallery").array(),
   description: text("description"),
+  // Product documents (PDFs)
+  cadFileUrl: text("cad_file_url"),
+  certificateReportUrl: text("certificate_report_url"),
+  msdsSheetUrl: text("msds_sheet_url"),
+  installationManualUrl: text("installation_manual_url"),
   condition: productConditionEnum("condition").default('new'),
   make: text("make"),
   model: text("model"),
@@ -629,6 +634,16 @@ export const userProfiles = pgTable("user_profiles", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// License files uploaded per vendor for specific license types (Step 3)
+export const userLicenseFiles = pgTable("user_license_files", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  licenseTypeId: integer("license_type_id").notNull().references(() => refLicenseTypes.id, { onDelete: 'restrict' }),
+  fileUrl: text("file_url").notNull(),
+  fileName: text("file_name"),
+  uploadedAt: timestamp("uploaded_at").notNull().defaultNow(),
+});
+
 // Admin action types enum
 export const adminActionTypeEnum = pgEnum('admin_action_type', [
   'seller_approved', 'seller_rejected', 'seller_suspended', 'seller_activated',
@@ -713,6 +728,16 @@ export const vendorNotifications = pgTable("vendor_notifications", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// Sponsored Ads table for homepage/sections
+export const sponsordAds = pgTable("sponsord_ad", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  verticalImage: text("vertical_image").notNull(),
+  horizontalImage: text("horizontal_image").notNull(),
+  link: text("link").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 // Auth sessions table for JWT session management
 export const authSessions = pgTable("auth_sessions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -745,6 +770,13 @@ export const usersRelations = relations(users, ({ one, many }) => ({
 export const userProfilesRelations = relations(userProfiles, ({ one }) => ({
   user: one(users, {
     fields: [userProfiles.userId],
+    references: [users.id],
+  }),
+}));
+
+export const userLicenseFilesRelations = relations(userLicenseFiles, ({ one }) => ({
+  user: one(users, {
+    fields: [userLicenseFiles.userId],
     references: [users.id],
   }),
 }));
@@ -1087,6 +1119,11 @@ export const insertUserProfileSchema = createInsertSchema(userProfiles).omit({
   termsAcceptedAt: true,
 });
 
+export const insertUserLicenseFileSchema = createInsertSchema(userLicenseFiles).omit({
+  id: true,
+  uploadedAt: true,
+});
+
 export const insertAdminActionLogSchema = createInsertSchema(adminActionLogs).omit({
   id: true,
   createdAt: true,
@@ -1113,6 +1150,12 @@ export const insertTicketAttachmentSchema = createInsertSchema(ticketAttachments
 export const insertVendorNotificationSchema = createInsertSchema(vendorNotifications).omit({
   id: true,
   createdAt: true,
+});
+
+export const insertSponsordAdSchema = createInsertSchema(sponsordAds).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
 });
 
 // Types
@@ -1170,6 +1213,9 @@ export type InsertOtpVerification = z.infer<typeof insertOtpVerificationSchema>;
 export type UserProfile = typeof userProfiles.$inferSelect;
 export type InsertUserProfile = z.infer<typeof insertUserProfileSchema>;
 
+export type UserLicenseFile = typeof userLicenseFiles.$inferSelect;
+export type InsertUserLicenseFile = z.infer<typeof insertUserLicenseFileSchema>;
+
 export type AdminActionLog = typeof adminActionLogs.$inferSelect;
 export type InsertAdminActionLog = z.infer<typeof insertAdminActionLogSchema>;
 
@@ -1186,3 +1232,6 @@ export type InsertTicketAttachment = z.infer<typeof insertTicketAttachmentSchema
 
 export type VendorNotification = typeof vendorNotifications.$inferSelect;
 export type InsertVendorNotification = z.infer<typeof insertVendorNotificationSchema>;
+
+export type SponsoredAd = typeof sponsordAds.$inferSelect;
+export type InsertSponsoredAd = z.infer<typeof insertSponsordAdSchema>;

@@ -28,6 +28,26 @@ const options: swaggerJsdoc.Options = {
         },
       },
       schemas: {
+        SponsoredAd: {
+          type: 'object',
+          properties: {
+            id: { type: 'integer' },
+            verticalImage: { type: 'string', description: 'URL of vertical image' },
+            horizontalImage: { type: 'string', description: 'URL of horizontal image' },
+            link: { type: 'string', description: 'Click-through URL' },
+            createdAt: { type: 'string', format: 'date-time' },
+            updatedAt: { type: 'string', format: 'date-time' },
+          },
+        },
+        SponsoredAdInput: {
+          type: 'object',
+          required: ['verticalImage', 'horizontalImage', 'link'],
+          properties: {
+            verticalImage: { type: 'string' },
+            horizontalImage: { type: 'string' },
+            link: { type: 'string' },
+          },
+        },
         User: {
           type: 'object',
           properties: {
@@ -172,10 +192,13 @@ const options: swaggerJsdoc.Options = {
             sellingCategories: { type: 'array', items: { type: 'string' } },
             preferredCurrency: { type: 'string' },
             sponsorContent: { type: 'boolean' },
-            paymentMethod: { type: 'string' },
+            paymentMethod: { type: 'string', nullable: true },
+            bankCountry: { type: 'string' },
             financialInstitution: { type: 'string' },
             swiftCode: { type: 'string' },
             bankAccountNumber: { type: 'string' },
+            proofType: { type: 'string', description: 'Bank proof document type' },
+            bankProofUrl: { type: 'string', description: 'URL of uploaded bank proof document' },
             verificationMethod: { type: 'string' },
             onboardingStatus: { type: 'string', enum: ['pending', 'in_progress', 'pending_verification', 'under_review', 'approved', 'rejected'] },
             currentStep: { type: 'integer', minimum: 0, maximum: 6 },

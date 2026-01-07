@@ -3,7 +3,7 @@ import {
   users, products, categories, reviews, cartItems, orders, orderItems, authSessions,
   refunds, refundItems, addresses, savedPaymentMethods, orderStatusHistory, otpVerifications, userProfiles,
   adminActionLogs, productMedia, productPricingTiers, productReviewNotes, platformSettings,
-  supportTickets, ticketMessages, ticketAttachments, vendorNotifications,
+  supportTickets, ticketMessages, ticketAttachments, vendorNotifications, sponsordAds,
   refNatureOfBusiness, refEndUseMarkets, refLicenseTypes, refCountries,
   refVendorCategories, refCurrencies, refPaymentMethods, refFinancialInstitutions, refProofTypes, refVerificationMethods,
   refProductSizes, refProductColors, refProductFeatures, refProductPerformance, 
@@ -24,6 +24,7 @@ import {
   type OrderStatusHistory, type InsertOrderStatusHistory,
   type OtpVerification, type InsertOtpVerification,
   type UserProfile, type InsertUserProfile,
+  userLicenseFiles, type UserLicenseFile, type InsertUserLicenseFile,
   type AdminActionLog, type InsertAdminActionLog,
   type ProductMedia, type InsertProductMedia,
   type ProductPricingTier, type InsertProductPricingTier,
@@ -32,7 +33,8 @@ import {
   type SupportTicket, type InsertSupportTicket,
   type TicketMessage, type InsertTicketMessage,
   type TicketAttachment, type InsertTicketAttachment,
-  type VendorNotification, type InsertVendorNotification
+  type VendorNotification, type InsertVendorNotification,
+  type SponsoredAd, type InsertSponsoredAd
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, sql, or, ilike, isNull, inArray, count, gte, lte, asc } from "drizzle-orm";
@@ -159,6 +161,7 @@ export interface IStorage {
   getUserProfile(userId: string): Promise<UserProfile | undefined>;
   createUserProfile(profile: InsertUserProfile): Promise<UserProfile>;
   updateUserProfile(userId: string, data: Partial<InsertUserProfile>): Promise<UserProfile | undefined>;
+  upsertUserLicenseFile(userId: string, licenseTypeName: string, fileUrl: string, fileName?: string): Promise<UserLicenseFile>;
   updateUserFirebaseUid(userId: string, firebaseUid: string): Promise<User | undefined>;
   
   // Reference Data
@@ -255,6 +258,13 @@ export interface IStorage {
   assignTicket(ticketId: string, adminId: string): Promise<SupportTicket | undefined>;
   updateTicketStatus(ticketId: string, status: string): Promise<SupportTicket | undefined>;
   updateTicketPriority(ticketId: string, priority: string): Promise<SupportTicket | undefined>;
+
+  // Sponsored Ads
+  getSponsoredAds(): Promise<SponsoredAd[]>;
+  getSponsoredAdById(id: number): Promise<SponsoredAd | undefined>;
+  createSponsoredAd(ad: InsertSponsoredAd): Promise<SponsoredAd>;
+  updateSponsoredAd(id: number, ad: Partial<InsertSponsoredAd>): Promise<SponsoredAd | undefined>;
+  deleteSponsoredAd(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1275,6 +1285,31 @@ export class DatabaseStorage implements IStorage {
       .where(eq(userProfiles.userId, userId))
       .returning();
     return updatedProfile || undefined;
+  }
+
+  async upsertUserLicenseFile(userId: string, licenseTypeName: string, fileUrl: string, fileName?: string): Promise<UserLicenseFile> {
+    // Find license type id
+    const [license] = await db.select().from(refLicenseTypes).where(eq(refLicenseTypes.name, licenseTypeName));
+    if (!license) {
+      throw new Error(`Invalid license type: ${licenseTypeName}`);
+    }
+
+    // Check existing file for user + license
+    const [existing] = await db.select().from(userLicenseFiles)
+      .where(and(eq(userLicenseFiles.userId, userId), eq(userLicenseFiles.licenseTypeId, license.id)));
+
+    if (existing) {
+      const [updated] = await db.update(userLicenseFiles)
+        .set({ fileUrl, fileName, uploadedAt: sql`NOW()` })
+        .where(and(eq(userLicenseFiles.userId, userId), eq(userLicenseFiles.licenseTypeId, license.id)))
+        .returning();
+      return updated;
+    }
+
+    const [created] = await db.insert(userLicenseFiles)
+      .values({ userId, licenseTypeId: license.id, fileUrl, fileName })
+      .returning();
+    return created;
   }
 
   async getReferenceData(type: 'nature_of_business' | 'end_use_markets' | 'license_types' | 'countries' | 'vendorCategories' | 'currencies' | 'paymentMethods' | 'financialInstitutions' | 'proofTypes' | 'verificationMethods'): Promise<any[]> {
@@ -2958,6 +2993,34 @@ export class DatabaseStorage implements IStorage {
       .where(eq(supportTickets.id, ticketId))
       .returning();
     return updated || undefined;
+  }
+
+  // Sponsored Ads
+  async getSponsoredAds(): Promise<SponsoredAd[]> {
+    return await db.select().from(sponsordAds).orderBy(desc(sponsordAds.createdAt));
+  }
+
+  async getSponsoredAdById(id: number): Promise<SponsoredAd | undefined> {
+    const [ad] = await db.select().from(sponsordAds).where(eq(sponsordAds.id, id));
+    return ad || undefined;
+  }
+
+  async createSponsoredAd(ad: InsertSponsoredAd): Promise<SponsoredAd> {
+    const [newAd] = await db.insert(sponsordAds).values(ad as any).returning();
+    return newAd;
+  }
+
+  async updateSponsoredAd(id: number, ad: Partial<InsertSponsoredAd>): Promise<SponsoredAd | undefined> {
+    const [updated] = await db
+      .update(sponsordAds)
+      .set({ ...(ad as any), updatedAt: new Date() })
+      .where(eq(sponsordAds.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async deleteSponsoredAd(id: number): Promise<void> {
+    await db.delete(sponsordAds).where(eq(sponsordAds.id, id));
   }
 }
 
