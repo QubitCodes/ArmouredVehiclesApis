@@ -1,0 +1,62 @@
+{
+  "name": "armoured-vehicles-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3002",
+    "build": "next build",
+    "start": "next start -p 3002",
+    "lint": "eslint",
+    "db:migrate": "npx sequelize-cli db:migrate",
+    "db:migrate:undo": "npx sequelize-cli db:migrate:undo",
+    "db:seed": "tsx src/scripts/seed.ts",
+    "db:seed:prod": "tsx src/scripts/seed-production.ts",
+    "db:seed:dummy": "tsx src/scripts/seed-dummy-data.ts"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/icons-material": "^7.3.6",
+    "@mui/material": "^7.3.6",
+    "@sendgrid/mail": "^8.1.6",
+    "bcryptjs": "^3.0.3",
+    "csv-parse": "^6.1.0",
+    "firebase-admin": "^13.6.0",
+    "jsonwebtoken": "^9.0.3",
+    "next": "16.1.1",
+    "next-swagger-doc": "^0.4.1",
+    "pg-hstore": "^2.3.4",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "sequelize": "^6.37.7",
+    "stripe": "^20.1.2",
+    "swagger-ui-react": "^5.31.0",
+    "twilio": "^5.11.2",
+    "zod": "^4.3.5"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^20",
+    "@types/pg": "^8.16.0",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/sequelize": "^4.28.20",
+    "@types/uuid": "^10.0.0",
+    "dotenv": "^17.2.3",
+    "eslint": "^9",
+    "eslint-config-next": "16.1.1",
+    "pg": "^8.16.3",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5"
+  },
+  "overrides": {
+    "react": "$react",
+    "react-dom": "$react-dom",
+    "swagger-ui-react": {
+      "react": "$react",
+      "react-dom": "$react-dom"
+    }
+  }
+}

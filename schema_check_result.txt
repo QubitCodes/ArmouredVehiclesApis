@@ -1,0 +1,10 @@
+Checking DB: neondb
+Columns in products: action_type, approval_status, armouring_level, base_price, category_id, certifications, color, colors, compliance_confirmed, condition, controlled_item_type, country_of_origin, created_at, currency, deleted_at, description, dimension_height, dimension_length, dimension_unit, dimension_width, drive_type, drive_types, engine_type, features, fuel_type, has_warranty, horsepower, id, is_featured, main_category_id, make, manufacturing_source, manufacturing_source_name, materials, min_order_quantity, model, name, original_price, packing_dimension_unit, packing_height, packing_length, packing_weight, packing_weight_unit, packing_width, performance, price, pricing_terms, production_lead_time, rating, ready_stock_available, rejection_reason, requires_export_license, review_count, review_note, reviewed_at, reviewed_by, sizes, sku, specifications, status, stock, sub_category_id, submission_date, supplier_signature, technical_description, thickness, transmission, updated_at, vehicle_compatibility, vehicle_fitment, vendor_id, warranty, warranty_duration, warranty_duration_unit, warranty_terms, weight_unit, weight_value, year
+SUCCESS: Columns exist.
+Attempting Query...
+Simple Query Success. Row: {"id":1,"rating":"0.00","review_count":0}
+Attempting Complex Query (with Joins)...
+Complex Query Success. Row: {"id":2,"rating":"0.00"}
+Checking Featured Products...
+Found 5 featured products. Details: [{"id":2,"name":"Ballistic Glass Level B6","status":"approved","is_featured":true},{"id":4,"name":"Tactical Intercom System","status":"approved","is_featured":true},{"id":6,"name":"Night Vision Periscope","status":"approved","is_featured":true},{"id":10,"name":"Military Grade GPS","status":"approved","is_featured":true},{"id":11,"name":"Blast Attenuation Seat","status":"approved","is_featured":true}]
+Last migrations: 20260111023000-add-rating-and-review-count.js, 20260110214000-remove-image-gallery-from-products.js, 20260110142604-add-rating-to-products.js, 20260110134550-add-image-to-categories.js, 20240428000000-create-product-pricing-tiers.js

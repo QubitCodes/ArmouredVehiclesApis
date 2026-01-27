@@ -1,0 +1,279 @@
+/* Swagger UI Dark Mode & Premium Theme */
+
+/* Global Reset & Typography */
+.swagger-ui {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+    color: #e0e0e0 !important;
+}
+
+/* Backgrounds & Main Colors */
+.swagger-ui .scheme-container {
+    background: transparent !important;
+    box-shadow: none !important;
+    border-bottom: 1px solid #333 !important;
+}
+
+.swagger-ui .info .title, 
+.swagger-ui .info h1, 
+.swagger-ui .info h2, 
+.swagger-ui .info h3, 
+.swagger-ui .info h4, 
+.swagger-ui .info h5 {
+    color: #ffffff !important;
+    font-weight: 600;
+}
+
+.swagger-ui .info p, 
+.swagger-ui .info li, 
+.swagger-ui .info table {
+    color: #b0b0b0 !important;
+}
+
+.swagger-ui .info a {
+    color: #61affe !important;
+}
+
+/* Operation Blocks (Endpoints) */
+.swagger-ui .opblock {
+    background: #1e1e1e !important;
+    border: 1px solid #333 !important;
+    border-radius: 8px !important;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.2) !important;
+    margin-bottom: 15px !important;
+}
+
+.swagger-ui .opblock:hover {
+    border-color: #555 !important;
+}
+
+.swagger-ui .opblock .opblock-summary {
+    border-bottom: 1px solid #2a2a2a !important;
+    padding: 12px 20px !important;
+}
+
+.swagger-ui .opblock .opblock-summary-operation-id, 
+.swagger-ui .opblock .opblock-summary-path, 
+.swagger-ui .opblock .opblock-summary-path__deprecated {
+    color: #e0e0e0 !important;
+    font-family: 'Fira Code', monospace !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+}
+
+.swagger-ui .opblock .opblock-summary-description {
+    color: #999 !important;
+}
+
+/* Methods Badges */
+.swagger-ui .opblock.opblock-get .opblock-summary-method { background: #0F6CBD !important; }
+.swagger-ui .opblock.opblock-post .opblock-summary-method { background: #00875A !important; }
+.swagger-ui .opblock.opblock-put .opblock-summary-method { background: #E67E22 !important; }
+.swagger-ui .opblock.opblock-delete .opblock-summary-method { background: #BF2600 !important; }
+.swagger-ui .opblock.opblock-patch .opblock-summary-method { background: #50E3C2 !important; color: #333 !important; }
+
+.swagger-ui .opblock.opblock-get { border-color: rgba(97,175,254,0.3) !important; background: rgba(97,175,254,0.05) !important; }
+.swagger-ui .opblock.opblock-post { border-color: rgba(73,204,144,0.3) !important; background: rgba(73,204,144,0.05) !important; }
+
+/* Expanded Details */
+.swagger-ui .opblock-body {
+    background: #1a1a1a !important;
+    border-radius: 0 0 8px 8px !important;
+}
+
+.swagger-ui .opblock-section-header {
+    background: #252525 !important;
+    color: #fff !important;
+    box-shadow: none !important;
+}
+
+.swagger-ui .opblock-section-header h4 {
+    color: #fff !important;
+}
+
+/* Parameters Table */
+.swagger-ui table thead tr th {
+    color: #eee !important;
+    border-bottom: 1px solid #444 !important;
+    font-weight: 600 !important;
+}
+
+.swagger-ui table tbody tr td {
+    color: #ccc !important;
+    border-bottom: 1px solid #333 !important;
+}
+
+.swagger-ui .parameter__name {
+    color: #fff !important;
+    font-weight: bold !important;
+}
+
+.swagger-ui .parameter__type {
+    color: #88c0d0 !important;
+}
+
+.swagger-ui .parameter__in {
+    color: #8fbcbb !important;
+    font-style: italic !important;
+}
+
+/* Inputs & Forms - Premium Look */
+.swagger-ui input[type=text], 
+.swagger-ui input[type=password], 
+.swagger-ui input[type=search], 
+.swagger-ui input[type=email], 
+.swagger-ui select, 
+.swagger-ui textarea {
+    background: #2a2a2a !important;
+    border: 1px solid #444 !important;
+    border-radius: 6px !important;
+    color: #fff !important;
+    padding: 10px 12px !important;
+    transition: all 0.2s ease;
+    outline: none !important;
+}
+
+.swagger-ui input:focus, 
+.swagger-ui select:focus, 
+.swagger-ui textarea:focus {
+    border-color: #61affe !important;
+    box-shadow: 0 0 0 2px rgba(97,175,254,0.2) !important;
+    background: #333 !important;
+}
+
+.swagger-ui .btn {
+    border-radius: 6px !important;
+    font-weight: 600 !important;
+    text-transform: none !important;
+    box-shadow: none !important;
+    transition: all 0.2s !important;
+}
+
+.swagger-ui .btn.execute {
+    background: #61affe !important;
+    color: #fff !important;
+    border: none !important;
+    width: 100% !important;
+    padding: 12px !important;
+}
+
+.swagger-ui .btn.execute:hover {
+    background: #4a9be0 !important;
+}
+
+.swagger-ui .btn.authorize {
+    background: transparent !important;
+    color: #61affe !important;
+    border: 1px solid #61affe !important;
+}
+
+.swagger-ui .btn.authorize:hover {
+    background: rgba(97,175,254,0.1) !important;
+}
+
+/* Models */
+.swagger-ui section.models {
+    border: 1px solid #333 !important;
+    border-radius: 8px !important;
+    background: #1e1e1e !important;
+}
+
+.swagger-ui section.models h4 {
+    color: #fff !important;
+    border-bottom: 1px solid #333 !important;
+}
+
+.swagger-ui .model-box {
+    background: transparent !important;
+}
+
+.swagger-ui .model {
+    color: #ccc !important;
+}
+
+.swagger-ui .model-title {
+    color: #a3be8c !important;
+}
+
+.swagger-ui .prop-type {
+    color: #d08770 !important;
+}
+
+.swagger-ui .prop-format {
+    color: #88c0d0 !important;
+}
+
+/* Markdown & Code */
+.swagger-ui .markdown p, .swagger-ui .markdown pre {
+    color: #ccc !important;
+}
+
+.swagger-ui .markdown code, .swagger-ui .renderedMarkdown code {
+    background: #333 !important;
+    color: #e5e5e5 !important;
+    border-radius: 4px !important;
+    padding: 2px 4px !important;
+}
+
+.swagger-ui pre {
+    background: #222 !important;
+    border: 1px solid #333 !important;
+    border-radius: 6px !important;
+}
+
+/* Responses */
+.swagger-ui .responses-inner h4, .swagger-ui .responses-inner h5 {
+    color: #fff !important;
+}
+
+.swagger-ui .response-col_status {
+    color: #ccc !important;
+}
+
+.swagger-ui .response-col_links {
+    color: #ccc !important;
+}
+
+/* Response Codes */
+.swagger-ui .response-col_status .status-200, 
+.swagger-ui .response-col_status .status-201 {
+    color: #a3be8c !important; 
+}
+.swagger-ui .response-col_status .status-400, 
+.swagger-ui .response-col_status .status-401,
+.swagger-ui .response-col_status .status-403,
+.swagger-ui .response-col_status .status-404 {
+    color: #d08770 !important; 
+}
+.swagger-ui .response-col_status .status-500 {
+    color: #bf616a !important;
+}
+
+/* Authorize Modal */
+.swagger-ui .dialog-ux .modal-ux {
+    background: #252525 !important;
+    border: 1px solid #444 !important;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.5) !important;
+    border-radius: 12px !important;
+}
+
+.swagger-ui .dialog-ux .modal-ux-header {
+    border-bottom: 1px solid #333 !important;
+}
+
+.swagger-ui .dialog-ux .modal-ux-content {
+    padding: 20px !important;
+}
+
+.swagger-ui .dialog-ux .modal-ux-header h3 {
+    color: #fff !important;
+}
+
+.swagger-ui label {
+    color: #ccc !important;
+    font-weight: 500 !important;
+}
+
+/* Hide Default Filter if we assume Custom Filter or style it */
+.swagger-ui .wrapper .filter {
+    margin-bottom: 20px !important;
+}
