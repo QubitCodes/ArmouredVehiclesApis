@@ -19,7 +19,7 @@ export class VendorController {
       try {
           const token = authHeader.split(' ')[1];
           const decoded: any = verifyAccessToken(token);
-          userId = decoded.userId;
+          userId = decoded.userId || decoded.sub;
       } catch (e) {
           return NextResponse.json({ success: false, message: 'Invalid Token' }, { status: 401 });
       }

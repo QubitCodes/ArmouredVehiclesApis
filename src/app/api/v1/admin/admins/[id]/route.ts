@@ -5,6 +5,23 @@ import { AdminController } from '@/controllers/AdminController';
 /**
  * @swagger
  * /api/v1/admin/admins/{id}:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Get an admin user
+ *     description: Get details of a specific admin.
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Admin details
+ *       403:
+ *         description: Forbidden
+ *       404:
+ *         description: Admin not found
  *   put:
  *     tags: [Admin]
  *     summary: Update an admin user
@@ -56,6 +73,11 @@ import { AdminController } from '@/controllers/AdminController';
  *       404:
  *         description: Admin not found
  */
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
+  return AdminController.getAdmin(req, { params });
+}
+
 export async function PUT(req: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   return AdminController.updateAdmin(req, { params });

@@ -1,6 +1,6 @@
 
 import { FileUploadService } from './FileUploadService';
-import { UserProfile } from '../models'; // Import other models as needed
+import { UserProfile, FrontendSlider, FrontendAd } from '../models'; // Import other models as needed
 
 /**
  * Configuration for File Uploads
@@ -125,6 +125,26 @@ export const UPLOAD_CONFIG = {
         form: "admin.product.description",
         path: "products/{product_id}/description",
         lookupField: "product_id"
+    },
+
+    // Frontend Sliders
+    FRONTEND_SLIDER: {
+        label: "Frontend Slider",
+        model: FrontendSlider,
+        column: "image_url",
+        form: "admin.web-frontend.slider",
+        path: "frontend/sliders",
+        lookupField: "id"
+    },
+
+    // Frontend Ads
+    FRONTEND_AD: {
+        label: "Frontend Ad",
+        model: FrontendAd,
+        column: "image_url",
+        form: "admin.web-frontend.ad",
+        path: "frontend/ads",
+        lookupField: "id"
     }
 };
 

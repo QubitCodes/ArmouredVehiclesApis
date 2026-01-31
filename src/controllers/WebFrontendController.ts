@@ -1,7 +1,6 @@
 import { NextRequest } from 'next/server';
 import { BaseController } from './BaseController';
 import { User, FrontendSlider, FrontendAd, sequelize } from '../models';
-import { FileUploadService } from '../services/FileUploadService';
 import { verifyAccessToken } from '../utils/jwt';
 import { getFileUrl } from '../utils/fileUrl';
 import { Op } from 'sequelize';
@@ -71,10 +70,13 @@ export class WebFrontendController extends BaseController {
                 order: [['sort_order', 'ASC'], ['created_at', 'DESC']]
             });
 
-            const formatted = sliders.map((s: any) => ({
-                ...s.toJSON(),
-                image_url: getFileUrl(s.image_url)
-            }));
+            const formatted = sliders.map((s: any) => {
+                const json = s.toJSON();
+                return {
+                    ...json,
+                    image_url: getFileUrl(json.image_url)
+                };
+            });
 
             return this.sendSuccess(formatted);
 
@@ -89,16 +91,8 @@ export class WebFrontendController extends BaseController {
 
         try {
             const body = parsedData ? parsedData.data : await req.json();
-            const files = parsedData ? parsedData.files : [];
-            
-            // Image is mandatory
-            let imagePath = null;
-            if (files && files.length > 0) {
-                 const file = files[0]; // Assume first file is image
-                 imagePath = await FileUploadService.saveFile(file, 'sliders');
-            } else if (body.image_url) {
-                imagePath = body.image_url; // If passed as string (unlikely for new upload)
-            }
+            let imagePath = body.image_url;
+
 
             if (!imagePath) {
                 return this.sendError('Image is required', 400);
@@ -132,12 +126,9 @@ export class WebFrontendController extends BaseController {
             if (!slider) return this.sendError('Slider not found', 404);
 
             const body = parsedData ? parsedData.data : await req.json();
-            const files = parsedData ? parsedData.files : [];
+            
+            const imagePath = body.image_url || slider.image_url;
 
-            let imagePath = slider.image_url;
-            if (files && files.length > 0) {
-                 imagePath = await FileUploadService.saveFile(files[0], 'sliders');
-            }
 
             await slider.update({
                 image_url: imagePath,
@@ -218,10 +209,13 @@ export class WebFrontendController extends BaseController {
 
             const ads = await FrontendAd.findAll(queryOptions);
 
-            const formatted = ads.map((ad: any) => ({
-                ...ad.toJSON(),
-                image_url: getFileUrl(ad.image_url)
-            }));
+            const formatted = ads.map((ad: any) => {
+                const json = ad.toJSON();
+                return {
+                    ...json,
+                    image_url: getFileUrl(json.image_url)
+                };
+            });
 
             return this.sendSuccess(formatted);
 
@@ -236,18 +230,8 @@ export class WebFrontendController extends BaseController {
 
         try {
             const body = parsedData ? parsedData.data : await req.json();
-            const files = parsedData ? parsedData.files : [];
-            
-            if (!body.location) return this.sendError('Location is required', 400);
+            let imagePath = body.image_url;
 
-            // Image is mandatory? Usually yes for ads.
-            let imagePath = null;
-            if (files && files.length > 0) {
-                 const file = files[0]; // Assume first file is image
-                 imagePath = await FileUploadService.saveFile(file, 'ads');
-            } else if (body.image_url) {
-                imagePath = body.image_url;
-            }
 
             const ad = await FrontendAd.create({
                 location: body.location,
@@ -275,12 +259,8 @@ export class WebFrontendController extends BaseController {
             if (!ad) return this.sendError('Ad not found', 404);
 
             const body = parsedData ? parsedData.data : await req.json();
-            const files = parsedData ? parsedData.files : [];
+            const imagePath = body.image_url || ad.image_url;
 
-            let imagePath = ad.image_url;
-            if (files && files.length > 0) {
-                 imagePath = await FileUploadService.saveFile(files[0], 'ads');
-            }
 
             await ad.update({
                 location: body.location || ad.location,

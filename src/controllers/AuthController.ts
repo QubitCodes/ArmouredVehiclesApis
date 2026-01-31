@@ -1,5 +1,5 @@
 import { BaseController } from './BaseController';
-import { QueryTypes } from 'sequelize';
+import { QueryTypes, Op } from 'sequelize';
 import { User } from '../models/User';
 import { UserProfile } from '../models/UserProfile'; // Import UserProfile
 import { AuthSession } from '../models/AuthSession';
@@ -30,34 +30,87 @@ export class AuthController extends BaseController {
         const body = await req.json();
         // Accept either 'identifier' or 'email' for backwards compatibility
         let identifier = body.identifier || body.email;
+        // Optional userType filter (customer, vendor, admin)
+        const expectedUserType = body.userType;
               
         // Normalize
         if (identifier) identifier = String(identifier).trim();
   
         if (!identifier) {
-          return this.sendError('Email or Phone number is required', 400);
+          return this.sendError('Email or Phone number is required', 202);
         }
   
         // Determine type
         const isEmail = identifier.includes('@');
         
-        // Find user
-        const whereClause = isEmail ? { email: identifier, is_active: true, suspended_at: null } : { phone: identifier, is_active: true, suspended_at: null };
-        const user = await User.findOne({ where: whereClause });
+        // Build where clause
+        let whereClause: any = {};
+
+        if (isEmail) {
+           whereClause = { email: identifier };
+        } else {
+           // Smart Phone Lookup using Sequelize Operators
+           whereClause = {
+               [Op.or]: [
+                   { phone: identifier },
+                   sequelize.where(
+                      sequelize.fn('concat', sequelize.col('country_code'), sequelize.col('phone')),
+                      identifier
+                   ),
+                   // Try stripped version (e.g. 97150...) against phone column
+                   (identifier.startsWith('+') ? { phone: identifier.replace('+', '') } : {})
+               ]
+           };
+        }
+
+        // Add user_type filter if provided
+        if (expectedUserType) {
+            if (expectedUserType === 'admin') {
+                // Admin login should accept admin OR super_admin
+                whereClause.user_type = { [Op.in]: ['admin', 'super_admin'] };
+            } else {
+                // Customer or vendor - exact match
+                whereClause.user_type = expectedUserType;
+            }
+        }
+
+        const user = await User.findOne({ 
+            where: whereClause,
+            include: [{ model: UserProfile, as: 'profile' }], 
+            paranoid: false 
+        });
   
         if (!user) {
-          return this.sendError('No account found with this identifier', 404);
+          // Customize message based on context
+          if (expectedUserType) {
+              return this.sendError(`No ${expectedUserType} account found with this identifier`, 310);
+          }
+          return this.sendError('No account found with this identifier', 310);
+        }
+
+        // Check status
+        if (user.suspended_at) {
+             return this.sendError(`Account is suspended. Reason: ${user.suspended_reason || 'Violation of terms'}`, 212);
+        }
+
+        if (!user.is_active) {
+            // Check onboarding status
+            const status = user.profile?.onboarding_status;
+            if (status === 'rejected') {
+                 return this.sendError(`Account rejected. Reason: ${user.profile?.rejection_reason || 'Policy violation'}`, 212);
+            }
+             return this.sendError('Account is inactive. Please contact support.', 212);
         }
   
         return this.sendSuccess({
           identifier_type: isEmail ? 'email' : 'phone',
           identifier: isEmail ? user.email : `${user.country_code}${user.phone}`,
           userType: user.user_type
-        }, 'User exists', 200);
+        }, 'User exists', 100);
   
       } catch (error: any) {
         console.error('User Exists Error:', error);
-        return this.sendError('Failed to check user details', 500, [error.message]);
+        return this.sendError('Failed to check user details', 300, [error.message]);
       }
   }
 
@@ -68,7 +121,7 @@ export class AuthController extends BaseController {
         const { idToken } = body;
 
         if (!idToken) {
-            return this.sendError('ID Token is required', 400);
+            return this.sendError('ID Token is required', 201);
         }
 
         // 1. Verify Token with Firebase Admin
@@ -80,7 +133,7 @@ export class AuthController extends BaseController {
             decodedToken = await firebaseAdmin.auth().verifyIdToken(idToken);
         } catch (e: any) {
             console.error('Firebase Token Verification Failed:', e);
-            return this.sendError('Invalid or expired token', 401, [e.message]);
+            return this.sendError('Invalid or expired token', 210, [e.message]);
         }
 
         const { uid, email, phone_number, email_verified } = decodedToken;
@@ -88,19 +141,21 @@ export class AuthController extends BaseController {
 
         if (!uid || uid.length > 128) {
              console.error('[AUTH ERROR] Decoded UID is invalid or too long (resembles token?)', uid);
-             return this.sendError('Security Error: Invalid UID from token', 400);
+             return this.sendError('Security Error: Invalid UID from token', 200);
         }
 
         if (!identifier) {
-            return this.sendError('Token does not contain email or phone', 400);
+            return this.sendError('Token does not contain email or phone', 201);
         }
 
         // 2. Find User in DB
         // Search by Firebase UID first (strongest link)
+        console.log(`[AUTH DEBUG] Looking for user with UID: ${uid}`);
         let user = await User.findOne({ 
             where: { firebase_uid: uid },
             include: [{ model: UserProfile, as: 'profile' }] 
         });
+        console.log(`[AUTH DEBUG] First Lookup Result:`, user ? { id: user.id, isActive: user.is_active, email: user.email } : 'NULL');
 
         // 3. Fallback: Search by Email or Phone if not linked yet
         if (!user) {
@@ -133,7 +188,7 @@ export class AuthController extends BaseController {
         // 4. If User Found -> LOGIN
         if (user) {
              if (!user.is_active || user.suspended_at) {
-                 return this.sendError('Account is inactive or suspended', 403);
+                 return this.sendError('Account is inactive or suspended', 212);
              }
 
              // Generate Session & Tokens (Similar to normal login)
@@ -173,6 +228,7 @@ export class AuthController extends BaseController {
             return this.sendSuccess({
                 user: {
                   ...user.toJSON() as any,
+                  profile: user.profile, // Explicitly include full profile object
                   email_verified: user.email_verified,
                   phone_verified: user.phone_verified,
                   country_code: user.country_code,
@@ -183,13 +239,13 @@ export class AuthController extends BaseController {
                 accessToken: tokens.accessToken,
                 refreshToken: tokens.refreshToken,
                 expiresIn: ACCESS_TOKEN_EXPIRY_SECONDS,
-            }, "Login Success", 200);
+            }, "Login Success", 100);
         }
 
         // 5. If User Not Found -> Return 202 (Accepted) or 404 with details to proceed to Registration
         // For security, usually 404 is okay if we are strictly "Login". 
         // But for "Onboarding", we might want to return the verified details so the frontend can pre-fill.
-        return this.sendError('User not found. Please register.', 404, [], {
+        return this.sendError('User not found. Please register.', 310, [], {
             firebaseUid: uid,
             email: email,
             phone: phone_number,
@@ -198,7 +254,7 @@ export class AuthController extends BaseController {
 
     } catch (error: any) {
         console.error('Firebase Verify Error:', error);
-        return this.sendError('Internal Auth Error', 500, [error.message]);
+        return this.sendError('Internal Auth Error', 300, [error.message]);
     }
   }
 
@@ -211,7 +267,7 @@ export class AuthController extends BaseController {
 
           // 1. Basic Validation
           if (!idToken || !name || !username) {
-              return this.sendError('ID Token, Name, and Username are required', 400);
+              return this.sendError('ID Token, Name, and Username are required', 201);
           }
 
           // 2. Verify Token
@@ -220,7 +276,7 @@ export class AuthController extends BaseController {
           try {
               decodedToken = await firebaseAdmin.auth().verifyIdToken(idToken);
           } catch (e: any) {
-              return this.sendError('Invalid or expired token', 401, [e.message]);
+              return this.sendError('Invalid or expired token', 210, [e.message]);
           }
 
           const { uid, email, phone_number, email_verified } = decodedToken;
@@ -229,7 +285,7 @@ export class AuthController extends BaseController {
           
           if (!uid || uid.length > 128) {
               console.error('[AUTH ERROR] Decoded UID is invalid or too long (resembles token?)', uid);
-              return this.sendError('Security Error: Invalid UID from token', 400);
+              return this.sendError('Security Error: Invalid UID from token', 200);
           }
 
           if (!email || !phone_number) {
@@ -246,7 +302,7 @@ export class AuthController extends BaseController {
           });
           
           if (existingUser) {
-              return this.sendError('User already exists. Please login.', 400);
+              return this.sendError('User already exists. Please login.', 310);
           }
 
           // 4. Create User
@@ -330,207 +386,16 @@ export class AuthController extends BaseController {
             accessToken: tokens.accessToken,
             refreshToken: tokens.refreshToken,
             expiresIn: ACCESS_TOKEN_EXPIRY_SECONDS,
-          }, 'Registration successful', 201);
+          }, 'Registration successful', 100);
 
       } catch (error: any) {
           console.error('Firebase Register Error:', error);
           // Handle specific errors
-          return this.sendError('Registration failed', 500, [error.message]);
+          return this.sendError('Registration failed', 300, [error.message]);
       }
   }
 
-  
-  // Register User
-  async register(req: NextRequest) {
-    // Transaction removed for debugging
-    try {
-      const body = await req.json();
-      
-      // Basic Validation
-      if (!body.email || !body.password || !body.name) {
-        return this.sendError('Email, password, and name are required', 400);
-      }
 
-      // Check existing
-      const existingUser = await User.findOne({ where: { email: body.email } });
-      if (existingUser) {
-        return this.sendError('Email already registered', 400);
-      }
-
-      // Hash Password
-      const hashedPassword = await bcrypt.hash(body.password, 10);
-
-      // Create User
-      const userId = crypto.randomUUID();
-      const user = await User.create({
-        id: userId,
-        name: body.name,
-        email: body.email,
-        password: hashedPassword,
-        user_type: (body.userType || 'customer') as 'customer' | 'vendor',
-        email_verified: false,
-        is_active: true,
-      });
-      
-      // Create User Profile
-      await UserProfile.create({
-        user_id: user.id,
-        onboarding_status: 'not_started',
-        current_step: 0,
-      });
-
-      // Create Session
-      const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
-      const userAgent = req.headers.get('user-agent') || 'unknown';
-      const ipAddress = req.headers.get('x-forwarded-for') || 'unknown';
-      const deviceLabel = this.parseUserAgent(userAgent);
-
-      const now = new Date();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const [results]: any = await sequelize.query(
-        `INSERT INTO auth_sessions (user_id, refresh_token_hash, user_agent, ip_address, device_label, expires_at, last_used_at, created_at)
-         VALUES (:uid, 'temp', :ua, :ip, :dev, :exp, :now, :now)
-         RETURNING id`,
-        {
-          replacements: {
-            uid: userId, 
-            ua: userAgent, 
-            ip: ipAddress, 
-            dev: deviceLabel, 
-            exp: expiresAt,
-            now: now
-          },
-          type: QueryTypes.INSERT
-        }
-      );
-      const sessionId = results[0]?.id;
-
-      // Generate Tokens
-      const tokens: { accessToken: string; refreshToken: string } = this.generateTokens(user, sessionId || '');
-      
-      // Hash Refresh Token
-      const refreshTokenHash = this.hashToken(tokens.refreshToken);
-      await sequelize.query(
-        `UPDATE auth_sessions SET refresh_token_hash = :hash WHERE id = :id`,
-        {
-          replacements: { hash: refreshTokenHash, id: sessionId },
-          type: QueryTypes.UPDATE
-        }
-      );
-
-      // await transaction.commit(); // Removed
-      
-      console.log(`[CHECKOUT DEBUG] AUTH API (Register): Generated Token ${(tokens.accessToken as string).substring(0, 20)}... for User ${user.id}`);
-
-      return this.sendSuccess({
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          userType: user.user_type,
-          onboardingStep: user.onboarding_step,
-        },
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        expiresIn: ACCESS_TOKEN_EXPIRY_SECONDS,
-      }, 'User registered successfully', 201);
-
-    } catch (error: any) {
-      // await transaction.rollback(); // Removed
-      console.error('Registration Error:', error);
-      return this.sendError('Registration failed', 500, [error.message]);
-    }
-  }
-
-  // Login User
-  async login(req: NextRequest) {
-    try {
-      const body = await req.json();
-      if (!body.email || !body.password) {
-        return this.sendError('Email and password required', 400);
-      }
-
-      // Include UserProfile in login query
-      const user = await User.findOne({ 
-          where: { email: body.email },
-          include: [{ model: UserProfile, as: 'profile' }] 
-      });
-
-      if (!user || !user.password) {
-        return this.sendError('Invalid credentials', 401);
-      }
-
-      const isValid = await bcrypt.compare(body.password, user.password);
-      if (!isValid) {
-        return this.sendError('Invalid credentials', 401);
-      }
-
-      // Create Session
-      const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
-      const userAgent = req.headers.get('user-agent') || 'unknown';
-      const ipAddress = req.headers.get('x-forwarded-for') || 'unknown';
-      const deviceLabel = this.parseUserAgent(userAgent);
-
-      const now = new Date();
-      const [results]: any = await sequelize.query(
-        `INSERT INTO auth_sessions (user_id, refresh_token_hash, user_agent, ip_address, device_label, expires_at, last_used_at, created_at)
-         VALUES (:uid, 'temp', :ua, :ip, :dev, :exp, :now, :now)
-         RETURNING id`,
-        {
-          replacements: {
-            uid: user.id, 
-            ua: userAgent, 
-            ip: ipAddress, 
-            dev: deviceLabel, 
-            exp: expiresAt,
-            now: now
-          },
-          type: QueryTypes.INSERT,
-        }
-      );
-      const sessionId = results[0]?.id;
-
-      const tokens: { accessToken: string; refreshToken: string } = this.generateTokens(user, sessionId || '');
-      const refreshTokenHash = this.hashToken(tokens.refreshToken);
-      await sequelize.query(
-        `UPDATE auth_sessions SET refresh_token_hash = :hash WHERE id = :id`,
-        {
-          replacements: { hash: refreshTokenHash, id: sessionId },
-          type: QueryTypes.UPDATE
-        }
-      );
-
-      console.log(`[CHECKOUT DEBUG] AUTH API (Login): Generated Token ${(tokens.accessToken as string).substring(0, 20)}... for User ${user.id}`);
-
-      // Fetch user permissions
-      const permissionService = new PermissionService();
-      const permissions = await permissionService.getUserPermissionNames(user.id);
-
-      // Build final user object
-      // We keep the profile nested to match frontend User interface and allow existence checks
-      const userJson = user.toJSON() as any;
-      
-      const responseUser = {
-          ...userJson,
-          userType: user.user_type, 
-          onboardingStep: user.onboarding_step,
-          permissions: permissions,
-          // profile is already in userJson as 'profile' from the include query
-      };
-
-      return this.sendSuccess({
-        user: responseUser,
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        expiresIn: ACCESS_TOKEN_EXPIRY_SECONDS,
-      });
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (error: any) {
-      console.error('Login Error:', error);
-      return this.sendError('Login failed', 500, [error.message]);
-    }
-  }
 
   // Logout User
   async logout(req: NextRequest) {
@@ -564,7 +429,7 @@ export class AuthController extends BaseController {
       const { refreshToken } = body;
 
       if (!refreshToken) {
-        return this.sendError('Refresh token required', 400);
+        return this.sendError('Refresh token required', 201);
       }
 
       // Verify Token
@@ -572,13 +437,13 @@ export class AuthController extends BaseController {
       try {
         decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET);
       } catch (_) {
-        return this.sendError('Invalid refresh token', 401);
+        return this.sendError('Invalid refresh token', 210);
       }
 
       // Check Session in DB
       const session = await AuthSession.findByPk(decoded.sessionId);
       if (!session) {
-        return this.sendError('Session expired', 401);
+        return this.sendError('Session expired', 211);
       }
 
       // Verify Hash
@@ -586,18 +451,18 @@ export class AuthController extends BaseController {
       if (session.refresh_token_hash !== hash) {
         // Potential reuse attack! Delete session
         await session.destroy();
-        return this.sendError('Invalid refresh token detected', 401);
+        return this.sendError('Invalid refresh token detected', 210);
       }
 
       // Find user to ensure they still exist/active
       const user = await User.findByPk(decoded.sub);
       if (!user || !user.is_active) {
-         return this.sendError('User not found or inactive', 401);
+         return this.sendError('User not found or inactive', 210);
       }
       
       // Token Version Check
       if (user.token_version !== decoded.tokenVersion) {
-        return this.sendError('Token revoked', 401);
+        return this.sendError('Token revoked', 211);
       }
 
       // Generate New Tokens
@@ -619,7 +484,7 @@ export class AuthController extends BaseController {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       console.error('Refresh Token Error:', error);
-      return this.sendError('Refresh failed', 500, [error.message]);
+      return this.sendError('Refresh failed', 300, [error.message]);
     }
   }
 

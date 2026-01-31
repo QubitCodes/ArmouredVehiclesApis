@@ -41,6 +41,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   return controller.updateAd(req, context);
 }
 
+export const PATCH = PUT;
+
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   return controller.deleteAd(req, { params });
 }

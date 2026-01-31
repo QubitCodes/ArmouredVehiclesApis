@@ -387,7 +387,7 @@ export class OnboardingController extends BaseController {
 
 			await profile.update({
 				selling_categories: sellingCategories,
-				register_as: registerAs || 'Verified Supplier',
+				register_as: registerAs,
 				preferred_currency: preferredCurrency,
 				sponsor_content: sponsorContent || false,
 				current_step: 5,

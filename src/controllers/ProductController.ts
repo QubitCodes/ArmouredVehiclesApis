@@ -172,7 +172,7 @@ export class ProductController extends BaseController {
              }
 
              // --- JSON Parsing for Array Fields stored as Text ---
-             const arrayFields = ['vehicle_fitment', 'specifications', 'features', 'materials', 'performance', 'drive_types', 'sizes', 'thickness', 'colors', 'pricing_terms', 'individual_product_pricing'];
+             const arrayFields = ['vehicle_fitment', 'specifications', 'features', 'materials', 'performance', 'drive_types', 'sizes', 'thickness', 'colors', 'pricing_terms', 'individual_product_pricing', 'certifications'];
              
              arrayFields.forEach(field => {
                  if (typeof p[field] === 'string') {
@@ -990,7 +990,7 @@ export class ProductController extends BaseController {
                 return this.sendError('Invalid Token', 401);
             }
 
-            const user = await User.findByPk(decoded.userId);
+            const user = await User.findByPk(decoded.userId || decoded.sub);
             if (!user) {
                 return this.sendError('User not found', 401);
             }
@@ -1391,7 +1391,9 @@ export class ProductController extends BaseController {
                 await ProductPricingTier.destroy({ where: { product_id: id } });
                 // Create new
                  const tiers = body.pricing_tiers.map((t: any) => ({
-                     ...t,
+                     min_quantity: t.min_quantity,
+                     max_quantity: t.max_quantity,
+                     price: t.price,
                      product_id: id
                  }));
                  await ProductPricingTier.bulkCreate(tiers);
@@ -1488,6 +1490,11 @@ export class ProductController extends BaseController {
         ];
 
         for (const specDef of specsToSync) {
+            // Check if key is present in body. If undefined, SKIP.
+            if (body[specDef.key] === undefined) {
+                continue;
+            }
+
             const values: string[] = body[specDef.key] || []; // e.g. ["Red", "Blue"]
             
             // Delete existing generic specs for this Label
@@ -1529,7 +1536,7 @@ export class ProductController extends BaseController {
         try {
             const token = authHeader.split(' ')[1];
             const decoded: any = verifyAccessToken(token);
-            const user = await User.findByPk(decoded.userId);
+            const user = await User.findByPk(decoded.userId || decoded.sub);
 
             if (!user) {
                 return { product: null, user: null, error: this.sendError('User not found', 401) };
@@ -1913,7 +1920,7 @@ export class ProductController extends BaseController {
                 return this.sendError('Invalid Token', 401);
             }
 
-            const user = await User.findByPk(decoded.userId);
+            const user = await User.findByPk(decoded.userId || decoded.sub);
             if (!user) {
                 return this.sendError('User not found', 401);
             }
@@ -2005,7 +2012,7 @@ export class ProductController extends BaseController {
                 return this.sendError('Invalid Token', 401);
             }
 
-            const user = await User.findByPk(decoded.userId);
+            const user = await User.findByPk(decoded.userId || decoded.sub);
             if (!user) {
                 return this.sendError('User not found', 401);
             }

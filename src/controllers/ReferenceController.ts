@@ -198,7 +198,7 @@ export class ReferenceController extends BaseController {
     try {
         const token = authHeader.split(' ')[1];
         const decoded: any = verifyAccessToken(token);
-        const user = await User.findByPk(decoded.userId);
+        const user = await User.findByPk(decoded.userId || decoded.sub);
         if (!user) return { user: null, error: this.sendError('User not found', 401) };
         
         if (!['admin', 'super_admin'].includes(user.user_type)) {

@@ -71,16 +71,16 @@ User.init(
     },
     username: {
       type: DataTypes.TEXT,
-      unique: true,
+      // unique: true,
     },
     email: {
       type: DataTypes.TEXT,
       allowNull: false,
-      unique: true,
+      // unique: true,
     },
     phone: {
       type: DataTypes.TEXT,
-      unique: true,
+      // unique: true,
     },
     country_code: {
       type: DataTypes.TEXT,

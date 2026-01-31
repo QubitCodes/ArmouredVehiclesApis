@@ -7,13 +7,13 @@ import { AdminController } from '@/controllers/AdminController';
  * /api/v1/admin/dashboard:
  *   get:
  *     tags: [Admin]
- *     summary: Get Dashboard Stats
- *     description: Returns stats for Admin or Vendor dashboard based on user role
+ *     summary: Get Dashboard Stats (SDUI)
+ *     description: Returns dashboard widgets for Admin or Vendor. Response format is Server-Driven UI (SDUI). Widgets are dynamically populated based on user permissions.
  *     security:
  *       - BearerAuth: []
  *     responses:
  *       200:
- *         description: Dashboard statistics
+ *         description: Dashboard widgets array
  *         content:
  *           application/json:
  *             schema:
@@ -24,18 +24,15 @@ import { AdminController } from '@/controllers/AdminController';
  *                     data:
  *                       type: object
  *                       properties:
- *                         total_products: { type: integer }
- *                         total_orders: { type: integer }
- *                         total_revenue: { type: number }
- *                         total_customers: { type: integer }
- *                         total_vendors: { type: integer }
- *                         pending_orders: { type: integer }
- *                         recent_orders:
+ *                         items:
  *                           type: array
  *                           items:
- *                             $ref: '#/components/schemas/Order'
+ *                             $ref: '#/components/schemas/DashboardWidget'
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Server Error
  */
 export async function GET(req: NextRequest) {
-  const controller = new AdminController();
-  return controller.getDashboardStats(req);
+  return AdminController.getDashboardStats(req);
 }

@@ -274,6 +274,20 @@ export const getApiDocs = async () => {
               created_at: { type: 'string', format: 'date-time' },
             },
           },
+          // === Dashboard SDUI ===
+          DashboardWidget: {
+            type: 'object',
+            description: 'Server-Driven UI Widget for Dashboard',
+            properties: {
+              type: { type: 'string', example: 'stat_card', description: 'Widget type identifier' },
+              width: { type: 'integer', example: 1, description: 'Grid column span (1-4)' },
+              title: { type: 'string', example: 'Total Vendors', description: 'Widget title' },
+              value: { oneOf: [{ type: 'string' }, { type: 'integer' }], example: 120, description: 'Primary value' },
+              subValue: { type: 'string', example: '5 new this month', description: 'Secondary/sub value' },
+              icon: { type: 'string', example: 'Store', description: 'Lucide icon name' },
+              theme: { type: 'string', example: 'blue', description: 'Color theme key (e.g., blue, emerald, amber)' },
+            },
+          },
         },
       },
       security: [],

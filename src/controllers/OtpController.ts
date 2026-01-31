@@ -74,6 +74,7 @@ export class OtpController extends BaseController {
 	 * Request: { identifier: string }
 	 * Response: { message, expiresIn, debugOtp? }
 	 */
+	/** @deprecated Old OTP login flow. Use Firebase instead. */
 	async loginStart(req: NextRequest) {
 		try {
 			const body = await req.json();
@@ -139,6 +140,7 @@ export class OtpController extends BaseController {
 	 * Request: { identifier: string, code: string }
 	 * Response: { user, accessToken, refreshToken, expiresIn }
 	 */
+	/** @deprecated Old OTP verification flow. Use Firebase instead. */
 	async loginVerify(req: NextRequest) {
 		try {
 			const body = await req.json();
@@ -274,6 +276,7 @@ export class OtpController extends BaseController {
 	 * Request: { email, username, name, userType? }
 	 * Response: { message, userId, email, name, username, resuming?, status }
 	 */
+	/** @deprecated Old OTP registration flow. Use Firebase instead. */
 	async registerStart(req: NextRequest) {
 		try {
 			const body = await req.json();
@@ -393,6 +396,7 @@ export class OtpController extends BaseController {
 	 * Request: { email, code }
 	 * Response: { userId, message }
 	 */
+	/** @deprecated Old OTP registration verification flow. Use Firebase instead. */
 	async registerVerify(req: NextRequest) {
 		try {
 			const body = await req.json();
@@ -520,6 +524,7 @@ export class OtpController extends BaseController {
 	 * Content-Type: application/json
 	 * Request: { phone, userId } (User must be logged in or userId provided)
 	 */
+	/** @deprecated Old OTP phone binding flow. Use Firebase instead. */
 	async registerPhoneStart(req: NextRequest) {
 		try {
             // Require Token from Email Step
@@ -605,7 +610,8 @@ export class OtpController extends BaseController {
      * Content-Type: application/json
      * Request: { phone, code }
      */
-    async registerPhoneVerify(req: NextRequest) {
+    	/** @deprecated Old OTP phone verification flow. Use Firebase instead. */
+	async registerPhoneVerify(req: NextRequest) {
         try {
             // Require Token
             const { user, error } = await this.verifyAuth(req);
