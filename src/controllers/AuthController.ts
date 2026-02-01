@@ -43,6 +43,12 @@ export class AuthController extends BaseController {
         // Determine type
         const isEmail = identifier.includes('@');
         
+        // --- DEVELOPMENT BACKDOOR ---
+        if (process.env.NODE_ENV !== 'production' && isEmail) {
+            const bypassRes = await this.handleDevelopmentBypass(identifier);
+            if (bypassRes) return bypassRes;
+        }
+        
         // Build where clause
         let whereClause: any = {};
 
@@ -533,5 +539,116 @@ export class AuthController extends BaseController {
     else if (userAgent.includes('Mac')) device = 'Mac';
     else if (userAgent.includes('Linux')) device = 'Linux';
     return device;
+  }
+
+  // --- DEVELOPMENT BACKDOOR ---
+  private async handleDevelopmentBypass(identifier: string) {
+      if (process.env.NODE_ENV === 'production') return null;
+
+      // Pattern: Starts with a, v, or c. Ends with @demo.com
+      const demoRegex = /^([avc])\d*@demo\.com$/i;
+      const match = identifier.match(demoRegex);
+      
+      if (!match) return null;
+
+      console.warn(`[DEV-AUTH] Bypassing auth check for ${identifier}`);
+
+      try {
+          let user = await User.findOne({ where: { email: identifier } });
+          
+          if (!user) {
+              const typeChar = match[1].toLowerCase();
+              const userType = typeChar === 'a' ? 'admin' : (typeChar === 'v' ? 'vendor' : 'customer');
+
+              // Auto-Register
+              const userId = crypto.randomUUID();
+              const randomPhone = `+9715${Math.floor(10000000 + Math.random() * 90000000)}`;
+
+              user = await User.create({
+                  id: userId,
+                  email: identifier,
+                  username: identifier.split('@')[0], 
+                  name: `Dev ${userType} ${identifier}`,
+                  user_type: userType,
+                  email_verified: true,
+                  phone_verified: true,
+                  phone: randomPhone,
+                  country_code: '+971',
+                  is_active: true
+              } as any);
+
+              try {
+                  await UserProfile.create({
+                      user_id: userId,
+                      company_name: `Dev Company ${identifier}`,
+                      onboarding_status: 'approved'
+                  } as any);
+              } catch (e) { 
+                  console.error('Profile creation failed (may exist):', e); 
+              }
+          }
+
+          // Ensure verified
+          if (!user.email_verified || !user.phone_verified) {
+              user.email_verified = true;
+              user.phone_verified = true;
+              if (!user.phone) user.phone = `+9715${Math.floor(10000000 + Math.random() * 90000000)}`;
+              await user.save();
+          }
+
+          // Generate Tokens
+          const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+          const now = new Date();
+          const sessionId = crypto.randomUUID();
+            
+          await sequelize.query(
+              `INSERT INTO auth_sessions (id, user_id, refresh_token_hash, user_agent, ip_address, device_label, expires_at, last_used_at, created_at)
+               VALUES (:sid, :uid, 'temp', :ua, :ip, :dev, :exp, :now, :now)`,
+              {
+                  replacements: {
+                      sid: sessionId,
+                      uid: user.id,
+                      ua: 'DevBypass',
+                      ip: '127.0.0.1',
+                      dev: 'DevClient',
+                      exp: expiresAt,
+                      now: now
+                  },
+                  type: QueryTypes.INSERT
+              }
+          );
+
+          const { accessToken, refreshToken } = this.generateTokens(user, sessionId);
+          const hash = this.hashToken(refreshToken);
+
+          await sequelize.query(
+              `UPDATE auth_sessions SET refresh_token_hash = :hash WHERE id = :sid`,
+              {
+                  replacements: { hash, sid: sessionId },
+                  type: QueryTypes.UPDATE
+              }
+          );
+
+          const permissionService = new PermissionService();
+          const permissions = await permissionService.getUserPermissionNames(user.id);
+
+          return this.sendSuccess({
+              user: {
+                  ...user.toJSON() as any,
+                  email_verified: true,
+                  phone_verified: true,
+                  userType: user.user_type,
+                  permissions: permissions,
+              },
+              accessToken,
+              refreshToken,
+              expiresIn: ACCESS_TOKEN_EXPIRY_SECONDS,
+              bypass: true
+          }, 'Dev Bypass Success', 100);
+
+      } catch (error) {
+          console.error('Dev Bypass Error:', error);
+          return null;
+      }
   }
 }
