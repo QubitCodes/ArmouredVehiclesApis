@@ -96,25 +96,8 @@ export class AdminOrderController extends BaseController {
                             required: true, // Need to match category
                             where: { is_controlled: true }
                         }]
-                        // Note: FormatProduct checks main/cat/sub. 
-                        // For strict SQL fitlering here, we should ideally check all 3.
-                        // But Category (main parent or direct) is usually the flag holder.
-                        // If we need strict 3-level check, we need specific Op.or logic in the include.
-                        // Simpler: Join all 3? Or just 'category' if that's the primary one used for control.
-                        // Assumption: 'category' relation points to the direct category. 
-                        // Let's try to include filtering on the Product itself if we de-normalized? No.
-                        // Let's stick to the 'category' relation. If is_controlled is on a parent, 
-                        // the product might not be flagged if we only check child.
-                        // However, solving deep hierarchical filter in one FindAll is heavy.
-                        // I will assume checking direct `category` is sufficient for now, or check `main_category` too if easy.
                     }]
                 });
-                
-                // Note: This 'include' must be added to the GROUP fetch?
-                // Group fetch is on Order Table.
-                // If I include Items there, it might break GROUP BY or make it heavy.
-                // The current pagination fetches `groupRows` (Order IDs) first.
-                // I need to apply the filter logic THERE.
             }
 
             // --- STEP 1: Fetch Unique Group IDs (Pagination Target) ---
@@ -124,34 +107,18 @@ export class AdminOrderController extends BaseController {
                 attributes: ['order_group_id'],
                 where,
                 include: includeForScope.length > 0 ? includeForScope : undefined,
-                group: ['order_group_id', ...includeForScope.map(() => 'items.id'), ...includeForScope.map(() => 'items->product.id'), ...includeForScope.map(() => 'items->product->category.id')], // If including, we must group by included columns or use subquery??
-                // Problem: Grouping by items will split the Order Groups if multiple items? 
-                // Actually if we filter by Item existence, we get duplicated Lines per Order if we don't be careful.
-                // But we actally just want the order_group_id. 
-                // Using `distinct: true` in Count works. 
-                // But `findAll` grouping might be tricky with Included joins.
-                // Use Standard Distinct ID approach instead of Group By?
-                // Original code used `group: ['order_group_id']`.
-                // If I join items, I must aggregate them or group them.
-                // Simplest: Don't use `findAll` with `group`. Use `findAll` with `distinct: true` on attributes?
-                // Or remove `group` and just get distinct IDs in JS? (Pagination breaks).
-                
-                // ALTERNATIVE: Use Subquery/Sequelize Literal for filtering if restricted.
-                // `WHERE EXISTS (SELECT 1 FROM order_items ...)`
-                // This preserves the Order-level pagination structure.
-                
-                order: [[sequelize.fn('MAX', Order.sequelize!.col('Order.created_at')), 'DESC']], 
+                // Match generated alias "Order"
+                group: ['order_group_id', ...includeForScope.map(() => 'items.id'), ...includeForScope.map(() => 'items->product.id'), ...includeForScope.map(() => 'items->product->category.id')],
+                order: [[sequelize.fn('MAX', sequelize.col('Order.created_at')), 'DESC']], 
                 limit, 
                 offset,
             });
-            
-            // Correction: Applying complex filters to the Pagination Query (Step 1) is BEST done via Subquery/Literal 
-            // if we want to avoid massive Join explosion and GroupBy hell.
             
             if (user!.user_type === 'admin' && !canViewAll && canViewControlled) {
                 // Apply Literal Filter to `where`
                 // "Order has at least one item that is controlled"
                 // Assuming standard naming convention: order_items, products, categories
+                // Match exact table naming and alias "Order"
                 where[Op.and] = [
                     literal(`EXISTS (
                         SELECT 1 FROM "order_items" AS "oi"
@@ -161,10 +128,6 @@ export class AdminOrderController extends BaseController {
                         AND "c"."is_controlled" = true
                     )`)
                 ];
-                // Note: Verify table names (plural/snake_case check).
-                // Usually Sequelize defaults to plural. Models usually define table names.
-                // Assuming 'Order' table name is 'orders'?
-                // Safe way: rely on model meta if possible, but literal is raw.
             }
 
             // Count Query (Distinct Groups)
@@ -465,17 +428,6 @@ export class AdminOrderController extends BaseController {
             const offset = (page - 1) * limit;
             
             const where: any = {};
-            // Filter Logic: Find orders where items are from this vendor
-            // Note: The old file used 'where: { vendor_id: id }' on Order ?? 
-            // Wait, looking at old file line 328: `where` was passed to Order.findAndCountAll.
-            // AND line 340: `where: { vendor_id: vendorId }` inside OrderItem include. 
-            // The `Order` model might NOT have `vendor_id` if it's a multi-vendor cart system.
-            // But if `Order` DOES have `vendor_id` (single vendor per order), then checking Order.vendor_id is faster.
-            // My previous file used `where: { vendor_id: id }` on Order.
-            // The "Old File" used `where` (empty) + `include.items.where { vendor_id }`.
-            // I should use the "Old File" logic (Item-based filtering) to be safe for multi-vendor contexts,
-            // UNLESS `order.vendor_id` is reliable. The prompt implies "Universal", so maybe mixed carts.
-            // Safest -> Item based.
 
             const { count, rows } = await Order.findAndCountAll({
                 where,
@@ -598,16 +550,7 @@ export class AdminOrderController extends BaseController {
                 const permissionService = new PermissionService();
                 // Basic Manage Perm
                 const hasManage = await permissionService.hasPermission(user!.id, 'order.manage');
-                
-                // Controlled Perm Checks (Lazy for now, we check logic below)
-                // We don't block immediately if missing 'manage', because 'controlled.approve' might be sufficient 
-                // if the order is controlled? 
-                // Actually, 'order.manage' is usually the baseline. 
-                // But following the pattern: "Strict Control" overrides.
-                // If I have 'order.controlled.approve', I should be able to approve controlled orders even if I lack 'order.manage'?
-                // Prompt: "A person with this permission...".
-                // I will allow if `hasManage` OR `hasControlled`.
-                
+
                 const hasControlled = await permissionService.hasPermission(user!.id, 'order.controlled.approve');
 
                 if (!hasManage && !hasControlled) {
@@ -640,11 +583,6 @@ export class AdminOrderController extends BaseController {
             const isVendor = user!.user_type === 'vendor';
 
             // Security: Vendors can only update their own orders
-            // Check if vendor owns any item in this order? 
-            // Or typically `order.vendor_id` existence. 
-            // The Old File logic didn't explicitly check `order.vendor_id` here in `updateOrder`? 
-            // Wait, Old File line 260 chcks `order.vendor_id !== user.id`. 
-            // So updating implies Order Level ownership.
             if (isVendor && order.vendor_id && order.vendor_id !== user!.id) {
                 return controller.sendError('Forbidden: You can only update your own orders', 403);
             }
@@ -719,10 +657,7 @@ export class AdminOrderController extends BaseController {
             }
             
             // 1. Update Fields
-            if (effectiveStatus !== undefined) order.order_status = effectiveStatus; // DB usually 'order_status' in my new models, but check Old File used 'status'. 
-            // Quick check: Old file used 'status'. My previous new file used `order_status`. 
-            // User Rules say: "Attributes: order_status". 
-            // I will assume `order_status` is the DB column name, but API might accept `status`.
+            if (effectiveStatus !== undefined) order.order_status = effectiveStatus;
             if (payment_status !== undefined) order.payment_status = payment_status;
             if (shipment_status !== undefined) order.shipment_status = shipment_status;
             
