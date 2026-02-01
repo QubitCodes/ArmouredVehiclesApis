@@ -125,6 +125,16 @@ export class Product extends Model<ProductAttributes, ProductCreationAttributes>
   declare public approval_status?: 'pending' | 'approved' | 'rejected';
   declare public rejection_reason?: string;
   
+  // Associations
+  declare public vendor?: any;
+  declare public category?: any;
+  declare public main_category?: any;
+  declare public sub_category?: any;
+  declare public brand?: RefProductBrand;
+  declare public media?: ProductMedia[];
+  declare public pricing_tiers?: any[];
+  declare public product_specifications?: any[];
+  
   // Basic
   declare public name?: string;
   declare public sku?: string;
@@ -210,10 +220,6 @@ export class Product extends Model<ProductAttributes, ProductCreationAttributes>
 
   declare public individual_product_pricing?: { name: string; amount: number }[];
   
-  // Associations
-  declare public media?: ProductMedia[];
-  declare public brand?: RefProductBrand;
-
   declare public readonly created_at: Date;
   declare public readonly updated_at: Date;
 }

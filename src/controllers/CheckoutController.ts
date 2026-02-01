@@ -50,9 +50,24 @@ export class CheckoutController extends BaseController {
 			const user = await this.getUser(req);
 			if (!user) return this.sendError('Authentication required', 401);
 
-			// Find User Cart
-			const cart = await Cart.findOne({ where: { user_id: user.id, status: 'active' } });
-			if (!cart) return this.sendError('Cart is empty', 400);
+			// Enforce Onboarding
+			const onboardingError = await this.checkOnboarding(user);
+			if (onboardingError) return onboardingError;
+
+			// Find User Cart with items
+			const cart = await Cart.findOne({ 
+				where: { user_id: user.id, status: 'active' },
+				include: [{ model: CartItem, as: 'items' }]
+			});
+			if (!cart || !cart.items || cart.items.length === 0) return this.sendError('Cart is empty', 400);
+
+			// Validate all items
+			for (const item of cart.items) {
+				const { eligible, error: eligibilityError } = await this.checkProductPurchaseEligibility(item.product_id);
+				if (!eligible) {
+					return this.sendError(`One or more items in your cart are no longer available: ${eligibilityError}`, 400);
+				}
+			}
 
 			const compliance = await OrderComplianceService.checkCompliance(user.id, cart.id);
 
@@ -78,6 +93,13 @@ export class CheckoutController extends BaseController {
 			const user = await this.getUser(req);
 			if (!user) return this.sendError('Authentication required', 401);
 
+			// Enforce Onboarding
+			const onboardingError = await this.checkOnboarding(user);
+			if (onboardingError) {
+				await t.rollback();
+				return onboardingError;
+			}
+
 			const cart = await Cart.findOne({
 				where: { user_id: user.id, status: 'active' },
 				include: [{ model: CartItem, as: 'items', include: ['product'] }]
@@ -86,6 +108,15 @@ export class CheckoutController extends BaseController {
 			if (!cart || !cart.items || cart.items.length === 0) {
 				await t.rollback();
 				return this.sendError('Cart is empty', 400);
+			}
+
+			// Validate all items (Final check before order creation)
+			for (const item of cart.items) {
+				const { eligible, error: eligibilityError } = await this.checkProductPurchaseEligibility(item.product_id);
+				if (!eligible) {
+					await t.rollback();
+					return this.sendError(`Checkout blocked: ${eligibilityError}`, 400);
+				}
 			}
 
 

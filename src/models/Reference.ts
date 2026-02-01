@@ -89,11 +89,7 @@ RefVerificationMethod.init({
 export class RefProductSize extends Model {}
 RefProductSize.init(baseAttributes, baseOptions('ref_product_sizes'));
 
-export class RefProductColor extends Model {}
-RefProductColor.init({
-  ...baseAttributes,
-  hex_code: DataTypes.TEXT,
-}, baseOptions('ref_product_colors'));
+
 
 export class RefProductFeature extends Model {}
 RefProductFeature.init(baseAttributes, baseOptions('ref_product_features'));
@@ -159,17 +155,17 @@ export const ReferenceModels: Record<string, any> = {
   financial_institutions: RefFinancialInstitution,
   proof_types: RefProofType,
   verification_methods: RefVerificationMethod,
-  product_sizes: RefProductSize,
-  product_colors: RefProductColor,
+  // product_sizes: RefProductSize,
+  // product_colors: RefProductColor,
   product_features: RefProductFeature,
   product_performance: RefProductPerformance,
   product_thickness: RefProductThickness,
   product_materials: RefProductMaterial,
-  drive_types: RefDriveType,
-  dimension_units: RefDimensionUnit,
-  weight_units: RefWeightUnit,
+  // drive_types: RefDriveType,
+  // dimension_units: RefDimensionUnit,
+  // weight_units: RefWeightUnit,
   controlled_item_types: RefControlledItemType,
-  pricing_terms: RefPricingTerm,
+  // pricing_terms: RefPricingTerm,
   manufacturing_sources: RefManufacturingSource,
   type_of_buyer: RefBuyerType,
   procurement_purpose: RefProcurementPurpose,

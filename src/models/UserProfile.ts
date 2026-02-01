@@ -113,7 +113,7 @@ interface UserProfileAttributes {
 	
 	// Status tracking
 	current_step?: number | null;
-	onboarding_status?: 'not_started' | 'in_progress' | 'pending_verification' | 'rejected' | 'approved_general' | 'approved_controlled';
+	onboarding_status?: 'not_started' | 'in_progress' | 'pending_verification' | 'rejected' | 'approved_general' | 'approved_controlled' | 'update_needed';
     rejection_reason?: string;
     reviewed_at?: Date;
     reviewed_by?: string;
@@ -126,100 +126,100 @@ interface UserProfileAttributes {
 interface UserProfileCreationAttributes extends Optional<UserProfileAttributes, 'id' | 'current_step' | 'onboarding_status' | 'created_at' | 'updated_at'> {}
 
 export class UserProfile extends Model<UserProfileAttributes, UserProfileCreationAttributes> implements UserProfileAttributes {
-	public id!: string;
-	public user_id!: string;
+	public declare id: string;
+	public declare user_id: string;
 	
 	// All optional fields
-	public country?: string;
-	public company_name?: string;
-	public company_email?: string;
-	public company_phone?: string;
-	public company_phone_country_code?: string;
-	public company_website?: string;
-	public company_size?: string;
-	public company_type?: string;
-	public type_of_buyer?: string;
-	public country_of_registration?: string;
-	public registered_company_name?: string;
-	public trade_brand_name?: string;
-	public registration_type?: string;
-	public legal_name?: string;
-	public registration_number?: string;
-	public year_of_establishment?: number;
-	public legal_entity_id?: string;
-	public legal_entity_issue_date?: Date;
-	public legal_entity_expiry_date?: Date;
-	public city_office_address?: string;
-	public official_website?: string;
-	public entity_type?: string;
-	public duns_number?: string;
-	public vat_certificate_url?: string;
-	public tax_vat_number?: string;
-	public tax_id?: string;
-	public vat_number?: string;
-	public company_registration_number?: string;
-	public company_registration_expiry?: Date;
-	public founded_year?: number;
-	public website?: string;
-	public description?: string;
-	public city?: string;
-	public address_line1?: string;
-	public address_line2?: string;
-	public postal_code?: string;
-	public state?: string;
-	public tax_issuing_date?: Date;
-	public tax_expiry_date?: Date;
-	public contact_full_name?: string;
-	public contact_job_title?: string;
-	public contact_work_email?: string;
-	public contact_id_document_url?: string;
-	public contact_mobile?: string;
-	public contact_mobile_country_code?: string;
-	public terms_accepted?: boolean;
-	public terms_accepted_at?: Date;
-	public nature_of_business?: string[];
-	public controlled_items?: boolean;
-	public license_types?: string[];
-	public end_use_markets?: string[];
-	public operating_countries?: string[];
-	public end_use_market?: string;
-	public license_type?: string;
-	public license_number?: string;
-	public license_expiry?: Date;
-    public procurement_purpose?: number;
-    public end_user_type?: number;
-	public is_on_sanctions_list?: boolean;
-	public business_license_url?: string;
-	public defense_approval_url?: string;
-    public eocn_approval_url?: string;
-    public itar_registration_url?: string;
-    public local_authority_approval_url?: string;
-	public company_profile_url?: string;
-	public compliance_terms_accepted?: boolean;
-	public compliance_terms_accepted_at?: Date;
-	public selling_categories?: string[];
-	public register_as?: string;
-	public preferred_currency?: string;
-	public sponsor_content?: boolean;
-	public payment_method?: string;
-	public bank_country?: string;
-	public financial_institution?: string;
-	public swift_code?: string;
-	public bank_account_number?: string;
-	public proof_type?: string;
-	public bank_proof_url?: string;
-	public verification_method?: string;
-	public submitted_for_approval?: boolean;
-	public submitted_at?: Date;
-	public current_step?: number;
-	public onboarding_status?: 'not_started' | 'in_progress' | 'pending_verification' | 'rejected' | 'approved_general' | 'approved_controlled';
-    public rejection_reason?: string;
-    public reviewed_at?: Date;
-    public reviewed_by?: string;
-    public review_note?: string;
+	public declare country?: string;
+	public declare company_name?: string;
+	public declare company_email?: string;
+	public declare company_phone?: string;
+	public declare company_phone_country_code?: string;
+	public declare company_website?: string;
+	public declare company_size?: string;
+	public declare company_type?: string;
+	public declare type_of_buyer?: string;
+	public declare country_of_registration?: string;
+	public declare registered_company_name?: string;
+	public declare trade_brand_name?: string;
+	public declare registration_type?: string;
+	public declare legal_name?: string;
+	public declare registration_number?: string;
+	public declare year_of_establishment?: number;
+	public declare legal_entity_id?: string;
+	public declare legal_entity_issue_date?: Date;
+	public declare legal_entity_expiry_date?: Date;
+	public declare city_office_address?: string;
+	public declare official_website?: string;
+	public declare entity_type?: string;
+	public declare duns_number?: string;
+	public declare vat_certificate_url?: string;
+	public declare tax_vat_number?: string;
+	public declare tax_id?: string;
+	public declare vat_number?: string;
+	public declare company_registration_number?: string;
+	public declare company_registration_expiry?: Date;
+	public declare founded_year?: number;
+	public declare website?: string;
+	public declare description?: string;
+	public declare city?: string;
+	public declare address_line1?: string;
+	public declare address_line2?: string;
+	public declare postal_code?: string;
+	public declare state?: string;
+	public declare tax_issuing_date?: Date;
+	public declare tax_expiry_date?: Date;
+	public declare contact_full_name?: string;
+	public declare contact_job_title?: string;
+	public declare contact_work_email?: string;
+	public declare contact_id_document_url?: string;
+	public declare contact_mobile?: string;
+	public declare contact_mobile_country_code?: string;
+	public declare terms_accepted?: boolean;
+	public declare terms_accepted_at?: Date;
+	public declare nature_of_business?: string[];
+	public declare controlled_items?: boolean;
+	public declare license_types?: string[];
+	public declare end_use_markets?: string[];
+	public declare operating_countries?: string[];
+	public declare end_use_market?: string;
+	public declare license_type?: string;
+	public declare license_number?: string;
+	public declare license_expiry?: Date;
+    public declare procurement_purpose?: number;
+    public declare end_user_type?: number;
+	public declare is_on_sanctions_list?: boolean;
+	public declare business_license_url?: string;
+	public declare defense_approval_url?: string;
+    public declare eocn_approval_url?: string;
+    public declare itar_registration_url?: string;
+    public declare local_authority_approval_url?: string;
+	public declare company_profile_url?: string;
+	public declare compliance_terms_accepted?: boolean;
+	public declare compliance_terms_accepted_at?: Date;
+	public declare selling_categories?: string[];
+	public declare register_as?: string;
+	public declare preferred_currency?: string;
+	public declare sponsor_content?: boolean;
+	public declare payment_method?: string;
+	public declare bank_country?: string;
+	public declare financial_institution?: string;
+	public declare swift_code?: string;
+	public declare bank_account_number?: string;
+	public declare proof_type?: string;
+	public declare bank_proof_url?: string;
+	public declare verification_method?: string;
+	public declare submitted_for_approval?: boolean;
+	public declare submitted_at?: Date;
+	public declare current_step?: number;
+	public declare onboarding_status?: 'not_started' | 'in_progress' | 'pending_verification' | 'rejected' | 'approved_general' | 'approved_controlled' | 'update_needed';
+    public declare rejection_reason?: string;
+    public declare reviewed_at?: Date;
+    public declare reviewed_by?: string;
+    public declare review_note?: string;
 	
-	public readonly created_at!: Date;
-	public readonly updated_at!: Date;
+	public declare readonly created_at: Date;
+	public declare readonly updated_at: Date;
 }
 
 UserProfile.init(
@@ -334,7 +334,7 @@ UserProfile.init(
 		// Status
 		current_step: { type: DataTypes.INTEGER, defaultValue: 0, allowNull: true },
 		onboarding_status: {
-			type: DataTypes.ENUM('not_started', 'in_progress', 'pending_verification', 'rejected', 'approved_general', 'approved_controlled'),
+			type: DataTypes.ENUM('not_started', 'in_progress', 'pending_verification', 'rejected', 'approved_general', 'approved_controlled', 'update_needed'),
 			defaultValue: 'not_started',
 		},
         rejection_reason: { type: DataTypes.TEXT },

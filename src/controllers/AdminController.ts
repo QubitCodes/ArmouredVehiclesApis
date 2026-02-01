@@ -821,7 +821,7 @@ export class AdminController extends BaseController {
 
     } catch (error: any) {
         console.error('Dashboard Stats Error:', error);
-        return responseHandler.error(error.message, 500);
+        return responseHandler.handleError(error);
     }
   }
 
@@ -896,19 +896,58 @@ export class AdminController extends BaseController {
           profileWhere.onboarding_status = { [Op.in]: ['approved_general', 'approved_controlled', 'pending_verification'] };
       }
 
+      // Controlled filter
+      const controlled = searchParams.get('controlled');
+      if (controlled === 'true') {
+          profileWhere.controlled_items = true;
+          profileWhere.onboarding_status = { [Op.ne]: 'approved_general' };
+      } else if (controlled === 'false') {
+          profileWhere[Op.or] = [
+              { controlled_items: { [Op.or]: [false, null] } },
+              { [Op.and]: [{ controlled_items: true }, { onboarding_status: 'approved_general' }] }
+          ];
+      }
+
       // --- Apply Visibility Filter ---
       // If Admin doesn't have 'VIEW ALL', they are restricted.
       if (user.user_type === 'admin' && !canViewAll) {
           // If they only have Controlled View, they see ONLY controlled items.
           if (canViewControlled) {
              profileWhere.controlled_items = true;
+             // Ensure strict visibility if they only have controlled access
+             profileWhere.onboarding_status = { [Op.ne]: 'approved_general' }; 
           }
       }
       // If they have canViewAll, we don't apply any extra filter (they see true and false).
 
       const vendors = await User.findAndCountAll({
         where,
-        attributes: { exclude: ['password'] },
+        attributes: { 
+            exclude: ['password'],
+            include: [
+                [
+                    sequelize.literal(`(
+                        SELECT COUNT(*)::int
+                        FROM products AS p
+                        WHERE p.vendor_id = "User"."id"
+                        AND p.status != 'draft'
+                        AND p.deleted_at IS NULL
+                    )`),
+                    'product_count'
+                ],
+                [
+                    sequelize.literal(`(
+                        SELECT COUNT(*)::int
+                        FROM products AS p
+                        WHERE p.vendor_id = "User"."id"
+                        AND p.approval_status = 'pending'
+                        AND p.status != 'draft'
+                        AND p.deleted_at IS NULL
+                    )`),
+                    'pending_product_count'
+                ]
+            ]
+        },
         include: [
             {
                 model: UserProfile,
@@ -953,12 +992,7 @@ export class AdminController extends BaseController {
       });
     } catch (error: any) {
       console.error('Get Vendors Error:', error);
-      return NextResponse.json({ 
-        success: false, 
-        message: 'Failed to fetch vendors', 
-        code: 300,
-        debug: error?.message || String(error)
-      }, { status: 500 });
+      return responseHandler.handleError(error);
     }
   }
 
@@ -1009,7 +1043,7 @@ export class AdminController extends BaseController {
 
     } catch (error: any) {
         console.error('Get Vendor Error Details:', error);
-        return NextResponse.json({ success: false, message: 'Failed to fetch vendor details', debug: error.message }, { status: 500 });
+        return responseHandler.handleError(error);
     }
   }
 
@@ -1078,7 +1112,7 @@ export class AdminController extends BaseController {
         const body = await req.json();
         const { status, note, fields_to_clear } = body;
         
-        const validStatuses = ['approved_general', 'approved_controlled', 'rejected'];
+        const validStatuses = ['approved_general', 'approved_controlled', 'rejected', 'update_needed'];
         if (!validStatuses.includes(status)) {
              return NextResponse.json({ success: false, message: 'Invalid status' }, { status: 400 });
         }
@@ -1116,7 +1150,7 @@ export class AdminController extends BaseController {
             reviewed_by: user.id,
         };
 
-        if (status === 'rejected') {
+        if (status === 'rejected' || status === 'update_needed') {
             updateData.rejection_reason = note;
             updateData.rejection_reason = note;
             // vendor.is_active = false; // Do not deactivate user on rejection, so they can login to fix profile
@@ -1320,6 +1354,8 @@ export class AdminController extends BaseController {
       const searchParams = req.nextUrl.searchParams;
       const search = searchParams.get('search');
       const status = searchParams.get('status');
+      const onboardingStatus = searchParams.get('onboarding_status');
+      const controlled = searchParams.get('controlled');
       const page = Number(searchParams.get('page')) || 1;
       const limit = Number(searchParams.get('limit')) || 20;
       const offset = (page - 1) * limit;
@@ -1370,6 +1406,29 @@ export class AdminController extends BaseController {
         ];
       }
 
+      // Build profile where clause
+      let profileWhere: any = {};
+      const validOnboardingStatuses = ['not_started', 'in_progress', 'pending_verification', 'rejected', 'approved_general', 'approved_controlled'];
+
+      if (onboardingStatus) {
+          if (onboardingStatus === 'approved') {
+              profileWhere.onboarding_status = { [Op.in]: ['approved_general', 'approved_controlled'] };
+          } else if (validOnboardingStatuses.includes(onboardingStatus)) {
+              profileWhere.onboarding_status = onboardingStatus;
+          }
+      }
+
+      // Controlled filter
+      if (controlled === 'true') {
+          profileWhere.controlled_items = true;
+          profileWhere.onboarding_status = { [Op.ne]: 'approved_general' };
+      } else if (controlled === 'false') {
+          profileWhere[Op.or] = [
+            { controlled_items: { [Op.or]: [false, null] } },
+            { [Op.and]: [{ controlled_items: true }, { onboarding_status: 'approved_general' }] }
+          ];
+      }
+
       // --- Apply Visibility Filter (Admin) ---
       let include: any[] = [];
       
@@ -1380,17 +1439,32 @@ export class AdminController extends BaseController {
                include.push({
                    model: UserProfile,
                    as: 'profile',
-                   where: { controlled_items: true },
+                   where: { 
+                        ...profileWhere,
+                        controlled_items: true,
+                        onboarding_status: { [Op.ne]: 'approved_general' }
+                   },
                    required: true
                });
           } else {
-             // Can view all, but we might want to include profile anyway?
-             // Usually getCustomers might not return profile info to keep light? 
-             // Original code didn't join Profile likely.
-             // But if we need to filter on Profile attributes, we must include it if filtering.
-             // But if Viewing All, we don't *need* the filter, so we don't strictly need the join *unless* 
-             // we want to display controlled status.
+             // Can view all, but we need profile for onboarding_status display
+             include.push({
+                model: UserProfile,
+                as: 'profile',
+                where: Object.keys(profileWhere).length > 0 ? profileWhere : undefined,
+                attributes: ['onboarding_status', 'controlled_items'],
+                required: Object.keys(profileWhere).length > 0
+             });
           }
+      } else if (user.user_type === 'super_admin') {
+          // Super admin sees all, include profile
+          include.push({
+            model: UserProfile,
+            as: 'profile',
+            where: Object.keys(profileWhere).length > 0 ? profileWhere : undefined,
+            attributes: ['onboarding_status', 'controlled_items'],
+            required: Object.keys(profileWhere).length > 0
+         });
       }
 
       const attributes = isVendor 
@@ -1417,7 +1491,7 @@ export class AdminController extends BaseController {
       });
     } catch (error: any) {
       console.error('Get Customers Error:', error);
-      return NextResponse.json({ success: false, message: 'Failed to fetch customers', debug: error?.message }, { status: 500 });
+      return responseHandler.handleError(error);
     }
   }
 
@@ -1533,7 +1607,7 @@ export class AdminController extends BaseController {
       });
     } catch (error: any) {
       console.error('Get Customer Error:', error);
-      return NextResponse.json({ success: false, message: 'Failed to fetch customer', debug: error?.message }, { status: 500 });
+      return responseHandler.handleError(error);
     }
   }
 
@@ -1625,7 +1699,7 @@ export class AdminController extends BaseController {
         const body = await req.json();
         const { status, note, fields_to_clear } = body;
         
-        const validStatuses = ['approved_general', 'approved_controlled', 'rejected', 'in_progress', 'pending_verification'];
+        const validStatuses = ['approved_general', 'approved_controlled', 'rejected', 'in_progress', 'pending_verification', 'update_needed'];
         if (!validStatuses.includes(status)) {
              return NextResponse.json({ success: false, message: 'Invalid status' }, { status: 400 });
         }
@@ -1694,7 +1768,7 @@ export class AdminController extends BaseController {
             reviewed_by: user.id,
         };
 
-        if (status === 'rejected') {
+        if (status === 'rejected' || status === 'update_needed') {
             updateData.rejection_reason = note;
             updateData.rejection_reason = note;
             // customer.is_active = false;

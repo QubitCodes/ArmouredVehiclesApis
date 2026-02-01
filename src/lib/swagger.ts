@@ -72,7 +72,7 @@ export const getApiDocs = async () => {
               state: { type: 'string' },
               country: { type: 'string' },
               postal_code: { type: 'string' },
-              onboarding_status: { type: 'string', enum: ['not_started', 'in_progress', 'pending_verification', 'approved', 'rejected'] },
+              onboarding_status: { type: 'string', enum: ['not_started', 'in_progress', 'pending_verification', 'approved', 'rejected', 'update_needed'] },
               govt_compliance_reg_url: { type: 'string' },
               business_license_url: { type: 'string' },
               vat_certificate_url: { type: 'string' },

@@ -543,6 +543,11 @@ export class ProductController extends BaseController {
                 offset,
                 order,
                 include: [
+                    {
+                        model: User,
+                        as: 'vendor',
+                        include: [{ model: UserProfile, as: 'profile', attributes: ['onboarding_status'] }]
+                    },
                     { 
                         model: ProductMedia, 
                         as: 'media', 
@@ -591,7 +596,7 @@ export class ProductController extends BaseController {
                 pages: Math.ceil(count / limit),
                 filters,
                 placeholder_image: getFileUrl('/placeholder.svg')
-            });
+            }, req);
 
         } catch (error: any) {
             return this.sendError(String((error as any).message), 500);
@@ -825,13 +830,8 @@ export class ProductController extends BaseController {
                 // Let's enforce: If `vendor_id` is present (filtering for a vendor), add `status: 'published'`.
                 
                 if (whereClause.vendor_id) {
-                     if (!searchParams.get('status')) {
-                         // Default to Published (and Approved? No, they are looking for approval)
-                         // Admin shouldn't see 'Draft'.
-                         if (!whereClause.status) {
-                             whereClause.status = 'published';
-                         }
-                     }
+                     // Strictly enforce PUBLISHED for vendor products shown to admin
+                     whereClause.status = ProductStatus.PUBLISHED;
                 }
             }
 
@@ -976,6 +976,7 @@ export class ProductController extends BaseController {
     async create(req: NextRequest, parsedData?: { data: any, files: File[] }) {
         try {
             // 1. Auth Check
+            // 1. Auth Check
             const authHeader = req.headers.get('authorization');
             if (!authHeader || !authHeader.startsWith('Bearer ')) {
                 return this.sendError('Unauthorized', 401);
@@ -986,7 +987,7 @@ export class ProductController extends BaseController {
             try {
                 const token = authHeader.split(' ')[1];
                 decoded = verifyAccessToken(token);
-            } catch (e) {
+            } catch (e: any) {
                 return this.sendError('Invalid Token', 401);
             }
 
@@ -994,6 +995,10 @@ export class ProductController extends BaseController {
             if (!user) {
                 return this.sendError('User not found', 401);
             }
+
+            // Enforce Onboarding
+            const onboardingError = await this.checkOnboarding(user);
+            if (onboardingError) return onboardingError;
 
             if (user.user_type === 'admin') {
                  const hasPerm = await new PermissionService().hasPermission(user.id, 'product.manage');
@@ -1061,7 +1066,7 @@ export class ProductController extends BaseController {
             const product = await Product.create({
                  ...validated,
                  vendor_id: finalVendorId as string, 
-                 status: ProductStatus.DRAFT,
+                 status: ['admin', 'super_admin'].includes(user.user_type) ? ProductStatus.PUBLISHED : ProductStatus.PENDING_REVIEW,
                  approval_status: ['admin', 'super_admin'].includes(user.user_type) ? 'approved' : 'pending'
              });
 
@@ -1180,6 +1185,11 @@ export class ProductController extends BaseController {
             });
 
             if (!fullProduct) return this.sendError('Product not found', 404);
+
+            // Invisibility for unpublished products for Admins
+            if (fullProduct.status !== ProductStatus.PUBLISHED) {
+                return this.sendError('Product not available for review (Draft status)', 403);
+            }
 
             const formatted = this.formatProduct(fullProduct);
             return this.sendSuccess(formatted, 'Success', 200, { placeholder_image: getFileUrl('/placeholder.svg') });
@@ -1383,6 +1393,11 @@ export class ProductController extends BaseController {
             
             delete body.gallery; // Remove from bodyUpdate
 
+            // If vendor publishes, set approval to pending
+            if (user.user_type === 'vendor' && body.status === ProductStatus.PUBLISHED && product.approval_status !== 'pending') {
+                body.approval_status = 'pending';
+            }
+
             await product.update(body);
 
             // Handle Pricing Tiers Update (Full Replace Strategy for now)
@@ -1541,6 +1556,10 @@ export class ProductController extends BaseController {
             if (!user) {
                 return { product: null, user: null, error: this.sendError('User not found', 401) };
             }
+
+            // Enforce Onboarding
+            const onboardingError = await this.checkOnboarding(user);
+            if (onboardingError) return { product: null, user: null, error: onboardingError };
 
             if (!['vendor', 'admin', 'super_admin'].includes(user.user_type)) {
                 return { product: null, user: null, error: this.sendError('Vendor authentication required', 401) };
@@ -1925,6 +1944,10 @@ export class ProductController extends BaseController {
                 return this.sendError('User not found', 401);
             }
 
+            // Enforce Onboarding
+            const onboardingError = await this.checkOnboarding(user);
+            if (onboardingError) return onboardingError;
+
             if (user.user_type === 'admin') {
                  const hasPerm = await new PermissionService().hasPermission(user.id, 'product.manage');
                  if (!hasPerm) return this.sendError('Forbidden: Missing product.manage Permission', 403);
@@ -2016,6 +2039,10 @@ export class ProductController extends BaseController {
             if (!user) {
                 return this.sendError('User not found', 401);
             }
+
+            // Enforce Onboarding
+            const onboardingError = await this.checkOnboarding(user);
+            if (onboardingError) return onboardingError;
 
             if (user.user_type === 'admin') {
                  const hasPerm = await new PermissionService().hasPermission(user.id, 'product.manage');
@@ -2164,10 +2191,10 @@ export class ProductController extends BaseController {
             }
 
             // Update Status
-            product.approval_status = normalizedStatus;
+            product.approval_status = normalizedStatus as 'approved' | 'rejected';
             
             if (normalizedStatus === 'approved') {
-                product.status = ProductStatus.APPROVED;
+                product.approval_status = 'approved';
                 product.rejection_reason = undefined; // Clear previous rejection reason
             } else if (normalizedStatus === 'rejected') {
                 product.status = ProductStatus.REJECTED;
@@ -2217,6 +2244,11 @@ export class ProductController extends BaseController {
 
             if (!product) {
                 return this.sendError('Product not found', 404);
+            }
+
+            // Invisibility for unpublished products
+            if (product.status !== ProductStatus.PUBLISHED) {
+                return this.sendError('Product not available for review (Draft status)', 403);
             }
 
             // Validation: Must have at least one image/media to be featured/top selling

@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, NextRequest } from 'next/server';
+import { verifyAccessToken } from './jwt';
 
 type MetaData = Record<string, unknown>;
 
@@ -11,12 +12,32 @@ interface ApiResponse<T> {
   errors?: unknown[];
 }
 
+/**
+ * Check Auth Status for Header
+ * Returns: 'valid' | 'invalid' | 'missing'
+ */
+const getAuthStatus = (req: NextRequest): string => {
+    const authHeader = req.headers.get('authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return 'missing';
+    }
+    
+    try {
+        const token = authHeader.split(' ')[1];
+        verifyAccessToken(token);
+        return 'valid';
+    } catch (e) {
+        return 'invalid';
+    }
+};
+
 export const responseHandler = {
   success: <T>(
     data: T,
     message: string = 'Success',
     code: number = 100, // Default to OK (100)
-    misc?: MetaData
+    misc?: MetaData,
+    req?: NextRequest // Optional Request for Header Injection
   ) => {
     const response: ApiResponse<T> = {
       status: true,
@@ -31,14 +52,20 @@ export const responseHandler = {
     let httpStatus = 200;
     if (code === 101) httpStatus = 201; // Created
     
-    return NextResponse.json(response, { status: httpStatus });
+    const headers: Record<string, string> = {};
+    if (req) {
+        headers['X-Auth-Status'] = getAuthStatus(req);
+    }
+
+    return NextResponse.json(response, { status: httpStatus, headers });
   },
 
   error: (
     message: string = 'Error',
     code: number = 200, // Default to General Client Error (200)
     errors: unknown[] = [],
-    misc?: MetaData
+    misc?: MetaData,
+    req?: NextRequest // Optional Request for Header Injection
   ) => {
     const response: ApiResponse<null> = {
       status: false,
@@ -65,6 +92,30 @@ export const responseHandler = {
         if (code === 212) httpStatus = 403; // Permission
     }
 
-    return NextResponse.json(response, { status: httpStatus });
+    const headers: Record<string, string> = {};
+    if (req) {
+        headers['X-Auth-Status'] = getAuthStatus(req);
+    }
+    
+    return NextResponse.json(response, { status: httpStatus, headers });
   },
+
+  handleError: (error: any, req?: NextRequest) => {
+      // JWT / Auth Errors
+      if (
+          error.name === 'TokenExpiredError' || 
+          error.name === 'JsonWebTokenError' || 
+          error?.message?.includes('jwt expired') ||
+          (error.constructor && error.constructor.name === 'TokenExpiredError')
+      ) {
+           return responseHandler.error('Unauthorized: Token expired', 210, [], undefined, req);
+      }
+
+      // Default Server Error
+      const msg = error?.message || 'Internal Server Error';
+      // If code is present in error object, reuse it?
+      const code = error?.code && typeof error.code === 'number' ? error.code : 300;
+      
+      return responseHandler.error(msg, code, [], { debug: String(error) }, req);
+  }
 };

@@ -85,46 +85,6 @@ const referenceController = new ReferenceController();
  *       200:
  *         description: List of verification methods
  *
- * /api/v1/references/product-sizes:
- *   get:
- *     summary: Get product sizes
- *     tags: [Reference Data]
- *     responses:
- *       200:
- *         description: List of product sizes
- *
- * /api/v1/references/product-colors:
- *   get:
- *     summary: Get product colors
- *     tags: [Reference Data]
- *     responses:
- *       200:
- *         description: List of product colors
- *
- * /api/v1/references/drive-types:
- *   get:
- *     summary: Get drive types
- *     tags: [Reference Data]
- *     responses:
- *       200:
- *         description: List of drive types
- *
- * /api/v1/references/dimension-units:
- *   get:
- *     summary: Get dimension units
- *     tags: [Reference Data]
- *     responses:
- *       200:
- *         description: List of dimension units
- *
- * /api/v1/references/weight-units:
- *   get:
- *     summary: Get weight units
- *     tags: [Reference Data]
- *     responses:
- *       200:
- *         description: List of weight units
- *
  * /api/v1/references/controlled-item-types:
  *   get:
  *     summary: Get controlled item types

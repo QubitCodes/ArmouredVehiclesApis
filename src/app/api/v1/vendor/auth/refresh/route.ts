@@ -1,14 +1,14 @@
 import { NextRequest } from 'next/server';
-import { AuthController } from '../../../../../controllers/AuthController';
+import { AuthController } from '../../../../../../controllers/AuthController';
 
 /**
  * @swagger
- * /api/v1/auth/refresh:
+ * /api/v1/vendor/auth/refresh:
  *   post:
- *     summary: Refresh Access Token
+ *     summary: Refresh Vendor Access Token
  *     description: Exchange a valid refresh token for a new access token
  *     tags:
- *       - Auth
+ *       - Vendor Auth
  *     requestBody:
  *       required: true
  *       content:

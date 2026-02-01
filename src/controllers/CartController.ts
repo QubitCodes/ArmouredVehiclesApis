@@ -34,12 +34,21 @@ export class CartController extends BaseController {
 				}
                 console.log(`[CHECKOUT DEBUG] CART API: Resolved UserID=${userId}`);
 			} catch (e) {
-				// Invalid token, treat as guest -> CHANGED: Throw 401
+				// Invalid token -> Throw 401
                 console.log(`[CHECKOUT DEBUG] CART API: Token Invalid/Expired`);
                 throw new Error('TOKEN_EXPIRED');
 			}
 		} else {
+            // GUEST LOGIC DISABLED (Strict Auth Enforced)
+            console.log(`[CHECKOUT DEBUG] CART API: Guest Access Blocked (Strict Mode)`);
+            throw new Error('TOKEN_MISSING'); 
+            
+            /* 
+            // --- Legacy Hybrid/Guest Logic (Preserved for future use. JkWorkz) ---
             console.log(`[CHECKOUT DEBUG] CART API: Is Guest`);
+            // Session logic was here - implied by userId being null and sessionId being set
+            // For now, we fall through, but if we want to block guests, we throw error.
+            */
         }
 
 		return { userId, sessionId };
@@ -147,8 +156,9 @@ export class CartController extends BaseController {
 
 			return this.sendSuccess({ cart, items: formattedItems });
 		} catch (error: any) {
-            if (error.message === 'TOKEN_EXPIRED') return this.sendError('Token expired', 401);
-			return this.sendError(String((error as any).message), 500);
+            if (error.message === 'TOKEN_EXPIRED') return this.sendError('Token expired', 210, [], undefined, req);
+            if (error.message === 'TOKEN_MISSING') return this.sendError('Authentication required', 210, [], undefined, req);
+			return this.sendError(String((error as any).message), 500, [], undefined, req);
 		}
 	}
 
@@ -170,9 +180,9 @@ export class CartController extends BaseController {
 				return this.sendError('Invalid product or quantity', 400);
 			}
 
-			const product = await Product.findByPk(productId);
-			if (!product) {
-				return this.sendError('Product not found', 404);
+			const { eligible, error: eligibilityError } = await this.checkProductPurchaseEligibility(productId);
+			if (!eligible) {
+				return this.sendError(eligibilityError || 'This product is currently unavailable', 400);
 			}
 
 			const cart = await this.findOrCreateCart(userId, sessionId);
@@ -194,8 +204,9 @@ export class CartController extends BaseController {
 
 			return this.sendSuccess({ message: 'Item added', item });
 		} catch (error: any) {
-            if (error.message === 'TOKEN_EXPIRED') return this.sendError('Token expired', 401);
-			return this.sendError(String((error as any).message), 500);
+            if (error.message === 'TOKEN_EXPIRED') return this.sendError('Token expired', 210, [], undefined, req);
+            if (error.message === 'TOKEN_MISSING') return this.sendError('Authentication required', 210, [], undefined, req);
+			return this.sendError(String((error as any).message), 500, [], undefined, req);
 		}
 	}
 
@@ -230,8 +241,9 @@ export class CartController extends BaseController {
 
 			return this.sendSuccess({ message: 'Cart updated', item });
 		} catch (error: any) {
-            if (error.message === 'TOKEN_EXPIRED') return this.sendError('Token expired', 401);
-			return this.sendError(String((error as any).message), 500);
+            if (error.message === 'TOKEN_EXPIRED') return this.sendError('Token expired', 210, [], undefined, req);
+            if (error.message === 'TOKEN_MISSING') return this.sendError('Authentication required', 210, [], undefined, req);
+			return this.sendError(String((error as any).message), 500, [], undefined, req);
 		}
 	}
 
@@ -257,8 +269,9 @@ export class CartController extends BaseController {
 
 			return this.sendSuccess({ message: 'Item removed' });
 		} catch (error: any) {
-            if (error.message === 'TOKEN_EXPIRED') return this.sendError('Token expired', 401);
-			return this.sendError(String((error as any).message), 500);
+            if (error.message === 'TOKEN_EXPIRED') return this.sendError('Token expired', 210, [], undefined, req);
+            if (error.message === 'TOKEN_MISSING') return this.sendError('Authentication required', 210, [], undefined, req);
+			return this.sendError(String((error as any).message), 500, [], undefined, req);
 		}
 	}
 
@@ -316,10 +329,10 @@ export class CartController extends BaseController {
 			await guestCart.destroy(); // Soft delete if paranoid, or hard delete
 
 			return this.sendSuccess({ message: 'Cart merged successfully' });
-
 		} catch (error: any) {
-            if (error.message === 'TOKEN_EXPIRED') return this.sendError('Token expired', 401);
-			return this.sendError(String((error as any).message), 500);
+            if (error.message === 'TOKEN_EXPIRED') return this.sendError('Token expired', 210, [], undefined, req);
+            if (error.message === 'TOKEN_MISSING') return this.sendError('Authentication required', 210, [], undefined, req);
+			return this.sendError(String((error as any).message), 500, [], undefined, req);
 		}
 	}
 }

@@ -72,9 +72,9 @@ export class ProfileController extends BaseController {
 			return this.sendSuccess({
 				...userJson,
 				...profileJson,
-			}, 'Profile fetched successfully', 200, { cart_count: cartCount });
+			}, 'Profile fetched successfully', 200, { cart_count: cartCount }, req);
 		} catch (error: any) {
-			return this.sendError(String((error as any).message), 500);
+			return this.sendError(String((error as any).message), 500, [], undefined, req);
 		}
 	}
 
@@ -112,9 +112,9 @@ export class ProfileController extends BaseController {
 					avatar: user!.avatar,
 					userType: user!.user_type,
 				},
-			});
+			}, undefined, 200, undefined, req);
 		} catch (error: any) {
-			return this.sendError(String((error as any).message), 500);
+			return this.sendError(String((error as any).message), 500, [], undefined, req);
 		}
 	}
 
