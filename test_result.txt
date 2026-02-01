@@ -1,1 +1,0 @@
-SUCCESS: Email sent to test-sink@example.com
