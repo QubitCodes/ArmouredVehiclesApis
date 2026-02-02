@@ -21,6 +21,8 @@ import { PayoutRequest } from './PayoutRequest';
 import FrontendSlider from './FrontendSlider';
 import FrontendAd from './FrontendAd';
 import { RefProductBrand } from './RefProductBrand';
+import { UserPermission } from './UserPermission';
+import { RefPermission } from './RefPermission';
 import * as ReferenceModels from './Reference';
 
 
@@ -43,7 +45,7 @@ const initAssociations = () => {
 
   User.hasMany(PayoutRequest, { foreignKey: 'user_id', as: 'payout_requests' });
   PayoutRequest.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
-  
+
   User.hasMany(PayoutRequest, { foreignKey: 'approved_by', as: 'approved_payouts' });
   PayoutRequest.belongsTo(User, { foreignKey: 'approved_by', as: 'approver' });
 
@@ -62,7 +64,7 @@ const initAssociations = () => {
 
   Category.hasMany(Product, { foreignKey: 'category_id', as: 'products' });
   Product.belongsTo(Category, { foreignKey: 'category_id', as: 'category' });
-  
+
   Category.hasMany(Product, { foreignKey: 'main_category_id', as: 'main_category_products' });
   Product.belongsTo(Category, { foreignKey: 'main_category_id', as: 'main_category' });
 
@@ -105,7 +107,7 @@ const initAssociations = () => {
   // --- Cart Associations ---
   // User/Session -> Cart is handled via query, no strict association needed on User model 
   // unless we want User.hasOne(Cart)
-  
+
   Cart.hasMany(CartItem, { foreignKey: 'cart_id', as: 'items' });
   CartItem.belongsTo(Cart, { foreignKey: 'cart_id', as: 'cart' });
 
@@ -133,47 +135,49 @@ const initAssociations = () => {
 initAssociations();
 
 const syncDatabase = async () => {
-    try {
-      if (process.env.NODE_ENV === 'development') {
-        await sequelize.sync({ alter: true });
-        console.log('✅ Database & Tables synced (Alter Mode)');
-      } else {
-        console.log('ℹ️ Production mode: Skipping auto-sync. Use migrations.');
-      }
-    } catch (error) {
-      console.error('❌ Database sync failed:', error);
+  try {
+    if (process.env.NODE_ENV === 'development') {
+      await sequelize.sync({ alter: true });
+      console.log('✅ Database & Tables synced (Alter Mode)');
+    } else {
+      console.log('ℹ️ Production mode: Skipping auto-sync. Use migrations.');
     }
-  };
+  } catch (error) {
+    console.error('❌ Database sync failed:', error);
+  }
+};
 
-export { 
-    sequelize, 
-    syncDatabase, 
-    User, 
-    AuthSession, 
-    Category,
-    Product,
-    ProductMedia,
-    ProductPricingTier,
-    ProductStatus,
-    ProductSpecification,
-    OtpVerification,
-    UserProfile,
-    Address,
-    Review,
-    ReferenceModels,
-    Cart,
-    CartItem,
-    Wishlist,
-    WishlistItem,
-    Order,
-    OrderItem,
-    WithdrawalRequest,
-    PlatformSetting,
-    FinancialLog,
-    UserWallet,
-    Transaction,
-    PayoutRequest,
-    FrontendSlider,
-    FrontendAd,
-    RefProductBrand
+export {
+  sequelize,
+  syncDatabase,
+  User,
+  AuthSession,
+  Category,
+  Product,
+  ProductMedia,
+  ProductPricingTier,
+  ProductStatus,
+  ProductSpecification,
+  OtpVerification,
+  UserProfile,
+  Address,
+  Review,
+  ReferenceModels,
+  Cart,
+  CartItem,
+  Wishlist,
+  WishlistItem,
+  Order,
+  OrderItem,
+  WithdrawalRequest,
+  PlatformSetting,
+  FinancialLog,
+  UserWallet,
+  Transaction,
+  PayoutRequest,
+  FrontendSlider,
+  FrontendAd,
+  RefProductBrand,
+  UserPermission,
+  RefPermission
 };

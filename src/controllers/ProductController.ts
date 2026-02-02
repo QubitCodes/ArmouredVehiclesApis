@@ -29,7 +29,7 @@ const createProductSchema = z.object({
     currency: z.string().optional(),
     vendor_id: z.string().uuid().optional().nullable(),
     pricing_tiers: z.array(pricingTierSchema).optional(),
-    
+
     // Specs
     dimension_length: z.coerce.number().optional().nullable(),
     dimension_width: z.coerce.number().optional().nullable(),
@@ -85,7 +85,7 @@ const createProductSchema = z.object({
     vehicle_fitment: z.string().optional().nullable(),
     warranty: z.string().optional().nullable(),
     action_type: z.string().optional().nullable(),
-    
+
     // Additional
     certifications: z.array(z.string()).optional().nullable(),
     country_of_origin: z.string().optional().nullable(),
@@ -101,7 +101,7 @@ const createProductSchema = z.object({
 });
 
 export class ProductController extends BaseController {
-    
+
     /**
      * Helper: Get user from request (Soft Auth)
      */
@@ -128,89 +128,89 @@ export class ProductController extends BaseController {
      */
     private formatProduct(data: any | any[]) {
         const fmt = (item: any) => {
-             if (!item) return null;
-             // Ensure we have a POJO
-             let p = item;
-             
-             // If item is a Sequelize model, convert to JSON
-             if (item.toJSON && typeof item.toJSON === 'function') {
-                 p = item.toJSON();
-             } else {
-                 p = { ...item };
-             }
+            if (!item) return null;
+            // Ensure we have a POJO
+            let p = item;
 
-             // --- Media Flattening Logic ---
-             // Default Empty
-             p.gallery = [];
-             p.image = null;
+            // If item is a Sequelize model, convert to JSON
+            if (item.toJSON && typeof item.toJSON === 'function') {
+                p = item.toJSON();
+            } else {
+                p = { ...item };
+            }
 
-             // Check media on both the POJO (p) and original item (item)
-             const mediaList = p.media || item.media;
+            // --- Media Flattening Logic ---
+            // Default Empty
+            p.gallery = [];
+            p.image = null;
 
-             if (mediaList && Array.isArray(mediaList) && mediaList.length > 0) {
+            // Check media on both the POJO (p) and original item (item)
+            const mediaList = p.media || item.media;
+
+            if (mediaList && Array.isArray(mediaList) && mediaList.length > 0) {
                 // Filter out nulls/undefineds and get clean URLs
                 const validUrls = mediaList.map((m: any) => {
                     const url = m.url || (m.getDataValue ? m.getDataValue('url') : null);
                     return getFileUrl(url);
                 }).filter((u: any) => u !== null && u !== '') as string[];
-                
+
                 p.gallery = validUrls;
-                
+
                 // Set cover image
                 const coverMedia = mediaList.find((m: any) => m.is_cover);
                 if (coverMedia) {
-                     const url = coverMedia.url || (coverMedia.getDataValue ? coverMedia.getDataValue('url') : null);
-                     p.image = getFileUrl(url);
+                    const url = coverMedia.url || (coverMedia.getDataValue ? coverMedia.getDataValue('url') : null);
+                    p.image = getFileUrl(url);
                 } else if (validUrls.length > 0) {
                     p.image = validUrls[0];
                 }
-             }
-             
-             // Fallback: If p.image is still null, try p.image field if it exists (legacy)
-             if (!p.image && item.image) {
-                 p.image = getFileUrl(item.image);
-             }
+            }
 
-             // --- JSON Parsing for Array Fields stored as Text ---
-             const arrayFields = ['vehicle_fitment', 'specifications', 'features', 'materials', 'performance', 'drive_types', 'sizes', 'thickness', 'colors', 'pricing_terms', 'individual_product_pricing', 'certifications'];
-             
-             arrayFields.forEach(field => {
-                 if (typeof p[field] === 'string') {
-                     try {
-                         // Check if it looks like a JSON array
-                         if (p[field].trim().startsWith('[')) {
+            // Fallback: If p.image is still null, try p.image field if it exists (legacy)
+            if (!p.image && item.image) {
+                p.image = getFileUrl(item.image);
+            }
+
+            // --- JSON Parsing for Array Fields stored as Text ---
+            const arrayFields = ['vehicle_fitment', 'specifications', 'features', 'materials', 'performance', 'drive_types', 'sizes', 'thickness', 'colors', 'pricing_terms', 'individual_product_pricing', 'certifications'];
+
+            arrayFields.forEach(field => {
+                if (typeof p[field] === 'string') {
+                    try {
+                        // Check if it looks like a JSON array
+                        if (p[field].trim().startsWith('[')) {
                             p[field] = JSON.parse(p[field]);
-                         }
-                     } catch (e) {
-                         // If parse fails, leave as string or split by comma?
-                         // Legacy fallback: if it contains commas but not brackets, split it
-                         if (p[field].includes(',') && !p[field].includes('[')) {
-                             p[field] = p[field].split(',').map((s: string) => s.trim());
-                         }
-                     }
-                 }
-             });
+                        }
+                    } catch (e) {
+                        // If parse fails, leave as string or split by comma?
+                        // Legacy fallback: if it contains commas but not brackets, split it
+                        if (p[field].includes(',') && !p[field].includes('[')) {
+                            p[field] = p[field].split(',').map((s: string) => s.trim());
+                        }
+                    }
+                }
+            });
 
-             // Ensure price is backfilled from base_price for legacy frontend components
-             
-             if (p.base_price !== undefined && p.base_price !== null) {
-                 p.price = p.base_price; // Prefer base_price
-             } else if (p.price) {
-                 p.base_price = p.price; // or vice-versa
-             }
-             
-             // --- is_controlled Logic ---
-             const mainCat = p.main_category || item.main_category;
-             const cat = p.category || item.category;
-             const subCat = p.sub_category || item.sub_category;
+            // Ensure price is backfilled from base_price for legacy frontend components
 
-             p.is_controlled = (
-                 (mainCat?.is_controlled === true) || 
-                 (cat?.is_controlled === true) || 
-                 (subCat?.is_controlled === true)
-             );
+            if (p.base_price !== undefined && p.base_price !== null) {
+                p.price = p.base_price; // Prefer base_price
+            } else if (p.price) {
+                p.base_price = p.price; // or vice-versa
+            }
 
-             return p;
+            // --- is_controlled Logic ---
+            const mainCat = p.main_category || item.main_category;
+            const cat = p.category || item.category;
+            const subCat = p.sub_category || item.sub_category;
+
+            p.is_controlled = (
+                (mainCat?.is_controlled === true) ||
+                (cat?.is_controlled === true) ||
+                (subCat?.is_controlled === true)
+            );
+
+            return p;
         };
 
         if (Array.isArray(data)) {
@@ -223,25 +223,25 @@ export class ProductController extends BaseController {
      * Helper: Mask product prices if user is not logged in
      */
     private maskProducts(data: any | any[], user: any | null) {
-        
+
         if (user) {
-             return data; // No masking
+            return data; // No masking
         }
 
         const mask = (item: any) => {
             if (!item) return item;
             let p = { ...item }; // Shallow clone
-            
+
             // Mask price fields with -1
             p.base_price = -1;
             p.price = -1;
-            
+
             if (p.pricing_tiers) {
                 p.pricing_tiers = p.pricing_tiers.map((t: any) => ({
                     ...t,
                     price: -1,
-                    min_quantity: t.min_quantity 
-                })); 
+                    min_quantity: t.min_quantity
+                }));
             }
             return p;
         };
@@ -266,20 +266,20 @@ export class ProductController extends BaseController {
                 attributes: ['id'],
                 raw: true
             }) as any[];
-            
+
             if (!children.length) break;
-            
+
             // Collect new IDs
             const childIds = children.map(c => c.id);
             // Check for potential circular dependency (safety check) - though DB constraints should prevent it
             const newIds = childIds.filter(id => !ids.includes(id));
-            
+
             if (newIds.length === 0) break;
 
             ids.push(...newIds);
             currentLevelIds = newIds;
         }
-        
+
         return ids;
     }
 
@@ -292,7 +292,7 @@ export class ProductController extends BaseController {
         try {
             const user = await this.getUserFromRequest(req);
             const { searchParams } = new URL(req.url);
-            
+
             // Pagination
             const page = parseInt(searchParams.get('page') || '1');
             const limit = parseInt(searchParams.get('limit') || '20');
@@ -315,12 +315,12 @@ export class ProductController extends BaseController {
 
             // 3. Base Filters
             const whereClause: any = {};
-            
+
             const isAdmin = user && ['admin', 'super_admin'].includes(user.user_type);
 
             if (isAdmin) {
                 // Admin Constraints
-                
+
                 // 1. Author Status (Draft, Active, etc.)
                 const statusParam = searchParams.get('status');
                 if (statusParam && statusParam !== 'all') {
@@ -345,15 +345,15 @@ export class ProductController extends BaseController {
             } else {
                 // Public / Restricted View
                 const isVendor = user && user.user_type === 'vendor';
-                
+
                 if (isVendor) {
-                     // Vendor sees their own, all statuses usually?
-                     // If status param provided, use it.
-                     const statusParam = searchParams.get('status');
-                     if (statusParam && statusParam !== 'all') {
-                         whereClause.status = statusParam;
-                     }
-                     // No default status filter for vendor, so they see drafts.
+                    // Vendor sees their own, all statuses usually?
+                    // If status param provided, use it.
+                    const statusParam = searchParams.get('status');
+                    if (statusParam && statusParam !== 'all') {
+                        whereClause.status = statusParam;
+                    }
+                    // No default status filter for vendor, so they see drafts.
                 } else {
                     // Public Guest
                     whereClause.status = ProductStatus.PUBLISHED;
@@ -402,7 +402,7 @@ export class ProductController extends BaseController {
                 const brands = searchParams.get('brand_id')!.split(',').map(s => parseInt(s)).filter(n => !isNaN(n));
                 if (brands.length > 0) whereClause.brand_id = { [Op.in]: brands };
             }
-            
+
             // Array Columns
             handleArrayFilter('drive_types', 'drive_types', true);
             handleArrayFilter('colors', 'colors', true);
@@ -415,12 +415,12 @@ export class ProductController extends BaseController {
                 if (!isNaN(catIdNum)) {
                     // Fetch all descendants
                     const allCategoryIds = await this.getAllCategoryDescendants(catIdNum);
-                    
+
                     // Logic: Product belongs to this category hierarchy if:
                     // 1. product.category_id IN [ids]
                     // 2. product.main_category_id IN [ids]
                     // 3. product.sub_category_id IN [ids]
-                    
+
                     const categoryCondition = {
                         [Op.or]: [
                             { category_id: { [Op.in]: allCategoryIds } },
@@ -435,44 +435,44 @@ export class ProductController extends BaseController {
                         if (!whereClause[Op.and]) {
                             whereClause[Op.and] = [];
                         }
-                        
+
                         // Move existing search ORs into AND array
                         whereClause[Op.and].push({ [Op.or]: whereClause[Op.or] });
-                        
+
                         // Add Category ORs to AND array
                         whereClause[Op.and].push(categoryCondition);
-                        
+
                         // Remove top-level Op.or to clearly switch to AND mode
                         delete whereClause[Op.or];
-                        
+
                     } else {
                         // No collision, just assign
                         Object.assign(whereClause, categoryCondition);
                     }
                 }
             }
-            
+
             const mainCatId = searchParams.get('main_category_id');
             if (mainCatId) whereClause.main_category_id = mainCatId;
-            
+
             const subCatId = searchParams.get('sub_category_id');
             if (subCatId) whereClause.sub_category_id = subCatId;
 
-             // Vendor Filter (Admin Only)
-             const vendorId = searchParams.get('vendor_id');
-             if (vendorId && user && ['admin', 'super_admin'].includes(user.user_type)) {
-                 whereClause.vendor_id = vendorId;
-             }
+            // Vendor Filter (Admin Only)
+            const vendorId = searchParams.get('vendor_id');
+            if (vendorId && user && ['admin', 'super_admin'].includes(user.user_type)) {
+                whereClause.vendor_id = vendorId;
+            }
 
-             // 6. Range Filters
-             // Price
-             const minPrice = searchParams.get('min_price');
-             const maxPrice = searchParams.get('max_price');
-             if (minPrice || maxPrice) {
-                 whereClause.base_price = {};
-                 if (minPrice) whereClause.base_price[Op.gte] = parseFloat(minPrice);
-                 if (maxPrice) whereClause.base_price[Op.lte] = parseFloat(maxPrice);
-             }
+            // 6. Range Filters
+            // Price
+            const minPrice = searchParams.get('min_price');
+            const maxPrice = searchParams.get('max_price');
+            if (minPrice || maxPrice) {
+                whereClause.base_price = {};
+                if (minPrice) whereClause.base_price[Op.gte] = parseFloat(minPrice);
+                if (maxPrice) whereClause.base_price[Op.lte] = parseFloat(maxPrice);
+            }
 
             // Year
             const minYear = searchParams.get('year_min');
@@ -494,7 +494,7 @@ export class ProductController extends BaseController {
             if (minL || maxL || minW || maxW || minH || maxH) {
                 // We use EXISTS subquery to find products that have AT LEAST ONE size matching the criteria
                 // Note: We need to properly escape or cast params to avoid SQL injection, though Sequelize binds replacements.
-                
+
                 const conditions: string[] = [];
                 const replacements: any = {};
 
@@ -513,7 +513,7 @@ export class ProductController extends BaseController {
                         AND ${conditions.join(' AND ')}
                     )
                 `;
-                
+
                 // Add to whereClause using literal
                 whereClause[Op.and] = [
                     ...(whereClause[Op.and] || []),
@@ -523,15 +523,15 @@ export class ProductController extends BaseController {
                         // It's safer to inline the sanitized number directly since we parsed float above, 
                         // OR utilize the sequelize valid literal structure.
                         // For simplicity in this codebase context, we inject the num values directly since they are cast to number.
-                        
-                         `EXISTS (
+
+                        `EXISTS (
                             SELECT 1 
                             FROM ref_product_size_view v 
                             WHERE v.original_size = ANY("Product"."sizes") 
                             AND ${conditions.map(c => {
-                                // Replace :key with value
-                                return c.replace(/:(\w+)/g, (_, key) => replacements[key]);
-                            }).join(' AND ')}
+                            // Replace :key with value
+                            return c.replace(/:(\w+)/g, (_, key) => replacements[key]);
+                        }).join(' AND ')}
                         )`
                     )
                 ];
@@ -548,11 +548,11 @@ export class ProductController extends BaseController {
                         as: 'vendor',
                         include: [{ model: UserProfile, as: 'profile', attributes: ['onboarding_status'] }]
                     },
-                    { 
-                        model: ProductMedia, 
-                        as: 'media', 
-                        where: { is_cover: true }, 
-                        required: false 
+                    {
+                        model: ProductMedia,
+                        as: 'media',
+                        where: { is_cover: true },
+                        required: false
                     },
                     {
                         model: Category,
@@ -589,10 +589,10 @@ export class ProductController extends BaseController {
             const formattedRows = this.formatProduct(rows);
             const maskedRows = this.maskProducts(formattedRows, user);
 
-            return this.sendSuccess(maskedRows, 'Success', 200, { 
-                total: count, 
-                page, 
-                limit, 
+            return this.sendSuccess(maskedRows, 'Success', 200, {
+                total: count,
+                page,
+                limit,
                 pages: Math.ceil(count / limit),
                 filters,
                 placeholder_image: getFileUrl('/placeholder.svg')
@@ -640,7 +640,7 @@ export class ProductController extends BaseController {
                 raw: true,
                 nest: true
             }) as any[];
-            
+
             filters.categories = categories.map(c => ({
                 id: c.category_id,
                 name: c.category?.name || 'Unknown',
@@ -656,31 +656,31 @@ export class ProductController extends BaseController {
                     model: RefProductBrand,
                     as: 'brand',
                     attributes: ['id', 'name'],
-                    required: true 
+                    required: true
                 }],
                 group: ['brand.id', 'brand.name'],
                 where: whereClause,
                 raw: true
             }) as any[];
-            
+
             filters.brands = brands.map(b => ({
                 id: b['brand.id'],
                 name: b['brand.name'],
                 count: parseInt(b.count)
             }));
-            
+
             // 4. Conditions
             const conditions = await Product.findAll({
-                 attributes: [
-                     'condition',
-                     [fn('COUNT', col('id')), 'count']
-                 ],
-                 group: ['condition'],
-                 where: {
+                attributes: [
+                    'condition',
+                    [fn('COUNT', col('id')), 'count']
+                ],
+                group: ['condition'],
+                where: {
                     ...whereClause,
                     condition: { [Op.ne]: null }
-                 },
-                 raw: true
+                },
+                raw: true
             }) as any[];
             filters.conditions = conditions.map(c => ({
                 name: c.condition ? c.condition.charAt(0).toUpperCase() + c.condition.slice(1) : '',
@@ -695,8 +695,8 @@ export class ProductController extends BaseController {
                 ],
                 group: ['country_of_origin'],
                 where: {
-                   ...whereClause,
-                   country_of_origin: { [Op.ne]: null }
+                    ...whereClause,
+                    country_of_origin: { [Op.ne]: null }
                 },
                 raw: true
             }) as any[];
@@ -713,8 +713,8 @@ export class ProductController extends BaseController {
                         [fn('COUNT', col('id')), 'count']
                     ],
                     where: {
-                         ...whereClause,
-                         [field]: { [Op.ne]: null }
+                        ...whereClause,
+                        [field]: { [Op.ne]: null }
                     },
                     group: [literal(`unnest("${field}")`) as any],
                     raw: true
@@ -723,13 +723,13 @@ export class ProductController extends BaseController {
             };
 
             filters.drive_types = await getArrayCounts('drive_types');
-            
+
             // COLORS: From View (Global Options) intersected with Contextual Counts
             const validColorRows = await Product.sequelize?.query(
-                 `SELECT color FROM ref_product_color_view ORDER BY color ASC`,
-                 { type: (Product.sequelize as any).QueryTypes.SELECT }
+                `SELECT color FROM ref_product_color_view ORDER BY color ASC`,
+                { type: (Product.sequelize as any).QueryTypes.SELECT }
             ) as any[];
-            
+
             const colorCounts = await getArrayCounts('colors');
             const colorMap = new Map(colorCounts.map(c => [c.name, c.count]));
 
@@ -771,15 +771,15 @@ export class ProductController extends BaseController {
                 canViewAll = await permissionService.hasPermission(user.id, 'product.view');
                 canViewControlled = await permissionService.hasPermission(user.id, 'product.controlled.approve'); // Grants visibility to Controlled
 
-                 if (!canViewAll && !canViewControlled) {
-                      // If they have NEITHER, they can't see list
-                      return this.sendError('Forbidden: Missing product.view or product.controlled.approve', 403);
-                 }
+                if (!canViewAll && !canViewControlled) {
+                    // If they have NEITHER, they can't see list
+                    return this.sendError('Forbidden: Missing product.view or product.controlled.approve', 403);
+                }
             }
 
 
             const { searchParams } = new URL(req.url);
-            
+
             // Pagination
             const page = parseInt(searchParams.get('page') || '1');
             const limit = parseInt(searchParams.get('limit') || '20');
@@ -816,43 +816,24 @@ export class ProductController extends BaseController {
                     whereClause.vendor_id = null;
                 }
 
-                // PUBLISH WORKFLOW: Admins only see PUBLISHED products for approval
-                // However, Admins should see their OWN drafts.
-                // Logic: IF looking at Vendor products (vendor_id != null), THEN status must be PUBLISHED.
-                // IF looking at OWN products (vendor_id == null), THEN see all.
-                
-                // Existing logic sets whereClause.vendor_id based on params.
-                // If whereClause.vendor_id is NOT null (meaning we are looking at specific vendor or 'vendor' scope)
-                // OR if scope is 'all' (which implies mixed list)... this gets tricky.
-                
-                // Simplified Interpretation: "Only the published product must be visible for admins for approval."
-                // This implies "Approval Queue" or "Vendor Products List".
-                // Let's enforce: If `vendor_id` is present (filtering for a vendor), add `status: 'published'`.
-                
                 if (whereClause.vendor_id) {
-                     // Strictly enforce PUBLISHED for vendor products shown to admin
-                     whereClause.status = ProductStatus.PUBLISHED;
+                    // Strictly enforce PUBLISHED for vendor products shown to admin
+                    whereClause.status = ProductStatus.PUBLISHED;
                 }
             }
 
             if (user.user_type === 'admin') {
                 // Visibility Filters
-                
                 // If NO View All (General), then MUST be Controlled Only
                 if (!canViewAll && canViewControlled) {
-                    // Filter: Product -> Category where is_controlled = true
-                    // We need to ensure the INCLUDE for categories has the filter or whereClause uses association
-                    // Sequelize allows '$category.is_controlled$': true
-                    
+
                     whereClause[Op.or] = [
                         { '$main_category.is_controlled$': true },
                         { '$category.is_controlled$': true },
                         { '$sub_category.is_controlled$': true }
                     ];
                 }
-                // If canViewAll is true, we show EVERYTHING (General + Controlled).
-                // If NEITHER (handled above), 403.
-                
+
                 // Existing Filters...
                 const statusParam = searchParams.get('status');
                 if (statusParam && statusParam !== 'all') whereClause.status = statusParam;
@@ -868,21 +849,21 @@ export class ProductController extends BaseController {
             // Categories
             const categoryId = searchParams.get('category_id');
             if (categoryId) whereClause.category_id = categoryId;
-            
+
             const mainCatId = searchParams.get('main_category_id');
             if (mainCatId) whereClause.main_category_id = mainCatId;
-            
+
             const subCatId = searchParams.get('sub_category_id');
             if (subCatId) whereClause.sub_category_id = subCatId;
 
             // Range Filters (Price / Year) matches list()
-             const minPrice = searchParams.get('min_price');
-             const maxPrice = searchParams.get('max_price');
-             if (minPrice || maxPrice) {
-                 whereClause.base_price = {};
-                 if (minPrice) whereClause.base_price[Op.gte] = parseFloat(minPrice);
-                 if (maxPrice) whereClause.base_price[Op.lte] = parseFloat(maxPrice);
-             }
+            const minPrice = searchParams.get('min_price');
+            const maxPrice = searchParams.get('max_price');
+            if (minPrice || maxPrice) {
+                whereClause.base_price = {};
+                if (minPrice) whereClause.base_price[Op.gte] = parseFloat(minPrice);
+                if (maxPrice) whereClause.base_price[Op.lte] = parseFloat(maxPrice);
+            }
 
             const minYear = searchParams.get('year_min');
             const maxYear = searchParams.get('year_max');
@@ -914,11 +895,11 @@ export class ProductController extends BaseController {
                 offset,
                 order: [[sortField, sortOrder]],
                 include: [
-                    { 
-                        model: ProductMedia, 
-                        as: 'media', 
-                        where: { is_cover: true }, 
-                        required: false 
+                    {
+                        model: ProductMedia,
+                        as: 'media',
+                        where: { is_cover: true },
+                        required: false
                     },
                     {
                         model: Category,
@@ -956,10 +937,10 @@ export class ProductController extends BaseController {
 
             const formattedRows = this.formatProduct(rows);
             // No masking for admin/vendor own products
-            return this.sendSuccess(formattedRows, 'Success', 200, { 
-                total: count, 
-                page, 
-                limit, 
+            return this.sendSuccess(formattedRows, 'Success', 200, {
+                total: count,
+                page,
+                limit,
                 pages: Math.ceil(count / limit),
                 placeholder_image: getFileUrl('/placeholder.svg')
             });
@@ -976,13 +957,12 @@ export class ProductController extends BaseController {
     async create(req: NextRequest, parsedData?: { data: any, files: File[] }) {
         try {
             // 1. Auth Check
-            // 1. Auth Check
             const authHeader = req.headers.get('authorization');
             if (!authHeader || !authHeader.startsWith('Bearer ')) {
                 return this.sendError('Unauthorized', 401);
             }
 
-            
+
             let decoded: any;
             try {
                 const token = authHeader.split(' ')[1];
@@ -1001,8 +981,8 @@ export class ProductController extends BaseController {
             if (onboardingError) return onboardingError;
 
             if (user.user_type === 'admin') {
-                 const hasPerm = await new PermissionService().hasPermission(user.id, 'product.manage');
-                 if (!hasPerm) return this.sendError('Forbidden: Missing product.manage Permission', 403);
+                const hasPerm = await new PermissionService().hasPermission(user.id, 'product.manage');
+                if (!hasPerm) return this.sendError('Forbidden: Missing product.manage Permission', 403);
             }
 
             // Use parsedData if provided (from multipart), otherwise json
@@ -1017,144 +997,144 @@ export class ProductController extends BaseController {
                     body.pricing_tiers = [];
                 }
             }
-             // Quick fix for arrays if they came as string
-             ['materials', 'features', 'performance', 'drive_types', 'sizes', 'thickness', 'colors', 'pricing_terms', 'individual_product_pricing', 'individualProductPricing', 'certifications'].forEach(field => {
+            // Quick fix for arrays if they came as string
+            ['materials', 'features', 'performance', 'drive_types', 'sizes', 'thickness', 'colors', 'pricing_terms', 'individual_product_pricing', 'individualProductPricing', 'certifications'].forEach(field => {
                 if (typeof body[field] === 'string') {
                     try {
-                         body[field] = JSON.parse(body[field]);
+                        body[field] = JSON.parse(body[field]);
                     } catch (e) {
-                         // if not json, maybe comma separated?
-                         if (field !== 'pricing_tiers' && field !== 'individual_product_pricing' && field !== 'individualProductPricing') {
-                             body[field] = body[field].split(',').map((s: string) => s.trim());
-                         }
+                        // if not json, maybe comma separated?
+                        if (field !== 'pricing_tiers' && field !== 'individual_product_pricing' && field !== 'individualProductPricing') {
+                            body[field] = body[field].split(',').map((s: string) => s.trim());
+                        }
                     }
                 }
-             });
+            });
 
 
-             const validated = createProductSchema.parse(body);
+            const validated = createProductSchema.parse(body);
 
-             // Auto-generate SKU if not provided
-             if (!validated.sku || validated.sku.trim() === '') {
-                 // Format: AV-[TIMESTAMP]-[RANDOM]
-                 const timestamp = Math.floor(Date.now() / 1000);
-                 const random = Math.floor(1000 + Math.random() * 9000); // 4 digit random
-                 validated.sku = `AV-${timestamp}-${random}`;
-             }
+            // Auto-generate SKU if not provided
+            if (!validated.sku || validated.sku.trim() === '') {
+                // Format: AV-[TIMESTAMP]-[RANDOM]
+                const timestamp = Math.floor(Date.now() / 1000);
+                const random = Math.floor(1000 + Math.random() * 9000); // 4 digit random
+                validated.sku = `AV-${timestamp}-${random}`;
+            }
 
-             // 2. Determine Vendor Ownership
-             let finalVendorId: string | null = null; // Default: Admin-owned (null)
+            // 2. Determine Vendor Ownership
+            let finalVendorId: string | null = null; // Default: Admin-owned (null)
 
-             if (user.user_type === 'vendor') {
-                 // Vendors MUST own their products
-                 finalVendorId = user.id; 
-             } else if (['admin', 'super_admin'].includes(user.user_type)) {
-                 // Admins can assign to a vendor OR keep it null (admin-owned)
-                 if (validated.vendor_id) {
-                     const targetVendor = await User.findByPk(validated.vendor_id);
-                     // Verify the target is actually a vendor
-                     if (!targetVendor || targetVendor.user_type !== 'vendor') {
-                         return this.sendError('Invalid vendor_id provided', 400);
-                     }
-                     finalVendorId = validated.vendor_id;
-                 }
-                 // If validated.vendor_id is null/undefined, finalVendorId remains null (admin owned)
-             } else {
-                 return this.sendError('Forbidden: Customers cannot create products', 403);
-             }
+            if (user.user_type === 'vendor') {
+                // Vendors MUST own their products
+                finalVendorId = user.id;
+            } else if (['admin', 'super_admin'].includes(user.user_type)) {
+                // Admins can assign to a vendor OR keep it null (admin-owned)
+                if (validated.vendor_id) {
+                    const targetVendor = await User.findByPk(validated.vendor_id);
+                    // Verify the target is actually a vendor
+                    if (!targetVendor || targetVendor.user_type !== 'vendor') {
+                        return this.sendError('Invalid vendor_id provided', 400);
+                    }
+                    finalVendorId = validated.vendor_id;
+                }
+                // If validated.vendor_id is null/undefined, finalVendorId remains null (admin owned)
+            } else {
+                return this.sendError('Forbidden: Customers cannot create products', 403);
+            }
 
             const product = await Product.create({
-                 ...validated,
-                 vendor_id: finalVendorId as string, 
-                 status: ['admin', 'super_admin'].includes(user.user_type) ? ProductStatus.PUBLISHED : ProductStatus.PENDING_REVIEW,
-                 approval_status: ['admin', 'super_admin'].includes(user.user_type) ? 'approved' : 'pending'
-             });
+                ...validated,
+                vendor_id: finalVendorId as string,
+                status: ['admin', 'super_admin'].includes(user.user_type) ? ProductStatus.PUBLISHED : ProductStatus.PENDING_REVIEW,
+                approval_status: ['admin', 'super_admin'].includes(user.user_type) ? 'approved' : 'pending'
+            });
 
-             // Create Pricing Tiers             
-             if (validated.pricing_tiers && validated.pricing_tiers.length > 0) {
-                 if (!product.id) {
-                     throw new Error("Product ID is missing after creation");
-                 }
+            // Create Pricing Tiers             
+            if (validated.pricing_tiers && validated.pricing_tiers.length > 0) {
+                if (!product.id) {
+                    throw new Error("Product ID is missing after creation");
+                }
 
-                 // Use sequential create to avoid bulkCreate validation quirks
-                 for (const t of validated.pricing_tiers) {
-                     await ProductPricingTier.create({
-                         min_quantity: t.min_quantity,
-                         max_quantity: t.max_quantity,
-                         price: t.price,
-                         product_id: product.id
-                     });
-                 }
-             }
+                // Use sequential create to avoid bulkCreate validation quirks
+                for (const t of validated.pricing_tiers) {
+                    await ProductPricingTier.create({
+                        min_quantity: t.min_quantity,
+                        max_quantity: t.max_quantity,
+                        price: t.price,
+                        product_id: product.id
+                    });
+                }
+            }
 
-             // Handle Files
-             if (files && files.length > 0) {
-                 for (const file of files) {
-                     // Determine type and subdir
-                     let type = 'product_image';
-                     let folder = 'gallery';
-                     
-                     if (file.type.startsWith('video/')) {
+            // Handle Files
+            if (files && files.length > 0) {
+                for (const file of files) {
+                    // Determine type and subdir
+                    let type = 'product_image';
+                    let folder = 'gallery';
+
+                    if (file.type.startsWith('video/')) {
                         type = 'video';
                         folder = 'gallery';
-                     }
-                     if (file.type.includes('pdf') || file.type.includes('application/')) {
+                    }
+                    if (file.type.includes('pdf') || file.type.includes('application/')) {
                         type = 'document';
                         folder = 'documents';
-                     }
+                    }
 
-                     // Structure: products/{id}/{folder}
-                     const subdir = `products/${product.id}/${folder}`;
-                     const path = await FileUploadService.saveFile(file, subdir);
-                     
-                     await ProductMedia.create({
-                         product_id: product.id,
-                         type: type,
-                         url: path,
-                         file_name: file.name,
-                         file_size: file.size,
-                         mime_type: file.type,
-                         is_cover: false // Logic to determine cover? e.g. first image
-                     });
-                 }
-                 
-                 // If no cover set, set first image as cover
-                 const cover = await ProductMedia.findOne({ where: { product_id: product.id, is_cover: true }});
-                 if (!cover) {
-                     const firstImage = await ProductMedia.findOne({ where: { product_id: product.id }});
-                     if (firstImage) {
-                         firstImage.is_cover = true;
-                         await firstImage.save();
-                     }
-                 }
-             }
+                    // Structure: products/{id}/{folder}
+                    const subdir = `products/${product.id}/${folder}`;
+                    const path = await FileUploadService.saveFile(file, subdir);
 
-             // Create does not need masking as user is auth'd
-             if (files && files.length > 0) {
-                 // Reload to get media URLs properly
-                 
-                 // SYNC SPECS
-                 await this.syncSpecifications(product.id, body);
+                    await ProductMedia.create({
+                        product_id: product.id,
+                        type: type,
+                        url: path,
+                        file_name: file.name,
+                        file_size: file.size,
+                        mime_type: file.type,
+                        is_cover: false // Logic to determine cover? e.g. first image
+                    });
+                }
 
-                 const reloaded = await Product.findByPk(product.id, { 
-                     include: [
-                         { model: ProductMedia, as: 'media' },
-                         { model: ProductSpecification, as: 'product_specifications' }
-                     ] 
-                 });
-                 const formatted = this.formatProduct(reloaded);
-                 return this.sendSuccess(formatted, 'Product created', 201, { placeholder_image: getFileUrl('/placeholder.svg') });
-             } else {
-                 await this.syncSpecifications(product.id, body);
-                 const formatted = this.formatProduct(product);
-                 return this.sendSuccess(formatted, 'Product created', 201, { placeholder_image: getFileUrl('/placeholder.svg') });
-             }
+                // If no cover set, set first image as cover
+                const cover = await ProductMedia.findOne({ where: { product_id: product.id, is_cover: true } });
+                if (!cover) {
+                    const firstImage = await ProductMedia.findOne({ where: { product_id: product.id } });
+                    if (firstImage) {
+                        firstImage.is_cover = true;
+                        await firstImage.save();
+                    }
+                }
+            }
+
+            // Create does not need masking as user is auth'd
+            if (files && files.length > 0) {
+                // Reload to get media URLs properly
+
+                // SYNC SPECS
+                await this.syncSpecifications(product.id, body);
+
+                const reloaded = await Product.findByPk(product.id, {
+                    include: [
+                        { model: ProductMedia, as: 'media' },
+                        { model: ProductSpecification, as: 'product_specifications' }
+                    ]
+                });
+                const formatted = this.formatProduct(reloaded);
+                return this.sendSuccess(formatted, 'Product created', 201, { placeholder_image: getFileUrl('/placeholder.svg') });
+            } else {
+                await this.syncSpecifications(product.id, body);
+                const formatted = this.formatProduct(product);
+                return this.sendSuccess(formatted, 'Product created', 201, { placeholder_image: getFileUrl('/placeholder.svg') });
+            }
 
         } catch (error) {
-             if (error instanceof z.ZodError) {
-                return this.sendError('Validation Error', 400, error.issues); 
-             }
-             return this.sendError('Internal Server Error', 500, [], error);
+            if (error instanceof z.ZodError) {
+                return this.sendError('Validation Error', 400, error.issues);
+            }
+            return this.sendError('Internal Server Error', 500, [], error);
         }
     }
 
@@ -1174,36 +1154,36 @@ export class ProductController extends BaseController {
             // Re-fetch with all associations for detail view
             const fullProduct = await Product.findByPk(id, {
                 include: [
-                { model: ProductMedia, as: 'media' },
-                { model: ProductPricingTier, as: 'pricing_tiers' },
-                { model: ProductSpecification, as: 'product_specifications' },
-                { model: Category, as: 'main_category', attributes: ['id', 'name', 'is_controlled', 'slug'] },
-                { model: Category, as: 'category', attributes: ['id', 'name', 'is_controlled', 'slug'] },
-                { model: Category, as: 'sub_category', attributes: ['id', 'name', 'is_controlled', 'slug'] },
-                { model: RefProductBrand, as: 'brand', attributes: ['id', 'name', 'icon'] }
-            ]
+                    { model: ProductMedia, as: 'media' },
+                    { model: ProductPricingTier, as: 'pricing_tiers' },
+                    { model: ProductSpecification, as: 'product_specifications' },
+                    { model: Category, as: 'main_category', attributes: ['id', 'name', 'is_controlled', 'slug'] },
+                    { model: Category, as: 'category', attributes: ['id', 'name', 'is_controlled', 'slug'] },
+                    { model: Category, as: 'sub_category', attributes: ['id', 'name', 'is_controlled', 'slug'] },
+                    { model: RefProductBrand, as: 'brand', attributes: ['id', 'name', 'icon'] }
+                ]
             });
 
             if (!fullProduct) return this.sendError('Product not found', 404);
 
-            // Invisibility for unpublished products for Admins
-            if (fullProduct.status !== ProductStatus.PUBLISHED) {
-                return this.sendError('Product not available for review (Draft status)', 403);
-            }
+            // Invisibility for unpublished products for Admins - REMOVED to allow reviewing drafts/pending
+            // if (fullProduct.status !== ProductStatus.PUBLISHED) {
+            //    return this.sendError('Product not available for review (Draft status)', 403);
+            // }
 
             const formatted = this.formatProduct(fullProduct);
             return this.sendSuccess(formatted, 'Success', 200, { placeholder_image: getFileUrl('/placeholder.svg') });
 
         } catch (error: any) {
-             return this.sendError(String((error as any).message), 500);
+            return this.sendError(String((error as any).message), 500);
         }
     }
 
-     /**
-     * getById
-     * GET /api/v1/products/:id
-     */
-     async getById(req: NextRequest, { params }: { params: { id: string } }) {
+    /**
+    * getById
+    * GET /api/v1/products/:id
+    */
+    async getById(req: NextRequest, { params }: { params: { id: string } }) {
         try {
             const user = await this.getUserFromRequest(req);
             const id = parseInt(params.id);
@@ -1237,11 +1217,11 @@ export class ProductController extends BaseController {
 
             const formatted = this.formatProduct(product);
             const maskedProduct = this.maskProducts(formatted, user);
-            
+
             return this.sendSuccess(maskedProduct, 'Success', 200, { placeholder_image: getFileUrl('/placeholder.svg') });
 
         } catch (error) {
-             return this.sendError('Internal Server Error', 500, [], error);
+            return this.sendError('Internal Server Error', 500, [], error);
         }
     }
 
@@ -1252,7 +1232,7 @@ export class ProductController extends BaseController {
     async update(req: NextRequest, { params, parsedData }: { params: { id: string }, parsedData?: { data: any, files: File[] } }) {
         try {
             const id = parseInt(params.id);
-            
+
             if (isNaN(id)) return this.sendError('Invalid Product ID', 400);
 
             const { product, user, error } = await this.verifyProductAccess(req, id);
@@ -1261,115 +1241,111 @@ export class ProductController extends BaseController {
             let body = parsedData ? parsedData.data : await req.json();
             const files = parsedData ? parsedData.files : [];
 
-             // Handle Parsing for arrays if stringified
-             const arrayFields = ['pricing_tiers', 'materials', 'features', 'performance', 'drive_types', 'sizes', 'thickness', 'colors', 'pricing_terms', 'individual_product_pricing', 'individualProductPricing', 'certifications'];
-             arrayFields.forEach(field => {
+            // Handle Parsing for arrays if stringified
+            const arrayFields = ['pricing_tiers', 'materials', 'features', 'performance', 'drive_types', 'sizes', 'thickness', 'colors', 'pricing_terms', 'individual_product_pricing', 'individualProductPricing', 'certifications'];
+            arrayFields.forEach(field => {
                 if (typeof body[field] === 'string') {
                     try {
-                         body[field] = JSON.parse(body[field]);
+                        body[field] = JSON.parse(body[field]);
                     } catch (e) {
-                         if (field !== 'pricing_tiers' && field !== 'individual_product_pricing' && field !== 'individualProductPricing') { // object arrays
-                             body[field] = body[field].split(',').map((s: string) => s.trim());
-                         }
+                        if (field !== 'pricing_tiers' && field !== 'individual_product_pricing' && field !== 'individualProductPricing') { // object arrays
+                            body[field] = body[field].split(',').map((s: string) => s.trim());
+                        }
                     }
                 }
-             });
+            });
 
-             // Handle CamelCase -> SnakeCase mapping for robustness
-             const mapping: any = {
-                 basePrice: 'base_price',
-                 minOrderQuantity: 'min_order_quantity',
-                 productionLeadTime: 'production_lead_time',
-                 weightValue: 'weight_value',
-                 warrantyDuration: 'warranty_duration',
-                 readyStockAvailable: 'ready_stock_available',
-                 requiresExportLicense: 'requires_export_license',
-                 hasWarranty: 'has_warranty',
-                 complianceConfirmed: 'compliance_confirmed',
-                 manufacturingSource: 'manufacturing_source',
-                 manufacturingSourceName: 'manufacturing_source_name',
-                 vehicleFitment: 'vehicle_fitment',
-                 specifications: 'specifications',
-                 technicalDescription: 'technical_description',
-                 controlledItemType: 'controlled_item_type',
-                 subCategoryId: 'sub_category_id',
-                 mainCategoryId: 'main_category_id',
-                 countryOfOrigin: 'country_of_origin',
-                 vehicleCompatibility: 'vehicle_compatibility',
-                 isFeatured: 'is_featured',
-                 isTopSelling: 'is_top_selling',
-                  individualProductPricing: 'individual_product_pricing'
-             };
+            // Handle CamelCase -> SnakeCase mapping for robustness
+            const mapping: any = {
+                basePrice: 'base_price',
+                minOrderQuantity: 'min_order_quantity',
+                productionLeadTime: 'production_lead_time',
+                weightValue: 'weight_value',
+                warrantyDuration: 'warranty_duration',
+                readyStockAvailable: 'ready_stock_available',
+                requiresExportLicense: 'requires_export_license',
+                hasWarranty: 'has_warranty',
+                complianceConfirmed: 'compliance_confirmed',
+                manufacturingSource: 'manufacturing_source',
+                manufacturingSourceName: 'manufacturing_source_name',
+                vehicleFitment: 'vehicle_fitment',
+                specifications: 'specifications',
+                technicalDescription: 'technical_description',
+                controlledItemType: 'controlled_item_type',
+                subCategoryId: 'sub_category_id',
+                mainCategoryId: 'main_category_id',
+                countryOfOrigin: 'country_of_origin',
+                vehicleCompatibility: 'vehicle_compatibility',
+                isFeatured: 'is_featured',
+                isTopSelling: 'is_top_selling',
+                individualProductPricing: 'individual_product_pricing'
+            };
 
-             Object.keys(mapping).forEach(camelKey => {
-                 if (body[camelKey] !== undefined) {
-                     body[mapping[camelKey]] = body[camelKey];
-                     delete body[camelKey]; // optional cleanup
-                 }
-             });
+            Object.keys(mapping).forEach(camelKey => {
+                if (body[camelKey] !== undefined) {
+                    body[mapping[camelKey]] = body[camelKey];
+                    delete body[camelKey]; // optional cleanup
+                }
+            });
 
-             // --- Controlled Product Approval Logic (Universal UAE Rule) ---
-             // If Status is changing AND User is Admin
-             if (user.user_type === 'admin') {
-                 // Check if it's an approval action (or status change likely to require permission)
-                 // Or just strict management?
-                 // Prompt focus: "Approval".
-                 // "Approve Products (Controlled)" -> sounds like Action.
-                 
-                 // If status is present in body (being updated)
-                 if (body.status || body.approval_status) {
-                     // Determine if Product is Controlled + UAE
-                     // We need full product with Categories and Vendor Profile
-                     const fullProduct = await Product.findByPk(id, {
-                         include: [
-                             { model: Category, as: 'main_category' },
-                             { model: Category, as: 'category' },
-                             { model: Category, as: 'sub_category' },
-                             { 
-                                 model: User, 
-                                 as: 'vendor',
-                                 include: [{ model: UserProfile, as: 'profile' }] 
-                             }
-                         ]
-                     }) as any;
+            // --- Controlled Product Approval Logic (Universal UAE Rule) ---
+            // If Status is changing AND User is Admin
+            if (user.user_type === 'admin') {
 
-                     if (fullProduct) {
-                         const isControlled = (
-                             fullProduct.main_category?.is_controlled ||
-                             fullProduct.category?.is_controlled ||
-                             fullProduct.sub_category?.is_controlled
-                         );
-                         
-                         const vendorProfile = fullProduct.vendor?.profile;
-                         const isUAE = vendorProfile ? ['UAE', 'United Arab Emirates', 'United Arab Emirates (UAE)'].includes(vendorProfile.country) : false;
+                // If status is present in body (being updated)
+                if (body.status || body.approval_status) {
+                    // Determine if Product is Controlled + UAE
+                    // We need full product with Categories and Vendor Profile
+                    const fullProduct = await Product.findByPk(id, {
+                        include: [
+                            { model: Category, as: 'main_category' },
+                            { model: Category, as: 'category' },
+                            { model: Category, as: 'sub_category' },
+                            {
+                                model: User,
+                                as: 'vendor',
+                                include: [{ model: UserProfile, as: 'profile' }]
+                            }
+                        ]
+                    }) as any;
 
-                         if (isControlled && isUAE) {
-                             // Strict Permission Required
-                             const hasPerm = await new PermissionService().hasPermission(user.id, 'product.controlled.approve');
-                             if (!hasPerm) {
-                                 return this.sendError('Forbidden: Missing product.controlled.approve Permission for UAE Controlled Product', 403);
-                             }
-                         } else {
-                             // General Product (or Non-UAE Controlled)
-                         }
-                     }
-                 }
-             }
+                    if (fullProduct) {
+                        const isControlled = (
+                            fullProduct.main_category?.is_controlled ||
+                            fullProduct.category?.is_controlled ||
+                            fullProduct.sub_category?.is_controlled
+                        );
 
-             // Ensure numeric fields are numbers (FormData sends strings)
-             if (body.base_price !== undefined) body.base_price = Number(body.base_price);
-             if (body.weight_value !== undefined) body.weight_value = Number(body.weight_value);
-             if (body.min_order_quantity !== undefined) body.min_order_quantity = Number(body.min_order_quantity);
-             if (body.production_lead_time !== undefined) body.production_lead_time = Number(body.production_lead_time);
-             if (body.year !== undefined) body.year = Number(body.year);
-             if (body.warranty_duration !== undefined) body.warranty_duration = Number(body.warranty_duration);
-             if (body.stock !== undefined) body.stock = Number(body.stock);
-             
-             // Boolean conversions
-             if (body.is_featured !== undefined) body.is_featured = String(body.is_featured) === 'true';
-             if (body.is_top_selling !== undefined) body.is_top_selling = String(body.is_top_selling) === 'true';
+                        const vendorProfile = fullProduct.vendor?.profile;
+                        const isUAE = vendorProfile ? ['UAE', 'United Arab Emirates', 'United Arab Emirates (UAE)'].includes(vendorProfile.country) : false;
 
-             // Update Product Fields
+                        if (isControlled && isUAE) {
+                            // Strict Permission Required
+                            const hasPerm = await new PermissionService().hasPermission(user.id, 'product.controlled.approve');
+                            if (!hasPerm) {
+                                return this.sendError('Forbidden: Missing product.controlled.approve Permission for UAE Controlled Product', 403);
+                            }
+                        } else {
+                            // General Product (or Non-UAE Controlled)
+                        }
+                    }
+                }
+            }
+
+            // Ensure numeric fields are numbers (FormData sends strings)
+            if (body.base_price !== undefined) body.base_price = Number(body.base_price);
+            if (body.weight_value !== undefined) body.weight_value = Number(body.weight_value);
+            if (body.min_order_quantity !== undefined) body.min_order_quantity = Number(body.min_order_quantity);
+            if (body.production_lead_time !== undefined) body.production_lead_time = Number(body.production_lead_time);
+            if (body.year !== undefined) body.year = Number(body.year);
+            if (body.warranty_duration !== undefined) body.warranty_duration = Number(body.warranty_duration);
+            if (body.stock !== undefined) body.stock = Number(body.stock);
+
+            // Boolean conversions
+            if (body.is_featured !== undefined) body.is_featured = String(body.is_featured) === 'true';
+            if (body.is_top_selling !== undefined) body.is_top_selling = String(body.is_top_selling) === 'true';
+
+            // Update Product Fields
             // Filter allowed fields? For now allow all
             // Prevent changing important fields if needed
             delete body.id;
@@ -1377,21 +1353,24 @@ export class ProductController extends BaseController {
             delete body.created_at;
             delete body.updated_at;
 
-             // Extract gallery for synchronization (URLs of images to KEEP)
+            // Extract gallery for synchronization (URLs of images to KEEP)
             let galleryToKeep: string[] = [];
             if (body.gallery) {
                 if (Array.isArray(body.gallery)) {
                     galleryToKeep = body.gallery;
                 } else if (typeof body.gallery === 'string') {
                     try {
-                        galleryToKeep = JSON.parse(body.gallery);
+                        const parsed = JSON.parse(body.gallery);
+                        if (Array.isArray(parsed)) galleryToKeep = parsed;
+                        else galleryToKeep = [body.gallery];
                     } catch (e) {
                         galleryToKeep = [body.gallery];
                     }
                 }
             }
-            
+
             delete body.gallery; // Remove from bodyUpdate
+            delete body.image;   // Remove legacy image field if present
 
             // If vendor publishes, set approval to pending
             if (user.user_type === 'vendor' && body.status === ProductStatus.PUBLISHED && product.approval_status !== 'pending') {
@@ -1405,73 +1384,74 @@ export class ProductController extends BaseController {
                 // Delete old
                 await ProductPricingTier.destroy({ where: { product_id: id } });
                 // Create new
-                 const tiers = body.pricing_tiers.map((t: any) => ({
-                     min_quantity: t.min_quantity,
-                     max_quantity: t.max_quantity,
-                     price: t.price,
-                     product_id: id
-                 }));
-                 await ProductPricingTier.bulkCreate(tiers);
+                const tiers = body.pricing_tiers.map((t: any) => ({
+                    min_quantity: t.min_quantity,
+                    max_quantity: t.max_quantity,
+                    price: t.price,
+                    product_id: id
+                }));
+                await ProductPricingTier.bulkCreate(tiers);
             }
 
             // --- Handle Media Synchronization (Deletions) ---
-             if (galleryToKeep.length > 0) {
-                 // 1. Fetch all existing media
-                 const existingMedia = await ProductMedia.findAll({ where: { product_id: id } });
-                 
-                 // 2. Filter out media that is NOT in the galleryToKeep list
-                 const mediaToDelete = existingMedia.filter(m => {
-                     const rawUrl = m.getDataValue('url');
-                     const isKept = galleryToKeep.some(keptUrl => keptUrl && keptUrl.includes(rawUrl));
-                     return !isKept;
-                 });
+            if (galleryToKeep.length > 0) {
+                // 1. Fetch all existing media
+                const existingMedia = await ProductMedia.findAll({ where: { product_id: id } });
 
-                 if (mediaToDelete.length > 0) {
-                     const idsToDelete = mediaToDelete.map(m => m.id);
-                     await ProductMedia.destroy({ where: { id: idsToDelete } });
-                 }
+                // 2. Filter out media that is NOT in the galleryToKeep list
+                const mediaToDelete = existingMedia.filter(m => {
+                    const rawUrl = m.getDataValue('url');
+                    // Check if the media URL is contained in any of the kept URLs (handling relative/absolute differences)
+                    const isKept = galleryToKeep.some(keptUrl => keptUrl && (keptUrl.includes(rawUrl) || rawUrl.includes(keptUrl)));
+                    return !isKept;
+                });
+
+                if (mediaToDelete.length > 0) {
+                    const idsToDelete = mediaToDelete.map(m => m.id);
+                    await ProductMedia.destroy({ where: { id: idsToDelete } });
+                }
             }
 
             // Handle New Files
             if (files && files.length > 0) {
-                 for (const file of files) {
-                     let type = 'product_image';
-                     let folder = 'gallery';
+                for (const file of files) {
+                    let type = 'product_image';
+                    let folder = 'gallery';
 
-                     if (file.type.startsWith('video/')) {
-                         type = 'video';
-                         folder = 'gallery';
-                     }
-                     if (file.type.includes('pdf') || file.type.includes('application/')) {
-                         type = 'document';
-                         folder = 'documents';
-                     }
+                    if (file.type.startsWith('video/')) {
+                        type = 'video';
+                        folder = 'gallery';
+                    }
+                    if (file.type.includes('pdf') || file.type.includes('application/')) {
+                        type = 'document';
+                        folder = 'documents';
+                    }
 
-                     const subdir = `products/${product.id}/${folder}`;
-                     const path = await FileUploadService.saveFile(file, subdir);
-                     
-                     const media = await ProductMedia.create({
-                         product_id: product.id,
-                         type: type,
-                         url: path,
-                         file_name: file.name,
-                         file_size: file.size,
-                         mime_type: file.type,
-                         is_cover: false 
-                     });
-                 }
-                 // Set cover if none exists
-                 const cover = await ProductMedia.findOne({ where: { product_id: product.id, is_cover: true }});
-                  const existingCover = await ProductMedia.findOne({ where: { product_id: id, is_cover: true }});
-                  if (!existingCover) {
-                       const first = await ProductMedia.findOne({ where: { product_id: id } });
-                       if (first) {
-                           first.is_cover = true;
-                           await first.save();
-                       }
-                  }
+                    const subdir = `products/${product.id}/${folder}`;
+                    const path = await FileUploadService.saveFile(file, subdir);
+
+                    const media = await ProductMedia.create({
+                        product_id: product.id,
+                        type: type,
+                        url: path,
+                        file_name: file.name,
+                        file_size: file.size,
+                        mime_type: file.type,
+                        is_cover: false
+                    });
+                }
+                // Set cover if none exists
+                const cover = await ProductMedia.findOne({ where: { product_id: product.id, is_cover: true } });
+                const existingCover = await ProductMedia.findOne({ where: { product_id: id, is_cover: true } });
+                if (!existingCover) {
+                    const first = await ProductMedia.findOne({ where: { product_id: id } });
+                    if (first) {
+                        first.is_cover = true;
+                        await first.save();
+                    }
+                }
             }
-            
+
             // --- SYNC Specifications (Dual Write) ---
             // We sync 'colors' and 'sizes' to ProductSpecification table to satisfy architectural requirements
             await this.syncSpecifications(id, body);
@@ -1489,8 +1469,8 @@ export class ProductController extends BaseController {
             return this.sendSuccess(formatted, "Product updated successfully");
 
         } catch (error) {
-             if (error instanceof z.ZodError) { return this.sendError('Validation Error', 400, error.issues); }
-             return this.sendError('Internal Server Error', 500, [], error);
+            if (error instanceof z.ZodError) { return this.sendError('Validation Error', 400, error.issues); }
+            return this.sendError('Internal Server Error', 500, [], error);
         }
     }
 
@@ -1511,7 +1491,7 @@ export class ProductController extends BaseController {
             }
 
             const values: string[] = body[specDef.key] || []; // e.g. ["Red", "Blue"]
-            
+
             // Delete existing generic specs for this Label
             await ProductSpecification.destroy({
                 where: {
@@ -1566,17 +1546,17 @@ export class ProductController extends BaseController {
             }
 
             if (user.user_type === 'admin') {
-                 // Check generic manage first
-                 let hasPerm = await new PermissionService().hasPermission(user.id, requiredPermission); // product.manage
-                 
-                 if (!hasPerm) {
-                     // Quick check for controlled permission
-                     const hasControlled = await new PermissionService().hasPermission(user.id, 'product.controlled.approve');
-                     if (hasControlled) {
-                     } else {
+                // Check generic manage first
+                let hasPerm = await new PermissionService().hasPermission(user.id, requiredPermission); // product.manage
+
+                if (!hasPerm) {
+                    // Quick check for controlled permission
+                    const hasControlled = await new PermissionService().hasPermission(user.id, 'product.controlled.approve');
+                    if (hasControlled) {
+                    } else {
                         return { product: null, user: null, error: this.sendError(`Forbidden: Missing ${requiredPermission} Permission`, 403) };
-                     }
-                 }
+                    }
+                }
             }
 
             const product = await Product.findByPk(productId);
@@ -1586,37 +1566,37 @@ export class ProductController extends BaseController {
 
             // Logic Re-Check for Admin with ONLY controlled permission
             if (user.user_type === 'admin') {
-                 const hasManage = await new PermissionService().hasPermission(user.id, requiredPermission);
-                 if (!hasManage) {
-                     const hasControlled = await new PermissionService().hasPermission(user.id, 'product.controlled.approve');
-                     if (!hasControlled) {
-                          // Neither Manage nor Controlled
-                          return { product: null, user: null, error: this.sendError(`Forbidden: Missing ${requiredPermission}`, 403) };
-                     }
-                     
-                     // Has Controlled BUT Not Manage.
-                     // Check if Product is Controlled.
-                     // We need categories.
-                     // Re-fetch product with categories
-                     const fullP = await Product.findByPk(productId, {
-                         include: [
-                             { model: Category, as: 'main_category' },
-                             { model: Category, as: 'category' },
-                             { model: Category, as: 'sub_category' }
-                         ]
-                     }) as any;
-                     
-                     const isControlled = (fullP.main_category?.is_controlled || fullP.category?.is_controlled || fullP.sub_category?.is_controlled);
-                     
-                     if (!isControlled) {
-                         // User only has Controlled perm, but product is General. Block.
-                         return { product: null, user: null, error: this.sendError('Forbidden: No access to General Products', 403) };
-                     }
-                 }
+                const hasManage = await new PermissionService().hasPermission(user.id, requiredPermission);
+                if (!hasManage) {
+                    const hasControlled = await new PermissionService().hasPermission(user.id, 'product.controlled.approve');
+                    if (!hasControlled) {
+                        // Neither Manage nor Controlled
+                        return { product: null, user: null, error: this.sendError(`Forbidden: Missing ${requiredPermission}`, 403) };
+                    }
+
+                    // Has Controlled BUT Not Manage.
+                    // Check if Product is Controlled.
+                    // We need categories.
+                    // Re-fetch product with categories
+                    const fullP = await Product.findByPk(productId, {
+                        include: [
+                            { model: Category, as: 'main_category' },
+                            { model: Category, as: 'category' },
+                            { model: Category, as: 'sub_category' }
+                        ]
+                    }) as any;
+
+                    const isControlled = (fullP.main_category?.is_controlled || fullP.category?.is_controlled || fullP.sub_category?.is_controlled);
+
+                    if (!isControlled) {
+                        // User only has Controlled perm, but product is General. Block.
+                        return { product: null, user: null, error: this.sendError('Forbidden: No access to General Products', 403) };
+                    }
+                }
             }
 
             // Vendors can only access their own products
-            if (user.user_type === 'vendor' && product.vendor_id !== user.id) {
+            if (user.user_type === 'vendor' && String(product.vendor_id) !== String(user.id)) {
                 return { product: null, user: null, error: this.sendError('Access denied', 403) };
             }
 
@@ -1801,14 +1781,7 @@ export class ProductController extends BaseController {
 
             const formatted = this.formatProduct(products);
             const masked = this.maskProducts(formatted, user);
-            
-            // Helper to sync gallery manually if maskProducts didn't do it (maskProducts currently only handles prices)
-            // Actually maskProducts returns POJOs (toJSON). We need to ensure we popuplate 'image' and 'gallery' props on these POJOs.
-            // Currently maskProducts DOES NOT do that. It just masks prices. 
-            // We should ideally move the "syncGallery" logic into maskProducts or a separate helper used by all lists.
-            // For now, let's just do it here inline or update maskProducts.
-            // Let's update maskProducts to also populate the virtual 'image' and 'gallery' fields from 'media'.
-            
+
             return this.sendSuccess(masked, 'Success', 200, { placeholder_image: getFileUrl('/placeholder.svg') });
         } catch (error: any) {
             return this.sendError(String((error as any).message), 500);
@@ -1824,18 +1797,18 @@ export class ProductController extends BaseController {
         try {
             const user = await this.getUserFromRequest(req);
             // User Request: "Top products must only return 6 items exactly. else return null"
-            const limit = 6; 
+            const limit = 6;
 
             const products = await Product.findAll({
-                where: { 
+                where: {
                     status: { [Op.in]: [ProductStatus.APPROVED, ProductStatus.PUBLISHED] },
                     approval_status: 'approved',
-                    is_top_selling: true 
+                    is_top_selling: true
                 },
                 limit: limit,
                 order: [literal('RANDOM()')],
                 include: [
-                    { model: ProductMedia, as: 'media', required: true }, 
+                    { model: ProductMedia, as: 'media', required: true },
                     { model: Category, as: 'category', attributes: ['id', 'name'] },
                 ],
             });
@@ -1949,8 +1922,8 @@ export class ProductController extends BaseController {
             if (onboardingError) return onboardingError;
 
             if (user.user_type === 'admin') {
-                 const hasPerm = await new PermissionService().hasPermission(user.id, 'product.manage');
-                 if (!hasPerm) return this.sendError('Forbidden: Missing product.manage Permission', 403);
+                const hasPerm = await new PermissionService().hasPermission(user.id, 'product.manage');
+                if (!hasPerm) return this.sendError('Forbidden: Missing product.manage Permission', 403);
             }
 
             if (!['vendor', 'admin', 'super_admin'].includes(user.user_type)) {
@@ -1983,7 +1956,7 @@ export class ProductController extends BaseController {
                 try {
                     const validated = createProductSchema.parse(products[i]);
                     const product = await Product.create({
-                        ...validated, 
+                        ...validated,
                         vendor_id: finalVendorId as string,
                         status: ProductStatus.DRAFT,
                     });
@@ -1995,7 +1968,7 @@ export class ProductController extends BaseController {
                         }));
                         await ProductPricingTier.bulkCreate(tiers);
                     }
-                    
+
                     created.push(product);
                 } catch (err: any) {
                     errors.push({ index: i, error: err.message || 'Validation failed' });
@@ -2045,8 +2018,8 @@ export class ProductController extends BaseController {
             if (onboardingError) return onboardingError;
 
             if (user.user_type === 'admin') {
-                 const hasPerm = await new PermissionService().hasPermission(user.id, 'product.manage');
-                 if (!hasPerm) return this.sendError('Forbidden: Missing product.manage Permission', 403);
+                const hasPerm = await new PermissionService().hasPermission(user.id, 'product.manage');
+                if (!hasPerm) return this.sendError('Forbidden: Missing product.manage Permission', 403);
             }
 
             if (!['vendor', 'admin', 'super_admin'].includes(user.user_type)) {
@@ -2077,7 +2050,7 @@ export class ProductController extends BaseController {
             // Read file content
             const fileBuffer = await file.arrayBuffer();
             const fileContent = new TextDecoder('utf-8').decode(fileBuffer);
-            
+
             // Parse CSV
             const records = parse(fileContent, {
                 columns: true,
@@ -2106,7 +2079,7 @@ export class ProductController extends BaseController {
                     };
 
                     const validated = createProductSchema.parse(productData);
-                    
+
                     const product = await Product.create({
                         ...validated,
                         vendor_id: finalVendorId as string,
@@ -2149,7 +2122,7 @@ export class ProductController extends BaseController {
             return this.sendSuccess(null, 'Product deleted', 200);
 
         } catch (error) {
-             return this.sendError(error instanceof Error ? error.message : 'Delete failed', 500);
+            return this.sendError(error instanceof Error ? error.message : 'Delete failed', 500);
         }
     }
     /**
@@ -2167,8 +2140,8 @@ export class ProductController extends BaseController {
             }
 
             if (user.user_type === 'admin') {
-                 const hasPerm = await new PermissionService().hasPermission(user.id, 'product.manage');
-                 if (!hasPerm) return this.sendError('Forbidden: Missing product.manage Permission', 403);
+                const hasPerm = await new PermissionService().hasPermission(user.id, 'product.manage');
+                if (!hasPerm) return this.sendError('Forbidden: Missing product.manage Permission', 403);
             }
 
             const productId = params.id;
@@ -2178,7 +2151,7 @@ export class ProductController extends BaseController {
             if (!status) {
                 return this.sendError('Status is required', 400);
             }
-            
+
             const normalizedStatus = status.toLowerCase();
 
             if (!['approved', 'rejected'].includes(normalizedStatus)) {
@@ -2192,7 +2165,7 @@ export class ProductController extends BaseController {
 
             // Update Status
             product.approval_status = normalizedStatus as 'approved' | 'rejected';
-            
+
             if (normalizedStatus === 'approved') {
                 product.approval_status = 'approved';
                 product.rejection_reason = undefined; // Clear previous rejection reason
@@ -2229,8 +2202,8 @@ export class ProductController extends BaseController {
             }
 
             if (user.user_type === 'admin') {
-                 const hasPerm = await new PermissionService().hasPermission(user.id, 'product.manage');
-                 if (!hasPerm) return this.sendError('Forbidden: Missing product.manage Permission', 403);
+                const hasPerm = await new PermissionService().hasPermission(user.id, 'product.manage');
+                if (!hasPerm) return this.sendError('Forbidden: Missing product.manage Permission', 403);
             }
 
             const { id } = params;
@@ -2285,7 +2258,7 @@ export class ProductController extends BaseController {
             return this.sendSuccess(product, 'Product attributes updated successfully');
 
         } catch (error: any) {
-             return this.sendError(String((error as any).message), 500);
+            return this.sendError(String((error as any).message), 500);
         }
     }
 }

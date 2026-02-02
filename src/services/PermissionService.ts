@@ -58,13 +58,35 @@ export class PermissionService {
     // Check if user is super_admin
     const user = await User.findByPk(userId, { attributes: ['user_type'] });
     if (user && user.user_type === 'super_admin') {
-        return true;
+      return true;
     }
 
     const count = await UserPermission.count({
       where: {
         user_id: userId,
         permission_name: permissionName,
+      },
+    });
+
+    return count > 0;
+  }
+
+  /**
+   * Check if user has ANY of the provided permissions
+   */
+  async hasAnyPermission(userId: string, permissionNames: string[]): Promise<boolean> {
+    // Check if user is super_admin
+    const user = await User.findByPk(userId, { attributes: ['user_type'] });
+    if (user && user.user_type === 'super_admin') {
+      return true;
+    }
+
+    const count = await UserPermission.count({
+      where: {
+        user_id: userId,
+        permission_name: {
+          [Op.in]: permissionNames
+        },
       },
     });
 
@@ -93,13 +115,13 @@ export class PermissionService {
 
     // 3. Insert new permissions
     try {
-        await UserPermission.bulkCreate(records);
+      await UserPermission.bulkCreate(records);
     } catch (error) {
-        console.error("Failed to bulk create permissions. Validating existence...", error);
-        // Fallback: Verify names exist in RefPermission if FK failure occurs
-        // But assuming frontend/seed provides valid names.
+      console.error("Failed to bulk create permissions. Validating existence...", error);
+      // Fallback: Verify names exist in RefPermission if FK failure occurs
+      // But assuming frontend/seed provides valid names.
     }
-    
+
     return this.getUserPermissions(userId);
   }
 
@@ -112,7 +134,7 @@ export class PermissionService {
         model: RefPermission,
         as: 'permissions',
         where: { name: permissionName },
-        required: true, 
+        required: true,
       }],
       attributes: ['id', 'name', 'email', 'user_type'],
     });
