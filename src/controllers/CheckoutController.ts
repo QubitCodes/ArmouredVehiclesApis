@@ -424,9 +424,26 @@ export class CheckoutController extends BaseController {
             if (orders[0].user_id !== user.id) return this.sendError('Forbidden', 403);
 
             if (session.payment_status === 'paid' || session.payment_status === 'no_payment_required') {
+
+                const paymentIntent = session.payment_intent as any;
+                const paymentMethod = paymentIntent?.payment_method as any;
+
                 const transactionData = {
                     payment_mode: 'Stripe',
-                    transaction_id: session.payment_intent as string || session.id
+                    session_id: session.id,
+                    transaction_id: paymentIntent?.id || session.id,
+                    amount_total: session.amount_total,
+                    currency: session.currency,
+                    payment_status: session.payment_status,
+                    payment_details: {
+                        brand: paymentMethod?.card?.brand || null,
+                        last4: paymentMethod?.card?.last4 || null,
+                        funding: paymentMethod?.card?.funding || null,
+                        type: paymentMethod?.type || 'card'
+                    },
+                    billing_details: session.customer_details || paymentMethod?.billing_details,
+                    receipt_url: paymentIntent?.charges?.data?.[0]?.receipt_url || null,
+                    timestamp: new Date().toISOString()
                 };
 
                 for (const order of orders) {
@@ -482,7 +499,7 @@ export class CheckoutController extends BaseController {
             if (!user) return this.sendError('Authentication required', 401);
 
             const body = await req.json();
-            const { orderGroupId } = body;
+            const { orderGroupId, embedded } = body;
 
             if (!orderGroupId) return this.sendError('Order Group ID is required', 400);
 
@@ -600,20 +617,28 @@ export class CheckoutController extends BaseController {
                 frontendUrl = `http://${frontendUrl}`;
             }
 
+            const returnUrl = `${frontendUrl}/orders/summary/${orderGroupId}?session_id={CHECKOUT_SESSION_ID}&order_id=${orderGroupId}`;
+
             const stripeSession = await StripeService.createCheckoutSession(
                 orderGroupId, // Using Group ID as reference
                 allStripeItems,
                 user.email,
-                `${frontendUrl}/orders/summary/${orderGroupId}?session_id={CHECKOUT_SESSION_ID}&order_id=${orderGroupId}`,
-                `${frontendUrl}/checkout/cancel?order_id=${orderGroupId}`,
+                returnUrl, // Success URL (Used if hosted)
+                `${frontendUrl}/checkout/cancel?order_id=${orderGroupId}`, // Cancel URL (Used if hosted)
                 {
                     orderGroupId: orderGroupId
+                },
+                {
+                    uiMode: embedded ? 'embedded' : 'hosted',
+                    returnUrl: embedded ? returnUrl : undefined
                 }
             );
 
             return this.sendSuccess({
                 message: 'Payment session created',
-                paymentUrl: stripeSession.url
+                paymentUrl: stripeSession.url,
+                clientSecret: stripeSession.clientSecret,
+                sessionId: stripeSession.sessionId
             });
 
         } catch (error: any) {

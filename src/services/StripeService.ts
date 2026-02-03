@@ -30,7 +30,7 @@ export class StripeService {
         const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
         if (!webhookSecret) {
-             throw new Error("STRIPE_WEBHOOK_SECRET is missing.");
+            throw new Error("STRIPE_WEBHOOK_SECRET is missing.");
         }
 
         return stripe.webhooks.constructEvent(payload, signature, webhookSecret);
@@ -50,9 +50,11 @@ export class StripeService {
         customerEmail: string,
         successUrl: string,
         cancelUrl: string,
-        metadata: Record<string, string> = {}
+        metadata: Record<string, string> = {},
+        options?: { uiMode?: 'hosted' | 'embedded'; returnUrl?: string }
     ) {
         const stripe = this.getClient();
+        const uiMode = options?.uiMode || 'hosted';
 
         // Convert simplistic items to Stripe Line Items
         const line_items: Stripe.Checkout.SessionCreateParams.LineItem[] = items.map(item => ({
@@ -66,22 +68,33 @@ export class StripeService {
             quantity: item.quantity,
         }));
 
-        const session = await stripe.checkout.sessions.create({
+        const sessionConfig: Stripe.Checkout.SessionCreateParams = {
             payment_method_types: ['card'],
             line_items,
             mode: 'payment',
-            success_url: successUrl,
-            cancel_url: cancelUrl,
             customer_email: customerEmail,
             metadata: {
                 orderId: orderId,
                 ...metadata
             }
-        });
+        };
+
+        if (uiMode === 'embedded') {
+            sessionConfig.ui_mode = 'embedded';
+            if (!options?.returnUrl) throw new Error("returnUrl is required for embedded mode");
+            sessionConfig.return_url = options.returnUrl;
+            // success_url and cancel_url are NOT allowed in embedded mode
+        } else {
+            sessionConfig.success_url = successUrl;
+            sessionConfig.cancel_url = cancelUrl;
+        }
+
+        const session = await stripe.checkout.sessions.create(sessionConfig);
 
         return {
             sessionId: session.id,
-            url: session.url
+            url: session.url,
+            clientSecret: session.client_secret
         };
     }
 
@@ -90,6 +103,8 @@ export class StripeService {
      */
     static async retrieveSession(sessionId: string) {
         const stripe = this.getClient();
-        return await stripe.checkout.sessions.retrieve(sessionId);
+        return await stripe.checkout.sessions.retrieve(sessionId, {
+            expand: ['payment_intent', 'payment_intent.payment_method']
+        });
     }
 }
