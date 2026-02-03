@@ -423,64 +423,89 @@ export class CheckoutController extends BaseController {
             // Verify User Ownership (Check first order)
             if (orders[0].user_id !== user.id) return this.sendError('Forbidden', 403);
 
-            if (session.payment_status === 'paid' || session.payment_status === 'no_payment_required') {
+            const paymentIntent = session.payment_intent as any;
+            const paymentMethod = paymentIntent?.payment_method as any;
 
-                const paymentIntent = session.payment_intent as any;
-                const paymentMethod = paymentIntent?.payment_method as any;
+            const newTransactionRecord = {
+                payment_mode: 'Stripe',
+                session_id: session.id,
+                transaction_id: paymentIntent?.id || session.id,
+                amount_total: session.amount_total,
+                currency: session.currency,
+                payment_status: session.payment_status,
+                payment_details: {
+                    brand: paymentMethod?.card?.brand || null,
+                    last4: paymentMethod?.card?.last4 || null,
+                    funding: paymentMethod?.card?.funding || null,
+                    type: paymentMethod?.type || 'card'
+                },
+                billing_details: session.customer_details || paymentMethod?.billing_details,
+                receipt_url: paymentIntent?.charges?.data?.[0]?.receipt_url || null,
+                timestamp: new Date().toISOString()
+            };
 
-                const transactionData = {
-                    payment_mode: 'Stripe',
-                    session_id: session.id,
-                    transaction_id: paymentIntent?.id || session.id,
-                    amount_total: session.amount_total,
-                    currency: session.currency,
-                    payment_status: session.payment_status,
-                    payment_details: {
-                        brand: paymentMethod?.card?.brand || null,
-                        last4: paymentMethod?.card?.last4 || null,
-                        funding: paymentMethod?.card?.funding || null,
-                        type: paymentMethod?.type || 'card'
-                    },
-                    billing_details: session.customer_details || paymentMethod?.billing_details,
-                    receipt_url: paymentIntent?.charges?.data?.[0]?.receipt_url || null,
-                    timestamp: new Date().toISOString()
-                };
+            const isPaid = session.payment_status === 'paid' || session.payment_status === 'no_payment_required';
 
-                for (const order of orders) {
-                    if (order.payment_status !== 'paid') {
-                        order.payment_status = 'paid';
-                        // order.order_status = 'approved'; // Formerly auto-approved. Now waits for vendor.
-                        // Ensure it is 'order_received' if it wasn't already (it should be).
-                        if (order.order_status !== 'order_received') {
-                            order.order_status = 'order_received';
-                        }
-                        order.transaction_details = transactionData;
-
-                        // Append Payment Verification to History
-                        const currentHistory = (order.status_history as any[]) || [];
-                        const historyEntry = {
-                            status: order.order_status,
-                            payment_status: 'paid',
-                            shipment_status: order.shipment_status,
-                            updated_by: 'system', // or 'stripe'
-                            timestamp: new Date().toISOString(),
-                            note: 'Payment verified via Stripe'
-                        };
-                        order.status_history = [historyEntry, ...currentHistory];
-
-                        await order.save();
+            for (const order of orders) {
+                // Parse existing transaction_details
+                let currentDetails: any[] = [];
+                try {
+                    const raw = (order as any).transaction_details;
+                    if (raw) {
+                        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+                        currentDetails = Array.isArray(parsed) ? parsed : [parsed];
                     }
+                } catch (e) {
+                    console.error(`[CHECKOUT ERROR] Failed to parse existing transaction details for order ${order.id}`);
                 }
 
+                // Append new attempt
+                order.transaction_details = [...currentDetails, newTransactionRecord];
+
+                if (isPaid && order.payment_status !== 'paid') {
+                    order.payment_status = 'paid';
+                    if (order.order_status !== 'order_received') {
+                        order.order_status = 'order_received';
+                    }
+
+                    // Append Payment Verification to History
+                    const currentHistory = (order.status_history as any[]) || [];
+                    const historyEntry = {
+                        status: order.order_status,
+                        payment_status: 'paid',
+                        shipment_status: order.shipment_status,
+                        updated_by: 'system',
+                        timestamp: new Date().toISOString(),
+                        note: 'Payment verified via Stripe'
+                    };
+                    order.status_history = [historyEntry, ...currentHistory];
+                } else if (!isPaid) {
+                    // Record attempt failed in history too
+                    const currentHistory = (order.status_history as any[]) || [];
+                    const historyEntry = {
+                        status: order.order_status,
+                        payment_status: session.payment_status,
+                        shipment_status: order.shipment_status,
+                        updated_by: 'system',
+                        timestamp: new Date().toISOString(),
+                        note: `Payment attempt failed/incomplete: ${session.payment_status}`
+                    };
+                    order.status_history = [historyEntry, ...currentHistory];
+                }
+
+                await order.save();
+            }
+
+            if (isPaid) {
                 return this.sendSuccess({
                     success: true,
                     amount: session.amount_total,
                     currency: session.currency,
                     status: 'paid',
-                    orderId: orders[0].id // Return one ID for frontend routing
+                    orderId: orders[0].id
                 });
             } else {
-                return this.sendError('Payment not completed', 400);
+                return this.sendError(`Payment not completed: ${session.payment_status}`, 400);
             }
 
         } catch (error: any) {
