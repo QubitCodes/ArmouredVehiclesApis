@@ -59,6 +59,8 @@ export class Order extends Model<OrderAttributes, OrderCreationAttributes> imple
   declare public vendor_id?: string | null;
   declare public vat_amount: number;
   declare public admin_commission: number;
+  declare public total_shipping: number;
+  declare public total_packing: number;
 
   public items?: OrderItem[];
   public user?: User;

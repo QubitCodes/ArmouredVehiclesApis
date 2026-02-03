@@ -471,4 +471,154 @@ export class CheckoutController extends BaseController {
             return this.sendError(error.message, 500);
         }
     }
+
+    /**
+     * POST /api/v1/checkout/retry
+     * Retry payment for an existing Order Group
+     */
+    async retryPayment(req: NextRequest) {
+        try {
+            const user = await this.getUser(req);
+            if (!user) return this.sendError('Authentication required', 401);
+
+            const body = await req.json();
+            const { orderGroupId } = body;
+
+            if (!orderGroupId) return this.sendError('Order Group ID is required', 400);
+
+            // Fetch orders
+            const orders = await Order.findAll({
+                where: { order_group_id: orderGroupId },
+                include: [{ model: OrderItem, as: 'items' }]
+            });
+
+            if (orders.length === 0) return this.sendError('Order not found', 404);
+
+            // Verify Ownership
+            if (orders[0].user_id !== user.id) return this.sendError('Forbidden', 403);
+
+            // Check if already paid
+            const isPaid = orders.every(o => o.payment_status === 'paid');
+            if (isPaid) return this.sendError('Order is already paid', 400);
+
+            // Reconstruct Stripe Items
+            const allStripeItems: any[] = [];
+            let vatPercent = 5; // Default fallback
+
+            // Fetch items manually if association failed
+            for (const order of orders) {
+                if (!order.items || order.items.length === 0) {
+                    console.log(`[RETRY DEBUG] Items missing for Order ${order.id}. Fetching manually...`);
+                    const items = await OrderItem.findAll({ where: { order_id: order.id }, raw: true });
+                    order.items = items as any; // Cast to any to assume OrderItem structure
+                    console.log(`[RETRY DEBUG] Fetched ${items.length} items manually.`);
+                }
+            }
+
+            // Try to derive VAT percent from first order if possible, or just use current settings
+            let totalTaxable = 0;
+            let totalVatStored = 0;
+
+            orders.forEach(o => {
+                const sub = (o.items || []).reduce((sum: number, i: any) => sum + ((Number(i.price) || 0) * (Number(i.quantity) || 1)), 0);
+                totalTaxable += sub + (Number(o.total_shipping) || 0) + (Number(o.total_packing) || 0);
+                totalVatStored += (Number(o.vat_amount) || 0);
+            });
+
+            if (totalTaxable > 0) {
+                const calculatedVat = (totalVatStored / totalTaxable) * 100;
+                if (!isNaN(calculatedVat)) {
+                    vatPercent = calculatedVat;
+                }
+            }
+
+            // Now build items
+            for (const order of orders) {
+                for (const item of (order.items || [])) {
+                    const price = Number(item.price) || 0;
+                    const quantity = Number(item.quantity) || 1;
+
+                    const unitPriceWithTax = price * (1 + (vatPercent / 100));
+                    const finalAmount = Math.round(unitPriceWithTax * 100);
+
+                    if (finalAmount <= 0) {
+                        console.error(`[RETRY ERROR] Invalid Amount Item: Price=${price}, Qty=${quantity}, VAT=${vatPercent}, Calc=${finalAmount}`);
+                        return this.sendError('Invalid item amount detected. Please contact support.', 400);
+                    }
+
+                    allStripeItems.push({
+                        name: item.product_name || 'Product',
+                        amount: isNaN(finalAmount) ? 0 : finalAmount,
+                        quantity: quantity,
+                        currency: 'aed'
+                    });
+                }
+
+                if ((Number(order.total_shipping) || 0) > 0) {
+                    const shipping = Number(order.total_shipping) || 0;
+                    const val = shipping * (1 + (vatPercent / 100));
+                    const finalAmount = Math.round(val * 100);
+                    allStripeItems.push({
+                        name: 'Shipping Charges',
+                        amount: isNaN(finalAmount) ? 0 : finalAmount,
+                        quantity: 1,
+                        currency: 'aed'
+                    });
+                }
+
+                if ((Number(order.total_packing) || 0) > 0) {
+                    const packing = Number(order.total_packing) || 0;
+                    const val = packing * (1 + (vatPercent / 100));
+                    const finalAmount = Math.round(val * 100);
+                    allStripeItems.push({
+                        name: 'Packing Charges',
+                        amount: isNaN(finalAmount) ? 0 : finalAmount,
+                        quantity: 1,
+                        currency: 'aed'
+                    });
+                }
+            }
+
+            if (allStripeItems.length === 0) {
+                return this.sendError('No items found to generate payment link', 400);
+            }
+
+            // Final sanity check for NaN
+            const hasNaN = allStripeItems.some(i => isNaN(i.amount));
+            if (hasNaN) {
+                console.error("[RETRY ERROR] NaN detected in stripe items:", allStripeItems);
+                return this.sendError("Error generating payment link: Invalid calculation", 500);
+            }
+
+            // Determine Frontend URL dynamically to support varying ports (e.g. localhost:3001)
+            const origin = req.headers.get('origin');
+            let frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+
+            if (origin && (origin.startsWith('http://') || origin.startsWith('https://'))) {
+                frontendUrl = origin;
+            } else if (!frontendUrl.startsWith('http')) {
+                frontendUrl = `http://${frontendUrl}`;
+            }
+
+            const stripeSession = await StripeService.createCheckoutSession(
+                orderGroupId, // Using Group ID as reference
+                allStripeItems,
+                user.email,
+                `${frontendUrl}/orders/summary/${orderGroupId}?session_id={CHECKOUT_SESSION_ID}&order_id=${orderGroupId}`,
+                `${frontendUrl}/checkout/cancel?order_id=${orderGroupId}`,
+                {
+                    orderGroupId: orderGroupId
+                }
+            );
+
+            return this.sendSuccess({
+                message: 'Payment session created',
+                paymentUrl: stripeSession.url
+            });
+
+        } catch (error: any) {
+            console.error('Retry Payment Error:', error);
+            return this.sendError(String(error.message), 500);
+        }
+    }
 }
