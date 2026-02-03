@@ -361,11 +361,27 @@ export class CheckoutController extends BaseController {
                     allStripeItems,
                     user.email,
                     `${frontendUrl}/orders/summary/${orderGroupId}?session_id={CHECKOUT_SESSION_ID}&order_id=${orderGroupId}`, // Keeping order_id in query for frontend loading
-                    `${frontendUrl}/checkout/cancel?order_id=${referenceOrderId}`,
+                    `${frontendUrl}/orders/summary/${orderGroupId}?session_id={CHECKOUT_SESSION_ID}&order_id=${orderGroupId}&cancelled=true`,
                     {
                         orderGroupId: orderGroupId
                     }
                 );
+
+                // Record initial session entry in all orders of the group
+                const initialTransactionRecord = {
+                    payment_mode: 'Stripe',
+                    session_id: stripeSession.sessionId,
+                    payment_status: 'pending',
+                    timestamp: new Date().toISOString()
+                };
+
+                for (const orderId of createdOrderIds) {
+                    const order = await Order.findByPk(orderId);
+                    if (order) {
+                        order.transaction_details = [initialTransactionRecord];
+                        await order.save();
+                    }
+                }
 
                 return this.sendSuccess({
                     message: 'Order created. Proceed to payment.',
@@ -459,8 +475,21 @@ export class CheckoutController extends BaseController {
                     console.error(`[CHECKOUT ERROR] Failed to parse existing transaction details for order ${order.id}`);
                 }
 
-                // Append new attempt
-                order.transaction_details = [...currentDetails, newTransactionRecord];
+                // Check if this session already exists in the history
+                const sessionIdx = currentDetails.findIndex((p: any) => p.session_id === session.id);
+
+                if (sessionIdx !== -1) {
+                    // Update existing entry
+                    currentDetails[sessionIdx] = {
+                        ...currentDetails[sessionIdx],
+                        ...newTransactionRecord
+                    };
+                } else {
+                    // Append new attempt
+                    currentDetails.push(newTransactionRecord);
+                }
+
+                order.transaction_details = currentDetails;
 
                 if (isPaid && order.payment_status !== 'paid') {
                     order.payment_status = 'paid';
@@ -643,13 +672,14 @@ export class CheckoutController extends BaseController {
             }
 
             const returnUrl = `${frontendUrl}/orders/summary/${orderGroupId}?session_id={CHECKOUT_SESSION_ID}&order_id=${orderGroupId}`;
+            const cancelUrl = `${frontendUrl}/orders/summary/${orderGroupId}?session_id={CHECKOUT_SESSION_ID}&order_id=${orderGroupId}&cancelled=true`;
 
             const stripeSession = await StripeService.createCheckoutSession(
                 orderGroupId, // Using Group ID as reference
                 allStripeItems,
                 user.email,
                 returnUrl, // Success URL (Used if hosted)
-                `${frontendUrl}/checkout/cancel?order_id=${orderGroupId}`, // Cancel URL (Used if hosted)
+                cancelUrl, // Cancel URL (Used if hosted)
                 {
                     orderGroupId: orderGroupId
                 },
@@ -658,6 +688,28 @@ export class CheckoutController extends BaseController {
                     returnUrl: embedded ? returnUrl : undefined
                 }
             );
+
+            // Record initial session entry in all orders
+            const initialTransactionRecord = {
+                payment_mode: 'Stripe',
+                session_id: stripeSession.sessionId,
+                payment_status: 'pending',
+                timestamp: new Date().toISOString()
+            };
+
+            for (const order of orders) {
+                let current: any[] = [];
+                try {
+                    const raw = (order as any).transaction_details;
+                    if (raw) {
+                        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+                        current = Array.isArray(parsed) ? parsed : [parsed];
+                    }
+                } catch (e) { }
+
+                order.transaction_details = [...current, initialTransactionRecord];
+                await order.save();
+            }
 
             return this.sendSuccess({
                 message: 'Payment session created',
