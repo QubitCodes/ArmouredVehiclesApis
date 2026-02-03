@@ -247,6 +247,14 @@ export class AdminOrderController extends BaseController {
                     }
                     return subJson;
                 });
+                // Calculate combined totals for the group
+                const groupTotal = group.reduce((sum, o) => sum + Number(o.total_amount || 0), 0);
+                const groupCommission = group.reduce((sum, o) => sum + Number(o.admin_commission || 0), 0);
+
+                // Update mainOrder with group totals for Admin view
+                mainOrder.total_amount = groupTotal;
+                mainOrder.admin_commission = groupCommission;
+
                 // @ts-ignore
                 mainOrder.sub_order_count = group.length;
 
@@ -381,6 +389,11 @@ export class AdminOrderController extends BaseController {
                     }
                     return subJson;
                 });
+
+                // Calculate group totals
+                orderJson.group_total_amount = groupedOrders.reduce((sum, o) => sum + Number(o.total_amount || 0), 0);
+                orderJson.group_admin_commission = groupedOrders.reduce((sum, o) => sum + Number(o.admin_commission || 0), 0);
+
                 return controller.sendSuccess(orderJson);
             }
 
