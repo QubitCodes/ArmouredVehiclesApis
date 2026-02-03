@@ -28,10 +28,12 @@ interface OrderAttributes {
   vendor_id?: string | null;
   vat_amount?: number;
   admin_commission?: number;
+  total_shipping?: number;
+  total_packing?: number;
 }
 
 
-interface OrderCreationAttributes extends Optional<OrderAttributes, 'id' | 'order_id' | 'order_status' | 'currency' | 'payment_status' | 'shipment_status' | 'transaction_details' | 'shipment_details'> {}
+interface OrderCreationAttributes extends Optional<OrderAttributes, 'id' | 'order_id' | 'order_status' | 'currency' | 'payment_status' | 'shipment_status' | 'transaction_details' | 'shipment_details'> { }
 
 export class Order extends Model<OrderAttributes, OrderCreationAttributes> implements OrderAttributes {
   declare public id: string;
@@ -57,7 +59,7 @@ export class Order extends Model<OrderAttributes, OrderCreationAttributes> imple
   declare public vendor_id?: string | null;
   declare public vat_amount: number;
   declare public admin_commission: number;
-  
+
   public items?: OrderItem[];
   public user?: User;
 }
@@ -131,9 +133,9 @@ Order.init(
       defaultValue: {}
     },
     status_history: {
-        type: DataTypes.JSONB,
-        allowNull: true,
-        defaultValue: []
+      type: DataTypes.JSONB,
+      allowNull: true,
+      defaultValue: []
     },
     order_group_id: {
       type: DataTypes.STRING,
@@ -149,6 +151,16 @@ Order.init(
       allowNull: false,
     },
     admin_commission: {
+      type: DataTypes.DECIMAL(10, 2),
+      defaultValue: 0,
+      allowNull: false,
+    },
+    total_shipping: {
+      type: DataTypes.DECIMAL(10, 2),
+      defaultValue: 0,
+      allowNull: false,
+    },
+    total_packing: {
       type: DataTypes.DECIMAL(10, 2),
       defaultValue: 0,
       allowNull: false,
@@ -176,7 +188,7 @@ interface OrderItemAttributes {
   updated_at?: Date;
 }
 
-interface OrderItemCreationAttributes extends Optional<OrderItemAttributes, 'id'> {}
+interface OrderItemCreationAttributes extends Optional<OrderItemAttributes, 'id'> { }
 
 export class OrderItem extends Model<OrderItemAttributes, OrderItemCreationAttributes> implements OrderItemAttributes {
   public id!: string;
@@ -186,7 +198,7 @@ export class OrderItem extends Model<OrderItemAttributes, OrderItemCreationAttri
   public quantity!: number;
   public price!: number;
   public product_name!: string;
-  
+
   public readonly product?: Product;
 }
 
