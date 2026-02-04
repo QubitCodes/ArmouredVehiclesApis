@@ -1862,8 +1862,8 @@ export class ProductController extends BaseController {
                     { model: ProductMedia, as: 'media', where: { is_cover: true }, required: false },
                 ],
             });
-
-            return this.sendSuccess(this.maskProducts(similar, user));
+            const formatted = this.formatProduct(similar);
+            return this.sendSuccess(this.maskProducts(formatted, user));
         } catch (error: any) {
             return this.sendError(String((error as any).message), 500);
         }
@@ -1889,7 +1889,8 @@ export class ProductController extends BaseController {
                 ],
             });
 
-            return this.sendSuccess(this.maskProducts(products, user));
+            const formatted = this.formatProduct(products);
+            return this.sendSuccess(this.maskProducts(formatted, user));
         } catch (error: any) {
             return this.sendError(String((error as any).message), 500);
         }
