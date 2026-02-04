@@ -19,10 +19,10 @@ async function verifyAuth(req: NextRequest) {
 		const decoded: any = verifyAccessToken(token);
 		const userId = decoded.userId || decoded.sub;
 		if (!userId) return { user: null, error: 'Invalid Token' };
-		
+
 		const user = await User.findByPk(userId);
 		if (!user) return { user: null, error: 'User not found' };
-		
+
 		return { user, error: null };
 	} catch (e: any) {
 		return { user: null, error: e.name === 'TokenExpiredError' ? 'Token Expired' : 'Invalid Token' };
@@ -42,8 +42,8 @@ export async function GET(
 ) {
 	try {
 		const resolvedParams = await params;
-		const productId = parseInt(resolvedParams.id);
-		if (isNaN(productId)) {
+		const productId = resolvedParams.id;
+		if (!productId) {
 			return NextResponse.json(
 				{ status: false, message: 'Invalid product ID', code: 400, data: null, errors: [] },
 				{ status: 400 }
@@ -108,8 +108,8 @@ export async function POST(
 		}
 
 		const resolvedParams = await params;
-		const productId = parseInt(resolvedParams.id);
-		if (isNaN(productId)) {
+		const productId = resolvedParams.id;
+		if (!productId) {
 			return NextResponse.json(
 				{ status: false, message: 'Invalid product ID', code: 400, data: null, errors: [] },
 				{ status: 400 }
@@ -176,8 +176,8 @@ export async function PUT(
 		}
 
 		const resolvedParams = await params;
-		const productId = parseInt(resolvedParams.id);
-		if (isNaN(productId)) {
+		const productId = resolvedParams.id;
+		if (!productId) {
 			return NextResponse.json(
 				{ status: false, message: 'Invalid product ID', code: 400, data: null, errors: [] },
 				{ status: 400 }
@@ -219,7 +219,7 @@ export async function PUT(
 				results.push(created);
 			}
 		}
-		
+
 		await syncProductAttributes(productId);
 
 		return NextResponse.json({
@@ -240,31 +240,31 @@ export async function PUT(
 /**
  * Helper: Sync Product Attributes (sizes, colors) from Specifications
  */
-async function syncProductAttributes(productId: number) {
-    try {
-        const specs = await ProductSpecification.findAll({ where: { product_id: productId } });
-        const sizes: string[] = [];
-        const colors: string[] = [];
-    
-        for (const s of specs) {
-            if (s.active === false) continue;
-            const label = (s.label || '').trim();
-            const value = (s.value || '').trim();
-            if (!value) continue;
-    
-            if (label === 'Size') {
-                 sizes.push(value);
-            } else if (label === 'Color') {
-                 const parts = value.split(',').map(x => x.trim()).filter(Boolean);
-                 colors.push(...parts);
-            }
-        }
-    
-        await Product.update(
-            { sizes: Array.from(new Set(sizes)), colors: Array.from(new Set(colors)) },
-            { where: { id: productId } }
-        );
-    } catch (err) {
-        console.error('Failed to sync product attributes:', err);
-    }
+async function syncProductAttributes(productId: string) {
+	try {
+		const specs = await ProductSpecification.findAll({ where: { product_id: productId } });
+		const sizes: string[] = [];
+		const colors: string[] = [];
+
+		for (const s of specs) {
+			if (s.active === false) continue;
+			const label = (s.label || '').trim();
+			const value = (s.value || '').trim();
+			if (!value) continue;
+
+			if (label === 'Size') {
+				sizes.push(value);
+			} else if (label === 'Color') {
+				const parts = value.split(',').map(x => x.trim()).filter(Boolean);
+				colors.push(...parts);
+			}
+		}
+
+		await Product.update(
+			{ sizes: Array.from(new Set(sizes)), colors: Array.from(new Set(colors)) },
+			{ where: { id: productId } }
+		);
+	} catch (err) {
+		console.error('Failed to sync product attributes:', err);
+	}
 }
