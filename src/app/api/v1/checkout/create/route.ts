@@ -31,5 +31,15 @@ const controller = new CheckoutController();
  *                         paymentUrl: { type: string, nullable: true }
  */
 export async function POST(req: NextRequest) {
-    return controller.create(req);
+    const contentType = req.headers.get('content-type') || '';
+    let data: any = {};
+
+    if (contentType.includes('multipart/form-data')) {
+        const formData = await req.formData().catch(() => new FormData());
+        data = Object.fromEntries(formData.entries());
+    } else {
+        data = await req.json().catch(() => ({}));
+    }
+
+    return controller.create(req, data);
 }

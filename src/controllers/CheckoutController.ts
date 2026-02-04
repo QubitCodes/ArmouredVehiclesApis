@@ -86,7 +86,7 @@ export class CheckoutController extends BaseController {
      * POST /api/v1/checkout/create
      * Create an Order (Direct or Request depending on compliance)
      */
-    async create(req: NextRequest) {
+    async create(req: NextRequest, data?: any) {
         const t = await sequelize.transaction();
         let isCommitted = false;
         try {
@@ -120,8 +120,18 @@ export class CheckoutController extends BaseController {
             }
 
 
-            const body = await req.json().catch(() => ({}));
-            const { addressId } = body;
+            const body = data || await req.json().catch(() => ({}));
+            const { addressId, embedded } = body;
+
+            // Standardizing embedded flag from FormData or JSON
+            const isEmbedded = true;
+
+            console.log('[CHECKOUT DEBUG] Create Session (FORCED):', {
+                hasData: !!data,
+                bodyKeys: Object.keys(body),
+                embeddedValue: embedded,
+                isEmbedded
+            });
 
             let shipmentDetails = {};
             if (addressId) {
@@ -357,7 +367,11 @@ export class CheckoutController extends BaseController {
                     `${frontendUrl}/orders/summary/${orderGroupId}?session_id={CHECKOUT_SESSION_ID}&order_id=${orderGroupId}&cancelled=true`,
                     {
                         orderGroupId: orderGroupId
-                    }
+                    },
+                    isEmbedded ? {
+                        uiMode: 'embedded',
+                        returnUrl: `${frontendUrl}/orders/summary/${orderGroupId}?session_id={CHECKOUT_SESSION_ID}&order_id=${orderGroupId}`
+                    } : undefined
                 );
 
                 // Record initial session entry in all orders of the group
@@ -385,7 +399,8 @@ export class CheckoutController extends BaseController {
                     orderGroupId: orderGroupId,
                     type: 'direct',
                     requiresApproval: false,
-                    paymentUrl: stripeSession.url
+                    paymentUrl: stripeSession.url,
+                    clientSecret: stripeSession.clientSecret
                 }, 'Created', 201);
             }
 
@@ -400,12 +415,12 @@ export class CheckoutController extends BaseController {
      * POST /api/v1/checkout/verify-session
      * Verify Stripe Session and Confirm Order(s)
      */
-    async verifySession(req: NextRequest) {
+    async verifySession(req: NextRequest, data?: any) {
         try {
             const user = await this.getUser(req);
             if (!user) return this.sendError('Authentication required', 401);
 
-            const body = await req.json();
+            const body = data || await req.json().catch(() => ({}));
             const { sessionId } = body; // We trust sessionId more than orderId
 
             if (!sessionId) return this.sendError('Session ID is required', 400);
@@ -543,12 +558,12 @@ export class CheckoutController extends BaseController {
      * POST /api/v1/checkout/retry
      * Retry payment for an existing Order Group
      */
-    async retryPayment(req: NextRequest) {
+    async retryPayment(req: NextRequest, data?: any) {
         try {
             const user = await this.getUser(req);
             if (!user) return this.sendError('Authentication required', 401);
 
-            const body = await req.json();
+            const body = data || await req.json().catch(() => ({}));
             const { orderGroupId, embedded } = body;
 
             if (!orderGroupId) return this.sendError('Order Group ID is required', 400);

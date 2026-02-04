@@ -38,5 +38,7 @@ import { CheckoutController } from '@/controllers/CheckoutController';
  */
 export async function POST(req: NextRequest) {
   const controller = new CheckoutController();
-  return controller.verifySession(req);
+  const formData = await req.formData().catch(() => new FormData());
+  const data = Object.fromEntries(formData.entries());
+  return controller.verifySession(req, data);
 }

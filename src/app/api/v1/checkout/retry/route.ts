@@ -36,5 +36,7 @@ const controller = new CheckoutController();
  *                   type: string
  */
 export async function POST(req: NextRequest) {
-    return controller.retryPayment(req);
+    const formData = await req.formData().catch(() => new FormData());
+    const data = Object.fromEntries(formData.entries());
+    return controller.retryPayment(req, data);
 }
