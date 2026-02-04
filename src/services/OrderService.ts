@@ -65,7 +65,7 @@ export class OrderService {
 
             // 4. Group Items by Vendor
             const vendorGroups = new Map<string, any[]>();
-            const consolidatedItems = new Map<number, any>();
+            const consolidatedItems = new Map<string, any>();
 
             for (const item of cart.items) {
                 if (!item.product) continue;

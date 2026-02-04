@@ -181,7 +181,7 @@ Order.init(
 interface OrderItemAttributes {
   id: string; // UUID
   order_id: string;
-  product_id: number;
+  product_id: string;
   vendor_id?: string | null;
   quantity: number;
   price: number;
@@ -195,7 +195,7 @@ interface OrderItemCreationAttributes extends Optional<OrderItemAttributes, 'id'
 export class OrderItem extends Model<OrderItemAttributes, OrderItemCreationAttributes> implements OrderItemAttributes {
   public id!: string;
   public order_id!: string;
-  public product_id!: number;
+  public product_id!: string;
   public vendor_id?: string | null;
   public quantity!: number;
   public price!: number;
@@ -216,7 +216,7 @@ OrderItem.init(
       allowNull: false,
     },
     product_id: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.UUID,
       allowNull: false,
     },
     vendor_id: {

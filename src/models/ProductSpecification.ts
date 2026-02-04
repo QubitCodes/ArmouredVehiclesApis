@@ -15,7 +15,7 @@ export const SpecificationType = {
 
 interface ProductSpecificationAttributes {
 	id: string;
-	product_id: number;
+	product_id: string;
 	label?: string | null;
 	value?: string | null;
 	type: 'general' | 'title_only' | 'value_only';
@@ -25,11 +25,11 @@ interface ProductSpecificationAttributes {
 	updated_at?: Date;
 }
 
-interface ProductSpecificationCreationAttributes extends Optional<ProductSpecificationAttributes, 'id' | 'label' | 'value' | 'type' | 'active' | 'sort' | 'created_at' | 'updated_at'> {}
+interface ProductSpecificationCreationAttributes extends Optional<ProductSpecificationAttributes, 'id' | 'label' | 'value' | 'type' | 'active' | 'sort' | 'created_at' | 'updated_at'> { }
 
 export class ProductSpecification extends Model<ProductSpecificationAttributes, ProductSpecificationCreationAttributes> implements ProductSpecificationAttributes {
 	declare public id: string;
-	declare public product_id: number;
+	declare public product_id: string;
 	declare public label?: string | null;
 	declare public value?: string | null;
 	declare public type: 'general' | 'title_only' | 'value_only';
@@ -47,7 +47,7 @@ ProductSpecification.init(
 			primaryKey: true,
 		},
 		product_id: {
-			type: DataTypes.INTEGER,
+			type: DataTypes.UUID,
 			allowNull: false,
 			references: {
 				model: 'products',

@@ -37,7 +37,7 @@ const productController = new ProductController();
  *       403:
  *         description: Forbidden
  */
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-    const { id } = await params;
-    return productController.toggleAttributes(req, { id });
+export async function PATCH(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+    const params = await props.params;
+    return productController.toggleAttributes(req, { params });
 }

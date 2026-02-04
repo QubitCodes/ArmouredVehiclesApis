@@ -17,8 +17,8 @@ export class ReviewController extends BaseController {
 	 */
 	async listByProduct(req: NextRequest, context: { params: { id: string } }) {
 		try {
-			const productId = parseInt(context.params.id);
-			if (isNaN(productId)) {
+			const productId = context.params.id;
+			if (!productId) {
 				return this.sendError('Invalid product ID', 400);
 			}
 
@@ -74,8 +74,8 @@ export class ReviewController extends BaseController {
 			const { user, error } = await this.verifyAuth(req);
 			if (error) return error;
 
-			const productId = parseInt(context.params.id);
-			if (isNaN(productId)) {
+			const productId = context.params.id;
+			if (!productId) {
 				return this.sendError('Invalid product ID', 400);
 			}
 

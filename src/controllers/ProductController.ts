@@ -1145,8 +1145,8 @@ export class ProductController extends BaseController {
      */
     async adminGetById(req: NextRequest, { params }: { params: { id: string } }) {
         try {
-            const id = parseInt(params.id);
-            if (isNaN(id)) return this.sendError('Invalid ID', 400);
+            const id = params.id;
+            if (!id) return this.sendError('Invalid ID', 400);
 
             const { product, user, error } = await this.verifyProductAccess(req, id, 'product.view');
             if (error) return error;
@@ -1186,12 +1186,16 @@ export class ProductController extends BaseController {
     async getById(req: NextRequest, { params }: { params: { id: string } }) {
         try {
             const user = await this.getUserFromRequest(req);
-            const id = parseInt(params.id);
+            const id = params.id;
 
-            if (isNaN(id)) return this.sendError('Invalid Product ID', 400);
+            if (!id) return this.sendError('Invalid Product ID', 400);
+
+            const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+            // If not UUID, assume it's a SKU and ensure it has the 'SKU-' prefix
+            const whereClause = isUuid ? { id } : { sku: id.startsWith('SKU-') ? id : `SKU-${id}` };
 
             const product = await Product.findOne({
-                where: { id },
+                where: whereClause,
                 include: [
                     { model: ProductMedia, as: 'media', required: false },
                     { model: ProductPricingTier, as: 'pricing_tiers' },
@@ -1231,9 +1235,9 @@ export class ProductController extends BaseController {
      */
     async update(req: NextRequest, { params, parsedData }: { params: { id: string }, parsedData?: { data: any, files: File[] } }) {
         try {
-            const id = parseInt(params.id);
+            const id = params.id;
 
-            if (isNaN(id)) return this.sendError('Invalid Product ID', 400);
+            if (!id) return this.sendError('Invalid Product ID', 400);
 
             const { product, user, error } = await this.verifyProductAccess(req, id);
             if (error) return error;
@@ -1477,7 +1481,7 @@ export class ProductController extends BaseController {
     /**
      * Helper: Sync Colors/Sizes to ProductSpecification table
      */
-    private async syncSpecifications(productId: number, body: any) {
+    private async syncSpecifications(productId: string, body: any) {
         // 1. Define specs to sync
         const specsToSync = [
             { key: 'colors', label: 'Color', type: 'general' },
@@ -1522,7 +1526,7 @@ export class ProductController extends BaseController {
     /**
      * Helper: Verify vendor/admin auth and product ownership
      */
-    private async verifyProductAccess(req: NextRequest, productId: number, requiredPermission: string = 'product.manage'): Promise<{ product: any; user: any; error: Response | null }> {
+    private async verifyProductAccess(req: NextRequest, productId: string, requiredPermission: string = 'product.manage'): Promise<{ product: any; user: any; error: Response | null }> {
         const authHeader = req.headers.get('authorization');
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
             return { product: null, user: null, error: this.sendError('Unauthorized', 401) };
@@ -1614,8 +1618,8 @@ export class ProductController extends BaseController {
      */
     async addMedia(req: NextRequest, { params }: { params: { id: string } }) {
         try {
-            const productId = parseInt(params.id);
-            if (isNaN(productId)) return this.sendError('Invalid product ID', 400);
+            const productId = params.id;
+            if (!productId) return this.sendError('Invalid product ID', 400);
 
             const { product, user, error } = await this.verifyProductAccess(req, productId);
             if (error) return error;
@@ -1656,9 +1660,9 @@ export class ProductController extends BaseController {
      */
     async deleteMedia(req: NextRequest, { params }: { params: { id: string; mediaId: string } }) {
         try {
-            const productId = parseInt(params.id);
+            const productId = params.id;
             const mediaId = parseInt(params.mediaId);
-            if (isNaN(productId) || isNaN(mediaId)) {
+            if (!productId || isNaN(mediaId)) {
                 return this.sendError('Invalid ID', 400);
             }
 
@@ -1688,8 +1692,8 @@ export class ProductController extends BaseController {
      */
     async bulkDeleteMedia(req: NextRequest, { params }: { params: { id: string } }) {
         try {
-            const productId = parseInt(params.id);
-            if (isNaN(productId)) return this.sendError('Invalid ID', 400);
+            const productId = params.id;
+            if (!productId) return this.sendError('Invalid ID', 400);
 
             const { product, user, error } = await this.verifyProductAccess(req, productId);
             if (error) return error;
@@ -1722,9 +1726,9 @@ export class ProductController extends BaseController {
      */
     async setCoverImage(req: NextRequest, { params }: { params: { id: string; mediaId: string } }) {
         try {
-            const productId = parseInt(params.id);
+            const productId = params.id;
             const mediaId = parseInt(params.mediaId);
-            if (isNaN(productId) || isNaN(mediaId)) {
+            if (!productId || isNaN(mediaId)) {
                 return this.sendError('Invalid ID', 400);
             }
 
@@ -1832,8 +1836,8 @@ export class ProductController extends BaseController {
     async getSimilar(req: NextRequest, { params }: { params: { id: string } }) {
         try {
             const user = await this.getUserFromRequest(req);
-            const id = parseInt(params.id);
-            if (isNaN(id)) return this.sendError('Invalid ID', 400);
+            const id = params.id;
+            if (!id) return this.sendError('Invalid ID', 400);
 
             const product = await Product.findByPk(id);
             if (!product) return this.sendError('Product not found', 404);
@@ -2110,8 +2114,8 @@ export class ProductController extends BaseController {
      */
     async delete(req: NextRequest, { params }: { params: { id: string } }) {
         try {
-            const id = parseInt(params.id);
-            if (isNaN(id)) return this.sendError('Invalid ID', 400);
+            const id = params.id;
+            if (!id) return this.sendError('Invalid ID', 400);
 
             const { product, user, error } = await this.verifyProductAccess(req, id);
             if (error) return error;
@@ -2130,7 +2134,7 @@ export class ProductController extends BaseController {
      * PATCH /api/v1/admin/products/:id/approval
      * Admin only: Approve or Reject a product
      */
-    async approve(req: NextRequest, params: { id: string }) {
+    async approve(req: NextRequest, { params }: { params: { id: string } }) {
         try {
             const user = await this.getUserFromRequest(req);
             if (!user) return this.sendError('Unauthorized', 401);
@@ -2192,7 +2196,7 @@ export class ProductController extends BaseController {
      * PATCH /api/v1/admin/products/:id/attributes
      * Toggle is_featured and is_top_selling flags
      */
-    async toggleAttributes(req: NextRequest, params: { id: string }) {
+    async toggleAttributes(req: NextRequest, { params }: { params: { id: string } }) {
         try {
             const user = await this.getUserFromRequest(req);
             if (!user) return this.sendError('Unauthorized', 401);

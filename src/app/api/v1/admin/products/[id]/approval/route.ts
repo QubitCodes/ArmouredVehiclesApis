@@ -41,5 +41,5 @@ import { ProductController } from '@/controllers/ProductController';
  */
 export async function PATCH(req: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
-  return new ProductController().approve(req, params);
+  return new ProductController().approve(req, { params });
 }

@@ -21,7 +21,7 @@ export const ProductCondition = {
 
 // --- Product Attribute Interface ---
 interface ProductAttributes {
-  id: number;
+  id: string; // UUID
   vendor_id?: string;
   status: string;
 
@@ -53,7 +53,7 @@ interface ProductAttributes {
   colors?: string[] | null;
   weight_value?: number | null;
   weight_unit?: string | null;
-  
+
   // Packing
   packing_length?: number | null;
   packing_width?: number | null;
@@ -116,15 +116,15 @@ interface ProductAttributes {
   updated_at?: Date;
 }
 
-interface ProductCreationAttributes extends Optional<ProductAttributes, 'id' | 'status' | 'created_at' | 'updated_at'> {}
+interface ProductCreationAttributes extends Optional<ProductAttributes, 'id' | 'status' | 'created_at' | 'updated_at'> { }
 
 export class Product extends Model<ProductAttributes, ProductCreationAttributes> implements ProductAttributes {
-  declare public id: number;
+  declare public id: string;
   declare public vendor_id?: string;
   declare public status: string;
   declare public approval_status?: 'pending' | 'approved' | 'rejected';
   declare public rejection_reason?: string;
-  
+
   // Associations
   declare public vendor?: any;
   declare public category?: any;
@@ -134,7 +134,7 @@ export class Product extends Model<ProductAttributes, ProductCreationAttributes>
   declare public media?: ProductMedia[];
   declare public pricing_tiers?: any[];
   declare public product_specifications?: any[];
-  
+
   // Basic
   declare public name?: string;
   declare public sku?: string;
@@ -219,14 +219,14 @@ export class Product extends Model<ProductAttributes, ProductCreationAttributes>
   declare public review_note?: string;
 
   declare public individual_product_pricing?: { name: string; amount: number }[];
-  
+
   declare public readonly created_at: Date;
   declare public readonly updated_at: Date;
 }
 
 Product.init(
   {
-    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
     vendor_id: { type: DataTypes.UUID },
     status: { type: DataTypes.STRING, defaultValue: ProductStatus.DRAFT },
     approval_status: { type: DataTypes.ENUM('pending', 'approved', 'rejected'), defaultValue: 'pending' },
@@ -259,7 +259,7 @@ Product.init(
     colors: { type: DataTypes.ARRAY(DataTypes.TEXT) },
     weight_value: { type: DataTypes.DECIMAL(10, 2) },
     weight_unit: { type: DataTypes.TEXT },
-    
+
     // Packing
     packing_length: { type: DataTypes.DECIMAL(10, 2) },
     packing_width: { type: DataTypes.DECIMAL(10, 2) },
@@ -295,7 +295,7 @@ Product.init(
     price: { type: DataTypes.DECIMAL(10, 2) },
     original_price: { type: DataTypes.DECIMAL(10, 2) },
 
-    
+
     // Additional Legacy
     description: { type: DataTypes.TEXT },
     condition: { type: DataTypes.STRING, defaultValue: ProductCondition.NEW },
@@ -335,7 +335,7 @@ Product.init(
 // --- Product Media ---
 interface ProductMediaAttributes {
   id: number;
-  product_id: number;
+  product_id: string;
   type: string;
   url: string;
   file_name?: string;
@@ -345,11 +345,11 @@ interface ProductMediaAttributes {
   display_order?: number;
   created_at?: Date;
 }
-interface ProductMediaCreationAttributes extends Optional<ProductMediaAttributes, 'id' | 'created_at'> {}
+interface ProductMediaCreationAttributes extends Optional<ProductMediaAttributes, 'id' | 'created_at'> { }
 
 export class ProductMedia extends Model<ProductMediaAttributes, ProductMediaCreationAttributes> implements ProductMediaAttributes {
   declare public id: number;
-  declare public product_id: number;
+  declare public product_id: string;
   declare public type: string;
   declare public url: string;
   declare public file_name?: string;
@@ -363,10 +363,10 @@ export class ProductMedia extends Model<ProductMediaAttributes, ProductMediaCrea
 ProductMedia.init(
   {
     id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
-    product_id: { type: DataTypes.INTEGER, allowNull: false },
+    product_id: { type: DataTypes.UUID, allowNull: false },
     type: { type: DataTypes.TEXT, allowNull: false }, // 'image', 'video', 'document'
-    url: { 
-      type: DataTypes.TEXT, 
+    url: {
+      type: DataTypes.TEXT,
       allowNull: false,
       get() {
         const rawValue = this.getDataValue('url');
@@ -394,7 +394,7 @@ ProductMedia.init(
 // --- Product Pricing Tiers ---
 interface ProductPricingTierAttributes {
   id: number;
-  product_id: number;
+  product_id: string;
   min_quantity: number;
   max_quantity?: number | null;
   price: number;
@@ -402,11 +402,11 @@ interface ProductPricingTierAttributes {
   deleted_at?: Date | null;
   delete_reason?: string | null;
 }
-interface ProductPricingTierCreationAttributes extends Optional<ProductPricingTierAttributes, 'id' | 'created_at' | 'deleted_at' | 'delete_reason'> {}
+interface ProductPricingTierCreationAttributes extends Optional<ProductPricingTierAttributes, 'id' | 'created_at' | 'deleted_at' | 'delete_reason'> { }
 
 export class ProductPricingTier extends Model<ProductPricingTierAttributes, ProductPricingTierCreationAttributes> implements ProductPricingTierAttributes {
   declare public id: number;
-  declare public product_id: number;
+  declare public product_id: string;
   declare public min_quantity: number;
   declare public max_quantity?: number | null;
   declare public price: number;
@@ -418,7 +418,7 @@ export class ProductPricingTier extends Model<ProductPricingTierAttributes, Prod
 ProductPricingTier.init(
   {
     id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
-    product_id: { type: DataTypes.INTEGER, allowNull: false },
+    product_id: { type: DataTypes.UUID, allowNull: false },
     min_quantity: { type: DataTypes.INTEGER, allowNull: false },
     max_quantity: { type: DataTypes.INTEGER },
     price: { type: DataTypes.DECIMAL(10, 2), allowNull: false },

@@ -8,7 +8,7 @@ import { sequelize } from '../config/database';
 
 interface ReviewAttributes {
 	id: number;
-	product_id: number;
+	product_id: string;
 	user_id: string;
 	rating: number;
 	title?: string;
@@ -20,11 +20,11 @@ interface ReviewAttributes {
 	updated_at?: Date;
 }
 
-interface ReviewCreationAttributes extends Optional<ReviewAttributes, 'id' | 'verified_purchase' | 'helpful_count' | 'created_at' | 'updated_at'> {}
+interface ReviewCreationAttributes extends Optional<ReviewAttributes, 'id' | 'verified_purchase' | 'helpful_count' | 'created_at' | 'updated_at'> { }
 
 export class Review extends Model<ReviewAttributes, ReviewCreationAttributes> implements ReviewAttributes {
 	public id!: number;
-	public product_id!: number;
+	public product_id!: string;
 	public user_id!: string;
 	public rating!: number;
 	public title?: string;
@@ -45,7 +45,7 @@ Review.init(
 			primaryKey: true,
 		},
 		product_id: {
-			type: DataTypes.INTEGER,
+			type: DataTypes.UUID,
 			allowNull: false,
 		},
 		user_id: {

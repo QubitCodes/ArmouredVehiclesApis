@@ -14,7 +14,7 @@ const controller = new ProductController();
  *         name: id
  *         required: true
  *         schema:
- *           type: integer
+ *           type: string
  *         description: Product ID
  *     responses:
  *       200:
@@ -57,12 +57,12 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
           files.push(value);
         } else {
           if (data[key]) {
-             if (!Array.isArray(data[key])) {
-                 data[key] = [data[key]];
-             }
-             data[key].push(value);
+            if (!Array.isArray(data[key])) {
+              data[key] = [data[key]];
+            }
+            data[key].push(value);
           } else {
-             data[key] = value;
+            data[key] = value;
           }
         }
       });
@@ -70,11 +70,11 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
       return controller.update(req, { params, parsedData: { data, files } });
 
     } catch (e) {
-       return Response.json({
-         status: false,
-         message: 'Error parsing form data',
-         code: 400,
-         error: String(e)
+      return Response.json({
+        status: false,
+        message: 'Error parsing form data',
+        code: 400,
+        error: String(e)
       }, { status: 400 });
     }
   }

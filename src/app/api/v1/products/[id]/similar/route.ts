@@ -14,7 +14,7 @@ const controller = new ProductController();
  *       - in: path
  *         name: id
  *         required: true
- *         schema: { type: integer }
+ *         schema: { type: string }
  *       - in: query
  *         name: limit
  *         schema: { type: integer, default: 6 }

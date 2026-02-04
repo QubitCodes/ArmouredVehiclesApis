@@ -26,12 +26,12 @@ export abstract class BaseController {
     try {
       const token = authHeader.split(' ')[1];
       const decoded: any = verifyAccessToken(token);
-      
+
       const userId = decoded.userId || decoded.sub;
-      
+
       if (!userId) {
-         console.error('VerifyAuth: Decoded token missing userId/sub');
-         return { user: null, error: this.sendError('Invalid Token Structure', 210, [], undefined, req) };
+        console.error('VerifyAuth: Decoded token missing userId/sub');
+        return { user: null, error: this.sendError('Invalid Token Structure', 210, [], undefined, req) };
       }
 
       const user = await User.findByPk(userId);
@@ -62,9 +62,9 @@ export abstract class BaseController {
 
     // Onboarding step must be null (completed)
     if (user.onboarding_step !== null) {
-      return this.sendError('Please complete your onboarding process first.', 212, [], { 
+      return this.sendError('Please complete your onboarding process first.', 212, [], {
         code: 'ONBOARDING_INCOMPLETE',
-        step: user.onboarding_step 
+        step: user.onboarding_step
       });
     }
 
@@ -79,18 +79,18 @@ export abstract class BaseController {
     if (!profile) {
       return this.sendError('User profile not found. Please complete onboarding.', 212, [], { code: 'PROFILE_MISSING' });
     }
-    
+
     const approvedStatuses = ['approved_general', 'approved_controlled'];
     if (!approvedStatuses.includes(profile.onboarding_status)) {
       let message = 'Your account is pending verification.';
-      
+
       if (profile.onboarding_status === 'rejected') {
         message = `Your account was rejected. Reason: ${profile.rejection_reason || 'Policy violation'}`;
       } else if (profile.onboarding_status === 'update_needed') {
-          message = `Action required: Please update your profile. Reason: ${profile.rejection_reason || 'Admin request'}`;
+        message = `Action required: Please update your profile. Reason: ${profile.rejection_reason || 'Admin request'}`;
       }
-      
-      return this.sendError(message, 212, [], { 
+
+      return this.sendError(message, 212, [], {
         code: profile.onboarding_status === 'update_needed' ? 'ONBOARDING_UPDATE_REQUIRED' : 'ONBOARDING_NOT_APPROVED',
         status: profile.onboarding_status,
         reason: profile.rejection_reason
@@ -104,16 +104,16 @@ export abstract class BaseController {
    * Check if a product is eligible for purchase
    * Checks status, approval, and vendor onboarding (including controlled categories)
    */
-  protected async checkProductPurchaseEligibility(productId: number): Promise<{ eligible: boolean; error?: string; product?: Product }> {
+  protected async checkProductPurchaseEligibility(productId: string): Promise<{ eligible: boolean; error?: string; product?: Product }> {
     const product = await Product.findByPk(productId, {
       include: [
         { model: Category, as: 'category' },
         { model: Category, as: 'main_category' },
         { model: Category, as: 'sub_category' },
-        { 
-          model: User, 
-          as: 'vendor', 
-          include: [{ model: UserProfile, as: 'profile' }] 
+        {
+          model: User,
+          as: 'vendor',
+          include: [{ model: UserProfile, as: 'profile' }]
         }
       ]
     });

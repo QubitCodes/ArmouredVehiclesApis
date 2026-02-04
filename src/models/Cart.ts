@@ -14,7 +14,7 @@ interface CartAttributes {
   delete_reason?: string | null;
 }
 
-interface CartCreationAttributes extends Optional<CartAttributes, 'id' | 'status'> {}
+interface CartCreationAttributes extends Optional<CartAttributes, 'id' | 'status'> { }
 
 export class Cart extends Model<CartAttributes, CartCreationAttributes> implements CartAttributes {
   declare id: string;
@@ -72,7 +72,7 @@ Cart.init(
 interface CartItemAttributes {
   id: string; // UUID
   cart_id: string;
-  product_id: number;
+  product_id: string;
   quantity: number;
   created_at?: Date;
   updated_at?: Date;
@@ -80,18 +80,18 @@ interface CartItemAttributes {
   delete_reason?: string | null;
 }
 
-interface CartItemCreationAttributes extends Optional<CartItemAttributes, 'id'> {}
+interface CartItemCreationAttributes extends Optional<CartItemAttributes, 'id'> { }
 
 export class CartItem extends Model<CartItemAttributes, CartItemCreationAttributes> implements CartItemAttributes {
   declare id: string;
   declare cart_id: string;
-  declare product_id: number;
+  declare product_id: string;
   declare quantity: number;
   declare created_at: Date;
   declare updated_at: Date;
   declare deleted_at: Date | null;
   declare delete_reason: string | null;
-  
+
   declare public readonly product?: Product;
 }
 
@@ -107,7 +107,7 @@ CartItem.init(
       allowNull: false,
     },
     product_id: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.UUID,
       allowNull: false,
     },
     quantity: {
