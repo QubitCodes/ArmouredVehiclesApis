@@ -337,7 +337,7 @@ export class CheckoutController extends BaseController {
             isCommitted = true;
 
             if (isRequest) {
-                let frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+                let frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
                 if (!frontendUrl.startsWith('http')) frontendUrl = `http://${frontendUrl}`;
 
                 return this.sendSuccess({
@@ -350,7 +350,7 @@ export class CheckoutController extends BaseController {
                 }, 'Created', 201);
             } else {
                 // Generate Stripe Session
-                let frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+                let frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
                 if (!frontendUrl.startsWith('http')) frontendUrl = `http://${frontendUrl}`;
 
                 // Use the first Order ID for url params, but verifySession will use logic
@@ -368,10 +368,13 @@ export class CheckoutController extends BaseController {
                 );
 
                 // Record initial session entry in all orders of the group
+                const totalCents = allStripeItems.reduce((acc, item) => acc + (item.amount * item.quantity), 0);
                 const initialTransactionRecord = {
                     payment_mode: 'Stripe',
                     session_id: stripeSession.sessionId,
                     payment_status: 'pending',
+                    amount_total: totalCents,
+                    currency: 'aed',
                     timestamp: new Date().toISOString()
                 };
 
@@ -663,7 +666,7 @@ export class CheckoutController extends BaseController {
 
             // Determine Frontend URL dynamically to support varying ports (e.g. localhost:3001)
             const origin = req.headers.get('origin');
-            let frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+            let frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
 
             if (origin && (origin.startsWith('http://') || origin.startsWith('https://'))) {
                 frontendUrl = origin;
@@ -690,10 +693,13 @@ export class CheckoutController extends BaseController {
             );
 
             // Record initial session entry in all orders
+            const totalCents = allStripeItems.reduce((acc, item) => acc + (item.amount * item.quantity), 0);
             const initialTransactionRecord = {
                 payment_mode: 'Stripe',
                 session_id: stripeSession.sessionId,
                 payment_status: 'pending',
+                amount_total: totalCents,
+                currency: 'aed',
                 timestamp: new Date().toISOString()
             };
 
