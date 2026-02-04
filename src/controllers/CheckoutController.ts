@@ -2,6 +2,7 @@
 import { NextRequest } from 'next/server';
 import { BaseController } from './BaseController';
 import { OrderComplianceService } from '../services/OrderComplianceService';
+import { OrderService } from '../services/OrderService';
 import { Cart, CartItem, Order, OrderItem, Product, User, PlatformSetting, Address } from '../models';
 import { verifyAccessToken } from '../utils/jwt';
 import { sequelize } from '../config/database';
@@ -87,18 +88,13 @@ export class CheckoutController extends BaseController {
      * Create an Order (Direct or Request depending on compliance)
      */
     async create(req: NextRequest, data?: any) {
-        const t = await sequelize.transaction();
-        let isCommitted = false;
         try {
             const user = await this.getUser(req);
             if (!user) return this.sendError('Authentication required', 401);
 
             // Enforce Onboarding
             const onboardingError = await this.checkOnboarding(user);
-            if (onboardingError) {
-                await t.rollback();
-                return onboardingError;
-            }
+            if (onboardingError) return onboardingError;
 
             const cart = await Cart.findOne({
                 where: { user_id: user.id, status: 'active' },
@@ -106,48 +102,26 @@ export class CheckoutController extends BaseController {
             });
 
             if (!cart || !cart.items || cart.items.length === 0) {
-                await t.rollback();
                 return this.sendError('Cart is empty', 400);
             }
 
-            // Validate all items (Final check before order creation)
+            // Validate all items
             for (const item of cart.items) {
                 const { eligible, error: eligibilityError } = await this.checkProductPurchaseEligibility(item.product_id);
                 if (!eligible) {
-                    await t.rollback();
                     return this.sendError(`Checkout blocked: ${eligibilityError}`, 400);
                 }
             }
 
-
             const body = data || await req.json().catch(() => ({}));
-            const { addressId, embedded } = body;
-
-            // Standardizing embedded flag from FormData or JSON
+            const { addressId } = body;
             const isEmbedded = true;
 
-            console.log('[CHECKOUT DEBUG] Create Session (FORCED):', {
-                hasData: !!data,
-                bodyKeys: Object.keys(body),
-                embeddedValue: embedded,
-                isEmbedded
-            });
-
-            let shipmentDetails = {};
-            if (addressId) {
-                const address = await Address.findByPk(addressId);
-                if (address && address.user_id === user.id) {
-                    shipmentDetails = address.toJSON();
-                }
-            }
-            const { vatPercent, commPercent } = await this.getPlatformSettings();
+            const { vatPercent } = await this.getPlatformSettings();
 
             // Check Compliance
             const compliance = await OrderComplianceService.checkCompliance(user.id, cart.id);
             const isComplianceRequest = compliance.type === 'request';
-
-            // Group Items by Vendor
-            const vendorGroups = new Map<string, any[]>();
 
             // Generate 8-digit Order Group ID
             const generate8DigitId = async () => {
@@ -155,218 +129,90 @@ export class CheckoutController extends BaseController {
                 let isUnique = false;
                 while (!isUnique) {
                     id = Math.floor(10000000 + Math.random() * 90000000).toString();
-                    // Check Uniqueness against existing 'order_id' or 'order_group_id'
-                    // Technically collision chance is low but good to check against Order.order_id
-                    const existing = await Order.findOne({ where: { order_id: id }, transaction: t });
+                    const existing = await Order.findOne({ where: { order_id: id } });
                     if (!existing) isUnique = true;
                 }
                 return id;
             };
 
             const orderGroupId = await generate8DigitId();
+
+            // Calculate Totals for Stripe and High Value check
+            let subtotal = 0;
             const allStripeItems: any[] = [];
-            let grandTotalAmount = 0;
 
-            // Helper to consolidate items (deduplicate within cart if needed)
-            const consolidatedItems = new Map<number, any>();
-            for (const item of cart.items!) {
+            for (const item of cart.items) {
                 if (!item.product) continue;
-
-                const productId = item.product_id;
                 const price = Number(item.product.base_price) || 0;
+                const qty = item.quantity;
+                subtotal += price * qty;
 
-                if (consolidatedItems.has(productId)) {
-                    const existing = consolidatedItems.get(productId);
-                    existing.quantity += item.quantity;
-                } else {
-                    consolidatedItems.set(productId, {
-                        product_id: productId,
-                        vendor_id: item.product.vendor_id,
-                        quantity: item.quantity,
-                        price: price,
-                        product_name: item.product.name,
-                        shipping_charge: item.product.shipping_charge,
-                        packing_charge: item.product.packing_charge
-                    });
-                }
-            }
-
-            // Distribute into vendor groups
-            for (const item of consolidatedItems.values()) {
-                const vId = item.vendor_id || 'admin'; // 'admin' or null if no vendor
-                if (!vendorGroups.has(vId)) {
-                    vendorGroups.set(vId, []);
-                }
-                vendorGroups.get(vId)?.push(item);
-            }
-
-            // Determine if SINGLE vendor or MULTI vendor
-            const isSingleVendor = vendorGroups.size === 1;
-
-            // Calculate Grand Total for high value check
-            let calculatedGrandTotal = 0;
-            for (const item of consolidatedItems.values()) {
-                calculatedGrandTotal += item.price * item.quantity;
-            }
-            const isHighValue = calculatedGrandTotal >= 10000;
-            const isRequest = isComplianceRequest || isHighValue;
-
-            // Generate Order IDs and Records for each group
-            const createdOrderIds: string[] = [];
-            let index = 0;
-
-            for (const [vendorId, items] of vendorGroups) {
-                const actualVendorId = vendorId === 'admin' ? null : vendorId;
-
-                // Calculate Group Totals
-                let groupSubtotal = 0;
-                items.forEach(i => groupSubtotal += i.price * i.quantity);
-
-                // Calculate Financials - UPDATED for Shipping & Packing
-                let groupShipping = 0;
-                let groupPacking = 0;
-
-                items.forEach(i => {
-                    const qty = i.quantity; // Ensure quantity is number
-                    // Ensure charges are treated as numbers
-                    const shipCharge = Number(i.shipping_charge) || 0;
-                    const packCharge = Number(i.packing_charge) || 0;
-
-                    groupShipping += (shipCharge * qty);
-                    groupPacking += (packCharge * qty);
+                const unitPriceWithTax = price * (1 + (vatPercent / 100));
+                allStripeItems.push({
+                    name: item.product.name,
+                    amount: Math.round(unitPriceWithTax * 100),
+                    quantity: qty,
+                    currency: 'aed'
                 });
 
-                // Taxable Base includes Product cost + Shipping + Packing?
-                // Usually VAT is applied to the total taxable value including shipping/packing services.
-                const taxableAmount = groupSubtotal + groupShipping + groupPacking;
-                const vatAmount = (taxableAmount * vatPercent) / 100;
-
-                // Admin's own products do not pay commission
-                // Commission is usually on the Subtotal (Product price), not including shipping/tax.
-                const adminCommission = (actualVendorId === null || actualVendorId === 'admin')
-                    ? 0
-                    : (groupSubtotal * commPercent) / 100;
-
-                const groupTotal = taxableAmount + vatAmount;
-
-                // Assume `total_amount` is Grand Total (Products + Services + VAT).
-
-                // Generate Order ID
-
-                // Generate Order ID
-                // If Single Vendor, order_id = order_group_id
-                // If Multi Vendor, generate NEW unique 8-digit ID
-                let finalOrderId = '';
-                if (isSingleVendor) {
-                    finalOrderId = orderGroupId;
-                } else {
-                    finalOrderId = await generate8DigitId();
-                    // Ensure it's not same as group ID (unlikely but possible)
-                    if (finalOrderId === orderGroupId) finalOrderId = await generate8DigitId();
-                }
-
-                const order = await Order.create({
-                    user_id: user.id,
-                    order_id: finalOrderId,
-                    order_group_id: orderGroupId, // Always store group ID, even if same
-                    vendor_id: actualVendorId,
-                    total_amount: groupTotal,
-                    vat_amount: vatAmount,
-                    admin_commission: adminCommission,
-                    total_shipping: groupShipping,
-                    total_packing: groupPacking,
-                    currency: 'AED',
-                    type: isRequest ? 'request' : 'direct',
-                    order_status: 'order_received', // Unified initial status
-                    payment_status: isRequest ? null : 'pending',
-                    comments: null,
-                    transaction_details: {},
-                    shipment_details: shipmentDetails,
-                    status_history: [{
-                        status: 'order_received',
-                        payment_status: isRequest ? null : 'pending',
-                        shipment_status: null,
-                        updated_by: user.id,
-                        timestamp: new Date().toISOString(),
-                        note: 'Order placed by customer'
-                    }]
-                }, { transaction: t });
-
-                createdOrderIds.push(order.id);
-
-                // Create Items for this order
-                for (const itemData of items) {
-                    await OrderItem.create({ ...itemData, order_id: order.id }, { transaction: t });
-
-                    // UnitPriceWithTax = UnitPrice * (1 + vat/100)
-                    const unitPriceWithTax = itemData.price * (1 + (vatPercent / 100));
-
-                    allStripeItems.push({
-                        name: itemData.product_name,
-                        amount: Math.round(unitPriceWithTax * 100), // cents/fils
-                        quantity: itemData.quantity,
-                        currency: 'aed'
-                    });
-                }
-
-                // Add Shipping and Packing to Stripe Items
-                if (groupShipping > 0) {
-                    const shippingWithTax = groupShipping * (1 + (vatPercent / 100));
+                if (Number(item.product.shipping_charge) > 0) {
+                    const val = Number(item.product.shipping_charge) * (1 + (vatPercent / 100));
                     allStripeItems.push({
                         name: 'Shipping Charges',
-                        amount: Math.round(shippingWithTax * 100),
-                        quantity: 1,
+                        amount: Math.round(val * 100),
+                        quantity: qty,
                         currency: 'aed'
                     });
                 }
 
-                if (groupPacking > 0) {
-                    const packingWithTax = groupPacking * (1 + (vatPercent / 100));
+                if (Number(item.product.packing_charge) > 0) {
+                    const val = Number(item.product.packing_charge) * (1 + (vatPercent / 100));
                     allStripeItems.push({
                         name: 'Packing Charges',
-                        amount: Math.round(packingWithTax * 100),
-                        quantity: 1,
+                        amount: Math.round(val * 100),
+                        quantity: qty,
                         currency: 'aed'
                     });
                 }
-
-                grandTotalAmount += groupTotal;
             }
 
-            // Mark Cart as Converted
-            await cart.update({ status: 'converted' }, { transaction: t });
-
-            await t.commit();
-            isCommitted = true;
+            const isHighValue = subtotal >= 10000;
+            const isRequest = isComplianceRequest || isHighValue;
 
             if (isRequest) {
+                // For Purchase Requests, create orders immediately
+                const createdOrders = await OrderService.convertCartToOrder(user.id, cart.id, orderGroupId, {
+                    addressId,
+                    isRequest: true
+                });
+
                 let frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
                 if (!frontendUrl.startsWith('http')) frontendUrl = `http://${frontendUrl}`;
 
                 return this.sendSuccess({
                     message: 'Purchase request submitted successfully. Waiting for admin approval.',
-                    orderId: createdOrderIds[0], // Return first ID for reference
+                    orderId: createdOrders[0].id,
                     orderGroupId: orderGroupId,
                     type: 'request',
                     requiresApproval: true,
-                    redirectUrl: `${frontendUrl}/orders/summary/${createdOrderIds[0]}?approval_required=true`
+                    redirectUrl: `${frontendUrl}/orders/summary/${createdOrders[0].id}?approval_required=true`
                 }, 'Created', 201);
             } else {
-                // Generate Stripe Session
+                // For Direct Payments, only generate Stripe Session
                 let frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
                 if (!frontendUrl.startsWith('http')) frontendUrl = `http://${frontendUrl}`;
 
-                // Use the first Order ID for url params, but verifySession will use logic
-                const referenceOrderId = createdOrderIds[0];
-
                 const stripeSession = await StripeService.createCheckoutSession(
-                    referenceOrderId,
+                    orderGroupId, // Use orderGroupId as the reference
                     allStripeItems,
                     user.email,
-                    `${frontendUrl}/orders/summary/${orderGroupId}?session_id={CHECKOUT_SESSION_ID}&order_id=${orderGroupId}`, // Keeping order_id in query for frontend loading
+                    `${frontendUrl}/orders/summary/${orderGroupId}?session_id={CHECKOUT_SESSION_ID}&order_id=${orderGroupId}`,
                     `${frontendUrl}/orders/summary/${orderGroupId}?session_id={CHECKOUT_SESSION_ID}&order_id=${orderGroupId}&cancelled=true`,
                     {
-                        orderGroupId: orderGroupId
+                        orderGroupId: orderGroupId,
+                        cartId: cart.id,
+                        addressId: addressId || '',
+                        userId: user.id
                     },
                     isEmbedded ? {
                         uiMode: 'embedded',
@@ -374,28 +220,9 @@ export class CheckoutController extends BaseController {
                     } : undefined
                 );
 
-                // Record initial session entry in all orders of the group
-                const totalCents = allStripeItems.reduce((acc, item) => acc + (item.amount * item.quantity), 0);
-                const initialTransactionRecord = {
-                    payment_mode: 'Stripe',
-                    session_id: stripeSession.sessionId,
-                    payment_status: 'pending',
-                    amount_total: totalCents,
-                    currency: 'aed',
-                    timestamp: new Date().toISOString()
-                };
-
-                for (const orderId of createdOrderIds) {
-                    const order = await Order.findByPk(orderId);
-                    if (order) {
-                        order.transaction_details = [initialTransactionRecord];
-                        await order.save();
-                    }
-                }
-
                 return this.sendSuccess({
-                    message: 'Order created. Proceed to payment.',
-                    orderId: referenceOrderId,
+                    message: 'Payment session created. Proceed to payment.',
+                    orderId: orderGroupId,
                     orderGroupId: orderGroupId,
                     type: 'direct',
                     requiresApproval: false,
@@ -405,7 +232,6 @@ export class CheckoutController extends BaseController {
             }
 
         } catch (error: any) {
-            if (!isCommitted) await t.rollback();
             console.error('Checkout Error:', error);
             return this.sendError(String((error as any).message), 500);
         }
@@ -421,35 +247,43 @@ export class CheckoutController extends BaseController {
             if (!user) return this.sendError('Authentication required', 401);
 
             const body = data || await req.json().catch(() => ({}));
-            const { sessionId } = body; // We trust sessionId more than orderId
+            const { sessionId } = body;
 
             if (!sessionId) return this.sendError('Session ID is required', 400);
 
             const session = await StripeService.retrieveSession(sessionId);
             if (!session) return this.sendError('Invalid Session', 400);
 
-            console.log(`[CHECKOUT DEBUG] verifySession: Session Found. Status=${session.status}, PaymentStatus=${session.payment_status}`);
-
-            // Strategy: Look for orderGroupId in metadata
             const orderGroupId = session.metadata?.orderGroupId;
-            const singleOrderId = session.metadata?.orderId; // Fallback for old orders
+            const cartId = session.metadata?.cartId;
+            const addressId = session.metadata?.addressId;
+            const userId = session.metadata?.userId;
+
+            if (!orderGroupId) return this.sendError('Order Group ID is missing in session', 400);
+
+            // Strategy: Convert Cart to Order now if it hasn't been done yet
+            const isPaid = session.payment_status === 'paid' || session.payment_status === 'no_payment_required';
 
             let orders: Order[] = [];
 
-            if (orderGroupId) {
+            if (isPaid && cartId && userId) {
+                // Ensure the user verifying is the one who owns the session
+                if (userId !== user.id) return this.sendError('Forbidden', 403);
+
+                // Convert Cart to Order (Idempotent)
+                orders = await OrderService.convertCartToOrder(userId, cartId, orderGroupId, {
+                    addressId: addressId || undefined
+                });
+            } else {
+                // If already converted or failed, find orders by group ID
                 orders = await Order.findAll({ where: { order_group_id: orderGroupId } });
-            } else if (singleOrderId) {
-                const o = await Order.findByPk(singleOrderId);
-                if (o) orders.push(o);
             }
 
-            if (orders.length === 0) {
-                return this.sendError('Orders not found for this session', 404);
+            if (orders.length === 0 && isPaid) {
+                return this.sendError('Orders not found and could not be created', 404);
             }
 
-            // Verify User Ownership (Check first order)
-            if (orders[0].user_id !== user.id) return this.sendError('Forbidden', 403);
-
+            // Sync with Stripe Payment Interest
             const paymentIntent = session.payment_intent as any;
             const paymentMethod = paymentIntent?.payment_method as any;
 
@@ -471,10 +305,7 @@ export class CheckoutController extends BaseController {
                 timestamp: new Date().toISOString()
             };
 
-            const isPaid = session.payment_status === 'paid' || session.payment_status === 'no_payment_required';
-
             for (const order of orders) {
-                // Parse existing transaction_details
                 let currentDetails: any[] = [];
                 try {
                     const raw = (order as any).transaction_details;
@@ -482,21 +313,12 @@ export class CheckoutController extends BaseController {
                         const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
                         currentDetails = Array.isArray(parsed) ? parsed : [parsed];
                     }
-                } catch (e) {
-                    console.error(`[CHECKOUT ERROR] Failed to parse existing transaction details for order ${order.id}`);
-                }
+                } catch (e) { }
 
-                // Check if this session already exists in the history
                 const sessionIdx = currentDetails.findIndex((p: any) => p.session_id === session.id);
-
                 if (sessionIdx !== -1) {
-                    // Update existing entry
-                    currentDetails[sessionIdx] = {
-                        ...currentDetails[sessionIdx],
-                        ...newTransactionRecord
-                    };
+                    currentDetails[sessionIdx] = { ...currentDetails[sessionIdx], ...newTransactionRecord };
                 } else {
-                    // Append new attempt
                     currentDetails.push(newTransactionRecord);
                 }
 
@@ -504,14 +326,11 @@ export class CheckoutController extends BaseController {
 
                 if (isPaid && order.payment_status !== 'paid') {
                     order.payment_status = 'paid';
-                    if (order.order_status !== 'order_received') {
-                        order.order_status = 'order_received';
-                    }
+                    order.order_status = 'order_received';
 
-                    // Append Payment Verification to History
                     const currentHistory = (order.status_history as any[]) || [];
                     const historyEntry = {
-                        status: order.order_status,
+                        status: 'order_received',
                         payment_status: 'paid',
                         shipment_status: order.shipment_status,
                         updated_by: 'system',
@@ -520,7 +339,6 @@ export class CheckoutController extends BaseController {
                     };
                     order.status_history = [historyEntry, ...currentHistory];
                 } else if (!isPaid) {
-                    // Record attempt failed in history too
                     const currentHistory = (order.status_history as any[]) || [];
                     const historyEntry = {
                         status: order.order_status,
@@ -528,25 +346,18 @@ export class CheckoutController extends BaseController {
                         shipment_status: order.shipment_status,
                         updated_by: 'system',
                         timestamp: new Date().toISOString(),
-                        note: `Payment attempt failed/incomplete: ${session.payment_status}`
+                        note: `Payment attempt incomplete: ${session.payment_status}`
                     };
                     order.status_history = [historyEntry, ...currentHistory];
                 }
-
                 await order.save();
             }
 
-            if (isPaid) {
-                return this.sendSuccess({
-                    success: true,
-                    amount: session.amount_total,
-                    currency: session.currency,
-                    status: 'paid',
-                    orderId: orders[0].id
-                });
-            } else {
-                return this.sendError(`Payment not completed: ${session.payment_status}`, 400);
-            }
+            return this.sendSuccess({
+                success: true,
+                status: isPaid ? 'paid' : session.payment_status,
+                orderGroupId: orderGroupId
+            });
 
         } catch (error: any) {
             console.error('Verify Session Error:', error);
