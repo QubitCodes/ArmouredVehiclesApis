@@ -127,28 +127,31 @@ export abstract class BaseController {
       return { eligible: false, error: 'This product is not currently available for purchase (pending review or unpublished).' };
     }
 
-    // 2. Vendor Onboarding Check
-    const vendor = product.vendor;
-    const profile = vendor?.profile;
-    if (!vendor || !profile) {
-      return { eligible: false, error: 'Vendor profile not found or inactive.' };
-    }
+    console.log("=======Product=======");
+    console.log(product);
 
-    const approvedStatuses = ['approved_general', 'approved_controlled'];
-    if (!approvedStatuses.includes(profile.onboarding_status)) {
-      return { eligible: false, error: 'This product is currently unavailable as the vendor is undergoing verification.' };
-    }
+    // 2. Vendor Onboarding Check
+    // const vendor = product.vendor;
+    // const profile = vendor?.profile;
+    // if (!vendor || !profile) {
+    //   return { eligible: false, error: 'Vendor profile not found or inactive.' };
+    // }
+
+    // const approvedStatuses = ['approved_general', 'approved_controlled'];
+    // if (!approvedStatuses.includes(profile.onboarding_status)) {
+    //   return { eligible: false, error: 'This product is currently unavailable as the vendor is undergoing verification.' };
+    // }
 
     // 3. Controlled Category Check
-    const isControlled = (
-      product.category?.is_controlled === true ||
-      product.main_category?.is_controlled === true ||
-      product.sub_category?.is_controlled === true
-    );
+    // const isControlled = (
+    //   product.category?.is_controlled === true ||
+    //   product.main_category?.is_controlled === true ||
+    //   product.sub_category?.is_controlled === true
+    // );
 
-    if (isControlled && profile.onboarding_status !== 'approved_controlled') {
-      return { eligible: false, error: 'Direct purchase of this controlled item is restricted. Please contact us for procurement.' };
-    }
+    // if (isControlled && profile.onboarding_status !== 'approved_controlled') {
+    //   return { eligible: false, error: 'Direct purchase of this controlled item is restricted. Please contact us for procurement.' };
+    // }
 
     return { eligible: true, product };
   }

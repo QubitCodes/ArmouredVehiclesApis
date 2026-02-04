@@ -109,6 +109,7 @@ interface ProductAttributes {
   review_note?: string | null;
   rejection_reason?: string | null;
   approval_status?: 'pending' | 'approved' | 'rejected' | null;
+  commission?: number;
 
   individual_product_pricing?: { name: string; amount: number }[] | null;
 
@@ -219,6 +220,7 @@ export class Product extends Model<ProductAttributes, ProductCreationAttributes>
   declare public review_note?: string;
 
   declare public individual_product_pricing?: { name: string; amount: number }[];
+  declare public commission?: number;
 
   declare public readonly created_at: Date;
   declare public readonly updated_at: Date;
@@ -317,6 +319,7 @@ Product.init(
     review_note: { type: DataTypes.TEXT },
 
     individual_product_pricing: { type: DataTypes.JSONB, defaultValue: [] },
+    commission: { type: DataTypes.INTEGER, defaultValue: 0 },
 
     created_at: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
     updated_at: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },

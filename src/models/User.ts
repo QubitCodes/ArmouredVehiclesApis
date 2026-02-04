@@ -28,7 +28,7 @@ interface UserAttributes {
 }
 
 // We recommend optional attributes for creation
-interface UserCreationAttributes extends Optional<UserAttributes, 'id' | 'user_type' | 'email_verified' | 'phone_verified' | 'completion_percentage' | 'token_version' | 'onboarding_step' | 'is_active'> {}
+interface UserCreationAttributes extends Optional<UserAttributes, 'id' | 'user_type' | 'email_verified' | 'phone_verified' | 'completion_percentage' | 'token_version' | 'onboarding_step' | 'is_active'> { }
 
 export class User extends Model<UserAttributes, UserCreationAttributes> implements UserAttributes {
   public declare id: string;
@@ -50,7 +50,7 @@ export class User extends Model<UserAttributes, UserCreationAttributes> implemen
   public declare suspended_at: Date | null;
   public declare suspended_by: string;
   public declare suspended_reason: string;
-  
+
   public declare readonly created_at: Date;
   public declare readonly updated_at: Date;
   public declare readonly deleted_at: Date;

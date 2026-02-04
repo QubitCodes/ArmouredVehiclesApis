@@ -1,7 +1,8 @@
 import { NextRequest } from 'next/server';
 import { getFileUrl } from '../utils/fileUrl';
 import { BaseController } from './BaseController';
-import { Product, ProductMedia, Category, ProductPricingTier, ProductStatus, User, UserProfile, ProductSpecification, RefProductBrand } from '../models';
+import { Product, ProductMedia, Category, ProductPricingTier, ProductStatus, User, UserProfile, ProductSpecification, RefProductBrand, PlatformSetting } from '../models';
+import { applyCommission } from '../utils/priceHelper';
 import { Op, fn, col, literal } from 'sequelize';
 import { z } from 'zod';
 import { verifyAccessToken } from '../utils/jwt';
@@ -209,6 +210,9 @@ export class ProductController extends BaseController {
                 (cat?.is_controlled === true) ||
                 (subCat?.is_controlled === true)
             );
+
+            // Apply Commission Calculation (Inflates price and removes commission field)
+            p = applyCommission(p);
 
             return p;
         };
@@ -1043,8 +1047,24 @@ export class ProductController extends BaseController {
                 return this.sendError('Forbidden: Customers cannot create products', 403);
             }
 
+            // Fetch Admin Commission Setting
+            let commissionValue = 0;
+
+            if (finalVendorId !== null) {
+                try {
+                    const setting = await PlatformSetting.findOne({ where: { key: 'admin_commission' } });
+                    if (setting && setting.value) {
+                        commissionValue = parseInt(setting.value);
+                        if (isNaN(commissionValue)) commissionValue = 0;
+                    }
+                } catch (e) {
+                    console.error("Failed to fetch admin_commission", e);
+                }
+            }
+
             const product = await Product.create({
                 ...validated,
+                commission: commissionValue,
                 vendor_id: finalVendorId as string,
                 status: ['admin', 'super_admin'].includes(user.user_type) ? ProductStatus.PUBLISHED : ProductStatus.PENDING_REVIEW,
                 approval_status: ['admin', 'super_admin'].includes(user.user_type) ? 'approved' : 'pending'
