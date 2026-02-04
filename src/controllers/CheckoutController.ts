@@ -288,13 +288,6 @@ export class CheckoutController extends BaseController {
                 for (const itemData of items) {
                     await OrderItem.create({ ...itemData, order_id: order.id }, { transaction: t });
 
-                    // Add to Stripe Items (using Unit Price? Or Unit Price + VAT?)
-                    // Stripe expects Unit Amount.
-                    // If we added VAT to the Order Total, we should probably add VAT to the line items or add a "Tax" line item.
-                    // For simplicity in this iteration: Add VAT as distributed or just rely on total match?
-                    // Stripe Checkout calculates total from line items. 
-                    // So we must increase unit amount by VAT %? Or add a separate Tax Item?
-                    // Let's effectively increase unit price by VAT % for Stripe display so the total matches.
                     // UnitPriceWithTax = UnitPrice * (1 + vat/100)
                     const unitPriceWithTax = itemData.price * (1 + (vatPercent / 100));
 
