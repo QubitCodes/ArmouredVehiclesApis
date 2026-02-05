@@ -56,7 +56,7 @@ const createProductSchema = z.object({
     packing_dimension_unit: z.string().optional().nullable(),
     packing_weight: z.coerce.number().optional().nullable(),
     packing_weight_unit: z.string().optional().nullable(),
-    min_order_quantity: z.coerce.number().optional().nullable(),
+    min_order_quantity: z.string().optional().nullable(),
 
     // Pricing & Stock
     pricing_terms: z.array(z.string()).optional().nullable(),

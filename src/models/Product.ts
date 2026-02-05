@@ -61,7 +61,7 @@ interface ProductAttributes {
   packing_dimension_unit?: string | null;
   packing_weight?: number | null;
   packing_weight_unit?: string | null;
-  min_order_quantity?: number | null;
+  min_order_quantity?: string | null;
 
   // Pricing & Stock
   base_price?: number | null;
@@ -172,7 +172,7 @@ export class Product extends Model<ProductAttributes, ProductCreationAttributes>
   declare public packing_dimension_unit?: string;
   declare public packing_weight?: number;
   declare public packing_weight_unit?: string;
-  declare public min_order_quantity?: number;
+  declare public min_order_quantity?: string;
 
   // Pricing
   declare public base_price?: number;
@@ -269,7 +269,7 @@ Product.init(
     packing_dimension_unit: { type: DataTypes.TEXT },
     packing_weight: { type: DataTypes.DECIMAL(10, 2) },
     packing_weight_unit: { type: DataTypes.TEXT },
-    min_order_quantity: { type: DataTypes.INTEGER },
+    min_order_quantity: { type: DataTypes.TEXT },
 
     // Pricing & Stock
     base_price: { type: DataTypes.DECIMAL(10, 2) },
