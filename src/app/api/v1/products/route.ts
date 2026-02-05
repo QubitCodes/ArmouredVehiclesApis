@@ -192,37 +192,43 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const contentType = req.headers.get('content-type') || '';
-  
+
   if (contentType.includes('multipart/form-data')) {
     try {
       const formData = await req.formData();
       const data: any = {};
+      let coverImage: File | null = null;
       const files: File[] = [];
 
       formData.forEach((value, key) => {
-        if (value instanceof File) {
+        if (key === 'coverImage' && value instanceof File) {
+          coverImage = value;
+        } else if (key === 'files' && value instanceof File) {
+          files.push(value);
+        } else if (value instanceof File) {
+          // Fallback for any other file keys
           files.push(value);
         } else {
           // Handle duplicate keys (arrays)
           if (data[key]) {
-             if (!Array.isArray(data[key])) {
-                 data[key] = [data[key]];
-             }
-             data[key].push(value);
+            if (!Array.isArray(data[key])) {
+              data[key] = [data[key]];
+            }
+            data[key].push(value);
           } else {
-             data[key] = value;
+            data[key] = value;
           }
         }
       });
 
-      return controller.create(req, { data, files });
+      return controller.create(req, { data, files, coverImage });
 
     } catch (e) {
       return Response.json({
-         status: false,
-         message: 'Error parsing form data',
-         code: 400,
-         error: String(e)
+        status: false,
+        message: 'Error parsing form data',
+        code: 400,
+        error: String(e)
       }, { status: 400 });
     }
   }

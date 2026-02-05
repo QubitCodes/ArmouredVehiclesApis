@@ -18,13 +18,14 @@ export class FileUploadService {
     // Saved to public/file_uploads so Next.js serves it at /file_uploads/...
     const uploadDir = path.join(process.cwd(), 'public', 'file_uploads', subdir);
     console.log(`[FileUploadService] Saving file to: ${uploadDir}`);
-    
+
     await mkdir(uploadDir, { recursive: true });
 
+    // Generate short random filename (8 chars alphanumeric) + extension
     const originalName = file.name;
-    // Sanitize original name to remove spaces or weird chars if needed, but for now simple replacement
-    const sanitizedName = originalName.replace(/[^a-zA-Z0-9.-]/g, '_'); 
-    const filename = `${uuidv4()}-${sanitizedName}`;
+    const extension = originalName.includes('.') ? originalName.split('.').pop() : '';
+    const randomId = Math.random().toString(36).substring(2, 10);
+    const filename = extension ? `${randomId}.${extension}` : randomId;
     const filePath = path.join(uploadDir, filename);
 
     await writeFile(filePath, buffer);

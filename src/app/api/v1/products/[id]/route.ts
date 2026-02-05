@@ -50,10 +50,16 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
     try {
       const formData = await req.formData();
       const data: any = {};
+      let coverImage: File | null = null;
       const files: File[] = [];
 
       formData.forEach((value, key) => {
-        if (value instanceof File) {
+        if (key === 'coverImage' && value instanceof File) {
+          coverImage = value;
+        } else if (key === 'files' && value instanceof File) {
+          files.push(value);
+        } else if (value instanceof File) {
+          // Fallback for any other file keys
           files.push(value);
         } else {
           if (data[key]) {
@@ -67,7 +73,7 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
         }
       });
 
-      return controller.update(req, { params, parsedData: { data, files } });
+      return controller.update(req, { params, parsedData: { data, files, coverImage } });
 
     } catch (e) {
       return Response.json({

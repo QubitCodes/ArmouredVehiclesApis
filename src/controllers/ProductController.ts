@@ -9,6 +9,7 @@ import { verifyAccessToken } from '../utils/jwt';
 import { parse } from 'csv-parse/sync';
 import { PermissionService } from '../services/PermissionService';
 import { FileUploadService } from '../services/FileUploadService';
+import { FileDeleteService } from '../services/FileDeleteService';
 
 // Mock schema for create - expand later
 const pricingTierSchema = z.object({
@@ -958,7 +959,7 @@ export class ProductController extends BaseController {
      * create
      * POST /api/v1/products
      */
-    async create(req: NextRequest, parsedData?: { data: any, files: File[] }) {
+    async create(req: NextRequest, parsedData?: { data: any, files: File[], coverImage?: File | null }) {
         try {
             // 1. Auth Check
             const authHeader = req.headers.get('authorization');
@@ -1121,7 +1122,7 @@ export class ProductController extends BaseController {
                 }
             }
 
-            // Handle Files
+            // Handle Files (Gallery)
             if (files && files.length > 0) {
                 for (const file of files) {
                     // Determine type and subdir
@@ -1137,8 +1138,8 @@ export class ProductController extends BaseController {
                         folder = 'documents';
                     }
 
-                    // Structure: products/{id}/{folder}
-                    const subdir = `products/${product.id}/${folder}`;
+                    // Structure: products/{sku}/{folder}
+                    const subdir = `products/${product.sku}/${folder}`;
                     const path = await FileUploadService.saveFile(file, subdir);
 
                     await ProductMedia.create({
@@ -1148,23 +1149,40 @@ export class ProductController extends BaseController {
                         file_name: file.name,
                         file_size: file.size,
                         mime_type: file.type,
-                        is_cover: false // Logic to determine cover? e.g. first image
+                        is_cover: false
                     });
                 }
+            }
 
-                // If no cover set, set first image as cover
-                const cover = await ProductMedia.findOne({ where: { product_id: product.id, is_cover: true } });
-                if (!cover) {
-                    const firstImage = await ProductMedia.findOne({ where: { product_id: product.id } });
-                    if (firstImage) {
-                        firstImage.is_cover = true;
-                        await firstImage.save();
-                    }
+            // Handle Cover Image
+            if (parsedData?.coverImage) {
+                const file = parsedData.coverImage;
+                const subdir = `products/${product.sku}/gallery`;
+                const path = await FileUploadService.saveFile(file, subdir);
+
+                await ProductMedia.create({
+                    product_id: product.id,
+                    type: 'product_image',
+                    url: path,
+                    file_name: file.name,
+                    file_size: file.size,
+                    mime_type: file.type,
+                    is_cover: true
+                });
+            }
+
+            // If no cover set (after gallery and cover handling), set first image as cover
+            const hasCover = await ProductMedia.findOne({ where: { product_id: product.id, is_cover: true } });
+            if (!hasCover) {
+                const firstImage = await ProductMedia.findOne({ where: { product_id: product.id } });
+                if (firstImage) {
+                    firstImage.is_cover = true;
+                    await firstImage.save();
                 }
             }
 
             // Create does not need masking as user is auth'd
-            if (files && files.length > 0) {
+            if ((files && files.length > 0) || parsedData?.coverImage) {
                 // Reload to get media URLs properly
 
                 // SYNC SPECS
@@ -1287,7 +1305,7 @@ export class ProductController extends BaseController {
      * update
      * PATCH/PUT /api/v1/products/:id
      */
-    async update(req: NextRequest, { params, parsedData }: { params: { id: string }, parsedData?: { data: any, files: File[] } }) {
+    async update(req: NextRequest, { params, parsedData }: { params: { id: string }, parsedData?: { data: any, files: File[], coverImage?: File | null } }) {
         try {
             const id = params.id;
 
@@ -1470,7 +1488,7 @@ export class ProductController extends BaseController {
                 }
             }
 
-            // Handle New Files
+            // Handle New Files (Gallery)
             if (files && files.length > 0) {
                 for (const file of files) {
                     let type = 'product_image';
@@ -1485,7 +1503,7 @@ export class ProductController extends BaseController {
                         folder = 'documents';
                     }
 
-                    const subdir = `products/${product.id}/${folder}`;
+                    const subdir = `products/${product.sku}/${folder}`;
                     const path = await FileUploadService.saveFile(file, subdir);
 
                     const media = await ProductMedia.create({
@@ -1498,15 +1516,39 @@ export class ProductController extends BaseController {
                         is_cover: false
                     });
                 }
-                // Set cover if none exists
-                const cover = await ProductMedia.findOne({ where: { product_id: product.id, is_cover: true } });
-                const existingCover = await ProductMedia.findOne({ where: { product_id: id, is_cover: true } });
-                if (!existingCover) {
-                    const first = await ProductMedia.findOne({ where: { product_id: id } });
-                    if (first) {
-                        first.is_cover = true;
-                        await first.save();
-                    }
+            }
+
+            // Handle New Cover Image
+            if (parsedData?.coverImage) {
+                const file = parsedData.coverImage;
+                const subdir = `products/${product.sku}/gallery`;
+                const path = await FileUploadService.saveFile(file, subdir);
+
+                // 1. Set all existing covers to false
+                await ProductMedia.update(
+                    { is_cover: false },
+                    { where: { product_id: id, is_cover: true } }
+                );
+
+                // 2. Create new cover
+                await ProductMedia.create({
+                    product_id: product.id,
+                    type: 'product_image',
+                    url: path,
+                    file_name: file.name,
+                    file_size: file.size,
+                    mime_type: file.type,
+                    is_cover: true
+                });
+            }
+
+            // Finally, Ensure ANY product image is set as cover if none exist
+            const existingCover = await ProductMedia.findOne({ where: { product_id: id, is_cover: true } });
+            if (!existingCover) {
+                const first = await ProductMedia.findOne({ where: { product_id: id, type: 'product_image' } });
+                if (first) {
+                    first.is_cover = true;
+                    await first.save();
                 }
             }
 
@@ -1731,7 +1773,27 @@ export class ProductController extends BaseController {
                 return this.sendError('Media not found', 404);
             }
 
+            const wasCover = media.is_cover;
+            const fileUrl = media.getDataValue('url');
+
+            // Delete file from disk first
+            if (fileUrl) {
+                await FileDeleteService.deleteFile(fileUrl);
+            }
+
             await media.destroy();
+
+            // If we deleted the cover, promote another image
+            if (wasCover) {
+                const nextCover = await ProductMedia.findOne({
+                    where: { product_id: productId }
+                });
+                if (nextCover) {
+                    nextCover.is_cover = true;
+                    await nextCover.save();
+                }
+            }
+
             return this.sendSuccess(null, 'Media deleted', 200);
 
         } catch (error: any) {
@@ -1759,13 +1821,41 @@ export class ProductController extends BaseController {
                 return this.sendError('mediaIds array is required', 400);
             }
 
-            // Ensure all media belong to the product
+            // Fetch media to get file URLs before deleting
+            const mediaToDelete = await ProductMedia.findAll({
+                where: {
+                    id: { [Op.in]: mediaIds },
+                    product_id: productId
+                }
+            });
+
+            // Delete files from disk
+            for (const media of mediaToDelete) {
+                const fileUrl = media.getDataValue('url');
+                if (fileUrl) {
+                    await FileDeleteService.deleteFile(fileUrl);
+                }
+            }
+
+            // Destroy DB records
             await ProductMedia.destroy({
                 where: {
                     id: { [Op.in]: mediaIds },
                     product_id: productId
                 }
             });
+
+            // Ensure a cover still exists
+            const hasCover = await ProductMedia.findOne({ where: { product_id: productId, is_cover: true } });
+            if (!hasCover) {
+                const nextCover = await ProductMedia.findOne({
+                    where: { product_id: productId }
+                });
+                if (nextCover) {
+                    nextCover.is_cover = true;
+                    await nextCover.save();
+                }
+            }
 
             return this.sendSuccess(null, 'Media deleted successfully', 200);
 
