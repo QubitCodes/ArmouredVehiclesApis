@@ -18,21 +18,21 @@ export class VendorOrderController extends BaseController {
       const offset = (page - 1) * limit;
 
       // Logic: Get Orders that contain products by this vendor.
-      
+
       const orders = await Order.findAndCountAll({
         include: [
-            { model: User, as: 'user', attributes: ['id', 'name', 'email'] },
-            { 
-              model: OrderItem, 
-              as: 'items', 
-              required: true,
-              include: [{
-                 model: Product,
-                 as: 'product',
-                 where: { vendor_id: user!.id },
-                 required: true
-              }]
-            }
+          { model: User, as: 'user', attributes: ['id', 'name', 'email'] },
+          {
+            model: OrderItem,
+            as: 'items',
+            required: true,
+            include: [{
+              model: Product,
+              as: 'product',
+              where: { vendor_id: user!.id },
+              required: true
+            }]
+          }
         ],
         limit,
         offset,
@@ -51,82 +51,104 @@ export class VendorOrderController extends BaseController {
   }
 
   async fulfillItem(req: NextRequest, { params }: { params: { id: string } }) {
-      try {
-        const { user, error } = await this.verifyAuth(req);
-        if (error) return error;
+    try {
+      const { user, error } = await this.verifyAuth(req);
+      if (error) return error;
 
-        // Enforce Onboarding
-        const onboardingError = await this.checkOnboarding(user);
-        if (onboardingError) return onboardingError;
+      // Enforce Onboarding
+      const onboardingError = await this.checkOnboarding(user);
+      if (onboardingError) return onboardingError;
 
-        const { item_ids } = await req.json(); // Array of item IDs to mark shipped
-        
-        if (!Array.isArray(item_ids)) return this.sendError('Invalid items', 400);
+      const { item_ids } = await req.json(); // Array of item IDs to mark shipped
 
-        const order = await Order.findByPk(params.id);
-        if(!order) return this.sendError('Order not found', 404);
-        
-        // Ownership check is implied by biz logic (simplifying for MVP)
-        
-        order.shipment_status = 'shipped'; 
-        await order.save();
-        
-        return this.sendSuccess(null, 'Order marked as shipped');
+      if (!Array.isArray(item_ids)) return this.sendError('Invalid items', 400);
 
-      } catch (error) {
-        return this.sendError('Failed to fulfill', 500);
-      }
+      const order = await Order.findByPk(params.id);
+      if (!order) return this.sendError('Order not found', 404);
+
+      // Ownership check is implied by biz logic (simplifying for MVP)
+
+      order.shipment_status = 'shipped';
+      await order.save();
+
+      return this.sendSuccess(null, 'Order marked as shipped');
+
+    } catch (error) {
+      return this.sendError('Failed to fulfill', 500);
+    }
   }
 
   async approveOrder(req: NextRequest, { params }: { params: { id: string } }) {
+    try {
+      const { user, error } = await this.verifyAuth(req);
+      if (error) return error;
+
+      // Enforce Onboarding
+      const onboardingError = await this.checkOnboarding(user);
+      if (onboardingError) return onboardingError;
+
+      // Parse request body for optional invoice comments
+      let invoice_comments: string | null = null;
       try {
-        const { user, error } = await this.verifyAuth(req);
-        if (error) return error;
-
-        // Enforce Onboarding
-        const onboardingError = await this.checkOnboarding(user);
-        if (onboardingError) return onboardingError;
-
-        const order = await Order.findByPk(params.id);
-        if (!order) return this.sendError('Order not found', 404);
-
-        if (order.vendor_id !== user!.id) {
-             return this.sendError('Forbidden', 403);
-        }
-
-        order.order_status = 'vendor_approved';
-        await order.save();
-
-        return this.sendSuccess(null, 'Order approved successfully');
-      } catch (error) {
-        console.error('Approve Order Error:', error);
-        return this.sendError('Failed to approve order', 500);
+        const body = await req.json();
+        invoice_comments = body.invoice_comments || null;
+      } catch {
+        // No body or invalid JSON - continue without comments
       }
+
+      const order = await Order.findByPk(params.id);
+      if (!order) return this.sendError('Order not found', 404);
+
+      if (order.vendor_id !== user!.id) {
+        return this.sendError('Forbidden', 403);
+      }
+
+      order.order_status = 'vendor_approved';
+      await order.save();
+
+      // Generate Admin Invoice (Vendor → Admin)
+      let invoice = null;
+      try {
+        const { InvoiceService } = await import('../services/InvoiceService');
+        invoice = await InvoiceService.generateAdminInvoice(order.id, invoice_comments);
+      } catch (invoiceError) {
+        console.error('Failed to generate admin invoice:', invoiceError);
+        // Continue without failing the order approval
+      }
+
+      return this.sendSuccess(
+        { invoice_id: invoice?.id, invoice_number: invoice?.invoice_number },
+        'Order approved successfully'
+      );
+    } catch (error) {
+      console.error('Approve Order Error:', error);
+      return this.sendError('Failed to approve order', 500);
+    }
   }
 
   async rejectOrder(req: NextRequest, { params }: { params: { id: string } }) {
-      try {
-        const { user, error } = await this.verifyAuth(req);
-        if (error) return error;
+    try {
+      const { user, error } = await this.verifyAuth(req);
+      if (error) return error;
 
-        // Enforce Onboarding
-        const onboardingError = await this.checkOnboarding(user);
-        if (onboardingError) return onboardingError;
+      // Enforce Onboarding
+      const onboardingError = await this.checkOnboarding(user);
+      if (onboardingError) return onboardingError;
 
-        const order = await Order.findByPk(params.id);
-        if (!order) return this.sendError('Order not found', 404);
+      const order = await Order.findByPk(params.id);
+      if (!order) return this.sendError('Order not found', 404);
 
-        if (order.vendor_id !== user!.id) {
-             return this.sendError('Forbidden', 403);
-        }
-
-        order.order_status = 'vendor_rejected';
-        await order.save();
-
-        return this.sendSuccess(null, 'Order rejected successfully');
-      } catch (error) {
-        console.error('Reject Order Error:', error);
-        return this.sendError('Failed to reject order', 500);
+      if (order.vendor_id !== user!.id) {
+        return this.sendError('Forbidden', 403);
       }
+
+      order.order_status = 'vendor_rejected';
+      await order.save();
+
+      return this.sendSuccess(null, 'Order rejected successfully');
+    } catch (error) {
+      console.error('Reject Order Error:', error);
+      return this.sendError('Failed to reject order', 500);
+    }
   }
 }

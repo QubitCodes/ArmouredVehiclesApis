@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import { BaseController } from './BaseController';
 import { Cart, CartItem, Product, ProductMedia, ProductPricingTier, Category } from '../models';
 import { verifyAccessToken } from '../utils/jwt';
+import { applyCommission } from '../utils/priceHelper';
 import { Op } from 'sequelize';
 import { getFileUrl } from '../utils/fileUrl';
 
@@ -17,10 +18,10 @@ export class CartController extends BaseController {
 	 */
 	private async getContext(req: NextRequest) {
 		const authHeader = req.headers.get('authorization');
-        const sessionIdClient = req.headers.get('x-session-id');
-        
-        console.log(`[CHECKOUT DEBUG] CART API (${req.nextUrl.pathname}): AuthHeader=${authHeader ? 'YES' : 'NO'}, SessionID=${sessionIdClient}`);
-        if(authHeader) console.log(`[CHECKOUT DEBUG] CART API: Token start=${authHeader.substring(0, 20)}`);
+		const sessionIdClient = req.headers.get('x-session-id');
+
+		console.log(`[CHECKOUT DEBUG] CART API (${req.nextUrl.pathname}): AuthHeader=${authHeader ? 'YES' : 'NO'}, SessionID=${sessionIdClient}`);
+		if (authHeader) console.log(`[CHECKOUT DEBUG] CART API: Token start=${authHeader.substring(0, 20)}`);
 
 		let userId: string | null = null;
 		let sessionId: string | null = sessionIdClient; // Client must send this generated ID
@@ -32,24 +33,24 @@ export class CartController extends BaseController {
 				if (decoded && (decoded.sub || decoded.userId)) {
 					userId = decoded.sub || decoded.userId;
 				}
-                console.log(`[CHECKOUT DEBUG] CART API: Resolved UserID=${userId}`);
+				console.log(`[CHECKOUT DEBUG] CART API: Resolved UserID=${userId}`);
 			} catch (e) {
 				// Invalid token -> Throw 401
-                console.log(`[CHECKOUT DEBUG] CART API: Token Invalid/Expired`);
-                throw new Error('TOKEN_EXPIRED');
+				console.log(`[CHECKOUT DEBUG] CART API: Token Invalid/Expired`);
+				throw new Error('TOKEN_EXPIRED');
 			}
 		} else {
-            // GUEST LOGIC DISABLED (Strict Auth Enforced)
-            console.log(`[CHECKOUT DEBUG] CART API: Guest Access Blocked (Strict Mode)`);
-            throw new Error('TOKEN_MISSING'); 
-            
-            /* 
-            // --- Legacy Hybrid/Guest Logic (Preserved for future use. JkWorkz) ---
-            console.log(`[CHECKOUT DEBUG] CART API: Is Guest`);
-            // Session logic was here - implied by userId being null and sessionId being set
-            // For now, we fall through, but if we want to block guests, we throw error.
-            */
-        }
+			// GUEST LOGIC DISABLED (Strict Auth Enforced)
+			console.log(`[CHECKOUT DEBUG] CART API: Guest Access Blocked (Strict Mode)`);
+			throw new Error('TOKEN_MISSING');
+
+			/* 
+			// --- Legacy Hybrid/Guest Logic (Preserved for future use. JkWorkz) ---
+			console.log(`[CHECKOUT DEBUG] CART API: Is Guest`);
+			// Session logic was here - implied by userId being null and sessionId being set
+			// For now, we fall through, but if we want to block guests, we throw error.
+			*/
+		}
 
 		return { userId, sessionId };
 	}
@@ -66,7 +67,7 @@ export class CartController extends BaseController {
 		} else {
 			whereClause.session_id = sessionId;
 			// Ensure we don't accidentally pick up a cart that has a user_id if we only have session_id
-			whereClause.user_id = null; 
+			whereClause.user_id = null;
 		}
 
 		let cart = await Cart.findOne({ where: whereClause });
@@ -105,59 +106,56 @@ export class CartController extends BaseController {
 					{
 						model: Product,
 						as: 'product',
-                        include: [
-                             { model: ProductMedia, as: 'media', limit: 1 },
-                             { model: ProductPricingTier, as: 'pricing_tiers' },
-                             { model: Category, as: 'category', attributes: ['id', 'name', 'is_controlled'] },
-                             { model: Category, as: 'main_category', attributes: ['id', 'name', 'is_controlled'] },
-                             { model: Category, as: 'sub_category', attributes: ['id', 'name', 'is_controlled'] }
-                        ]
+						include: [
+							{ model: ProductMedia, as: 'media', limit: 1 },
+							{ model: ProductPricingTier, as: 'pricing_tiers' },
+							{ model: Category, as: 'category', attributes: ['id', 'name', 'is_controlled'] },
+							{ model: Category, as: 'main_category', attributes: ['id', 'name', 'is_controlled'] },
+							{ model: Category, as: 'sub_category', attributes: ['id', 'name', 'is_controlled'] }
+						]
 					}
 				]
 			});
 
-            // Format items to include is_controlled and ensure helper format
-            const formattedItems = items.map((item: any) => {
-                const plainItem = item.toJSON();
-                const p = plainItem.product;
+			// Format items to include is_controlled and ensure helper format
+			const formattedItems = items.map((item: any) => {
+				const plainItem = item.toJSON();
+				const p = applyCommission(plainItem.product);
 
-                if (p) {
-                   // DEBUG LOG
-                   console.log(`[CartController] Item ${p.id} (${p.name}): Price=${p.price}, BasePrice=${p.base_price}, MediaLen=${p.media?.length}, Img=${p.image}`);
+				if (p) {
+					// Calculate is_controlled
+					const mainCat = p.main_category;
+					const cat = p.category;
+					const subCat = p.sub_category;
 
-                   // Calculate is_controlled
-                   const mainCat = p.main_category;
-                   const cat = p.category;
-                   const subCat = p.sub_category;
+					p.is_controlled = (
+						(mainCat?.is_controlled === true) ||
+						(cat?.is_controlled === true) ||
+						(subCat?.is_controlled === true)
+					);
 
-                   p.is_controlled = (
-                       (mainCat?.is_controlled === true) || 
-                       (cat?.is_controlled === true) || 
-                       (subCat?.is_controlled === true)
-                   );
-                   
-                   // Ensure image is set from media if available
-                   if (!p.image && p.media && p.media.length > 0) {
-                        // ProductMedia uses 'url'
-                        p.image = getFileUrl(p.media[0].url);
-                   }
-                   
-                   // Ensure price is set from base_price if price is 0/null
-                   // Cast to Number to be safe
-                   const basePrice = Number(p.base_price);
-                   const currentPrice = Number(p.price);
-                   
-                   if (!currentPrice && basePrice) {
-                       p.price = basePrice;
-                   }
-                }
-                return plainItem;
-            });
+					// Ensure image is set from media if available
+					if (!p.image && p.media && p.media.length > 0) {
+						// ProductMedia uses 'url'
+						p.image = getFileUrl(p.media[0].url);
+					}
+
+					// Ensure price is set from base_price if price is 0/null
+					// Cast to Number to be safe
+					const basePrice = Number(p.base_price);
+					const currentPrice = Number(p.price);
+
+					if (!currentPrice && basePrice) {
+						p.price = basePrice;
+					}
+				}
+				return plainItem;
+			});
 
 			return this.sendSuccess({ cart, items: formattedItems });
 		} catch (error: any) {
-            if (error.message === 'TOKEN_EXPIRED') return this.sendError('Token expired', 210, [], undefined, req);
-            if (error.message === 'TOKEN_MISSING') return this.sendError('Authentication required', 210, [], undefined, req);
+			if (error.message === 'TOKEN_EXPIRED') return this.sendError('Token expired', 210, [], undefined, req);
+			if (error.message === 'TOKEN_MISSING') return this.sendError('Authentication required', 210, [], undefined, req);
 			return this.sendError(String((error as any).message), 500, [], undefined, req);
 		}
 	}
@@ -204,8 +202,8 @@ export class CartController extends BaseController {
 
 			return this.sendSuccess({ message: 'Item added', item });
 		} catch (error: any) {
-            if (error.message === 'TOKEN_EXPIRED') return this.sendError('Token expired', 210, [], undefined, req);
-            if (error.message === 'TOKEN_MISSING') return this.sendError('Authentication required', 210, [], undefined, req);
+			if (error.message === 'TOKEN_EXPIRED') return this.sendError('Token expired', 210, [], undefined, req);
+			if (error.message === 'TOKEN_MISSING') return this.sendError('Authentication required', 210, [], undefined, req);
 			return this.sendError(String((error as any).message), 500, [], undefined, req);
 		}
 	}
@@ -241,8 +239,8 @@ export class CartController extends BaseController {
 
 			return this.sendSuccess({ message: 'Cart updated', item });
 		} catch (error: any) {
-            if (error.message === 'TOKEN_EXPIRED') return this.sendError('Token expired', 210, [], undefined, req);
-            if (error.message === 'TOKEN_MISSING') return this.sendError('Authentication required', 210, [], undefined, req);
+			if (error.message === 'TOKEN_EXPIRED') return this.sendError('Token expired', 210, [], undefined, req);
+			if (error.message === 'TOKEN_MISSING') return this.sendError('Authentication required', 210, [], undefined, req);
 			return this.sendError(String((error as any).message), 500, [], undefined, req);
 		}
 	}
@@ -269,8 +267,8 @@ export class CartController extends BaseController {
 
 			return this.sendSuccess({ message: 'Item removed' });
 		} catch (error: any) {
-            if (error.message === 'TOKEN_EXPIRED') return this.sendError('Token expired', 210, [], undefined, req);
-            if (error.message === 'TOKEN_MISSING') return this.sendError('Authentication required', 210, [], undefined, req);
+			if (error.message === 'TOKEN_EXPIRED') return this.sendError('Token expired', 210, [], undefined, req);
+			if (error.message === 'TOKEN_MISSING') return this.sendError('Authentication required', 210, [], undefined, req);
 			return this.sendError(String((error as any).message), 500, [], undefined, req);
 		}
 	}
@@ -330,8 +328,8 @@ export class CartController extends BaseController {
 
 			return this.sendSuccess({ message: 'Cart merged successfully' });
 		} catch (error: any) {
-            if (error.message === 'TOKEN_EXPIRED') return this.sendError('Token expired', 210, [], undefined, req);
-            if (error.message === 'TOKEN_MISSING') return this.sendError('Authentication required', 210, [], undefined, req);
+			if (error.message === 'TOKEN_EXPIRED') return this.sendError('Token expired', 210, [], undefined, req);
+			if (error.message === 'TOKEN_MISSING') return this.sendError('Authentication required', 210, [], undefined, req);
 			return this.sendError(String((error as any).message), 500, [], undefined, req);
 		}
 	}

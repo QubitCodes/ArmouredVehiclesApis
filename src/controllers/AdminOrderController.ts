@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { BaseController } from './BaseController';
-import { Order, OrderItem, User, Product, Address, UserProfile, Category, sequelize } from '../models'; // Added sequelize
+import { Order, OrderItem, User, Product, Address, UserProfile, Category, Invoice, sequelize } from '../models'; // Added sequelize and Invoice
 import { Op, literal } from 'sequelize';
 import { FinanceService } from '../services/FinanceService';
 import { getFileUrl } from '../utils/fileUrl';
@@ -119,25 +119,10 @@ export class AdminOrderController extends BaseController {
                 offset,
             });
 
-            if (user!.user_type === 'admin' && !canViewAll && canViewControlled) {
-                // Apply Literal Filter to `where`
-                // "Order has at least one item that is controlled"
-                // Assuming standard naming convention: order_items, products, categories
-                // Match exact table naming and alias "Order"
-                where[Op.and] = [
-                    literal(`EXISTS (
-                        SELECT 1 FROM "order_items" AS "oi"
-                        JOIN "products" AS "p" ON "oi"."product_id" = "p"."id"
-                        JOIN "categories" AS "c" ON "p"."category_id" = "c"."id"
-                        WHERE "oi"."order_id" = "Order"."id"
-                        AND "c"."is_controlled" = true
-                    )`)
-                ];
-            }
-
             // Count Query (Distinct Groups)
             const totalGroups = await Order.count({
                 where,
+                include: includeForScope.length > 0 ? includeForScope : undefined,
                 distinct: true,
                 col: 'order_group_id'
             });
@@ -554,7 +539,6 @@ export class AdminOrderController extends BaseController {
             return new AdminOrderController().sendError(error.message, 500);
         }
     }
-
     /**
      * PATCH /api/v1/admin/orders/:id
      */
@@ -589,7 +573,8 @@ export class AdminOrderController extends BaseController {
                 shipment_details,
                 tracking_number,
                 shipment_id,
-                label_url
+                label_url,
+                invoice_comments // Optional invoice comments for approval
             } = body;
 
             const effectiveStatus = status || order_status;
@@ -652,6 +637,11 @@ export class AdminOrderController extends BaseController {
                 }
             }
 
+            // Store previous values for comparison
+            const prevOrderStatus = order.order_status;
+            const prevPaymentStatus = order.payment_status;
+            const prevShipmentStatus = order.shipment_status;
+
             // --- FINANCIAL LOGIC ---
             // 1. Lock Funds on DISPATCH (Vendor Shipped)
             if (shipment_status === 'vendor_shipped' && (order.shipment_status as string) !== 'vendor_shipped') {
@@ -702,7 +692,68 @@ export class AdminOrderController extends BaseController {
 
             await order.save();
 
-            return controller.sendSuccess({ message: 'Order updated', order });
+            // --- INVOICE GENERATION LOGIC ---
+            let generatedInvoice = null;
+            let updatedAdminInvoice = null;
+
+            try {
+                const { InvoiceService } = await import('../services/InvoiceService');
+
+                // Check for customer invoice generation conditions:
+                // order_status changing to 'approved' AND payment_status is 'paid'
+                const isNowApproved = effectiveStatus === 'approved' && prevOrderStatus !== 'approved';
+                const isPaid = (payment_status === 'paid') || (order.payment_status === 'paid');
+
+                if (isNowApproved && isPaid) {
+                    // Generate Customer Invoice (Admin → Customer)
+                    generatedInvoice = await InvoiceService.generateCustomerInvoice(order.id, invoice_comments);
+                    console.log(`Generated customer invoice: ${generatedInvoice?.invoice_number}`);
+                }
+
+                // Check for admin invoice generation conditions (if admin changes status to vendor_approved)
+                const isNowVendorApproved = effectiveStatus === 'vendor_approved' && prevOrderStatus !== 'vendor_approved';
+                if (isNowVendorApproved) {
+                    // Generate Admin Invoice (Vendor → Admin) - but check if it already exists?
+                    // generateAdminInvoice has its own numbering and creation logic
+                    const existingAdminInvoice = await Invoice.findOne({ where: { order_id: order.id, invoice_type: 'admin' } });
+                    if (!existingAdminInvoice) {
+                        const adminInvoice = await InvoiceService.generateAdminInvoice(order.id, invoice_comments);
+                        console.log(`Generated admin invoice: ${adminInvoice?.invoice_number}`);
+                        // If we didn't generate customer invoice, we can return this one
+                        if (!generatedInvoice) generatedInvoice = adminInvoice;
+                    }
+                }
+
+                // Check for admin invoice payment status update:
+                // shipment_status changing to 'admin_received' AND payment_status is 'paid'
+                const isNowAdminReceived = shipment_status === 'admin_received' && prevShipmentStatus !== 'admin_received';
+
+                if (isNowAdminReceived && isPaid) {
+                    // Mark Admin Invoice as Paid
+                    updatedAdminInvoice = await InvoiceService.markAdminInvoicePaid(order.id);
+                    if (updatedAdminInvoice) {
+                        console.log(`Marked admin invoice as paid: ${updatedAdminInvoice.invoice_number}`);
+                    }
+                }
+            } catch (invoiceError) {
+                console.error('Invoice operation failed:', invoiceError);
+                // Continue without failing the order update
+            }
+
+            return controller.sendSuccess({
+                message: 'Order updated',
+                order,
+                invoice: generatedInvoice ? {
+                    id: generatedInvoice.id,
+                    invoice_number: generatedInvoice.invoice_number,
+                    type: generatedInvoice.invoice_type
+                } : undefined,
+                admin_invoice_updated: updatedAdminInvoice ? {
+                    id: updatedAdminInvoice.id,
+                    invoice_number: updatedAdminInvoice.invoice_number,
+                    payment_status: updatedAdminInvoice.payment_status
+                } : undefined
+            });
 
         } catch (error: any) {
             return new AdminOrderController().sendError(error.message, 500);

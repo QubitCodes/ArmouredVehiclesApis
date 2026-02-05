@@ -13,7 +13,7 @@ interface OrderAttributes {
   currency: string;
   type: 'direct' | 'request';
   payment_status?: 'pending' | 'paid' | 'failed' | 'refunded' | null;
-  shipment_status?: 'pending' | 'processing' | 'shipped' | 'delivered' | 'returned' | 'cancelled' | null;
+  shipment_status?: 'pending' | 'vendor_shipped' | 'admin_received' | 'processing' | 'shipped' | 'delivered' | 'returned' | 'cancelled' | null;
   comments?: string | null;
   tracking_number?: string | null;
   shipment_id?: string | null;
@@ -44,7 +44,7 @@ export class Order extends Model<OrderAttributes, OrderCreationAttributes> imple
   declare public currency: string;
   declare public type: 'direct' | 'request';
   declare public payment_status?: 'pending' | 'paid' | 'failed' | 'refunded' | null;
-  declare public shipment_status?: 'pending' | 'processing' | 'shipped' | 'delivered' | 'returned' | 'cancelled' | null;
+  declare public shipment_status?: 'pending' | 'vendor_shipped' | 'admin_received' | 'processing' | 'shipped' | 'delivered' | 'returned' | 'cancelled' | null;
   declare public comments?: string | null;
   declare public tracking_number?: string | null;
   declare public shipment_id?: string | null;

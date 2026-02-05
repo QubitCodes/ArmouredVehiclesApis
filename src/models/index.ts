@@ -12,6 +12,7 @@ import { Review } from './Review';
 import { Cart, CartItem } from './Cart';
 import { Wishlist, WishlistItem } from './Wishlist';
 import { Order, OrderItem } from './Order';
+import { Invoice } from './Invoice';
 import { WithdrawalRequest } from './WithdrawalRequest';
 import { PlatformSetting } from './PlatformSetting';
 import { FinancialLog } from './FinancialLog';
@@ -129,6 +130,10 @@ const initAssociations = () => {
   OrderItem.belongsTo(Order, { foreignKey: 'order_id', as: 'order' });
 
   OrderItem.belongsTo(Product, { foreignKey: 'product_id', as: 'product' });
+
+  // --- Invoice Associations ---
+  Order.hasMany(Invoice, { foreignKey: 'order_id', as: 'invoices' });
+  Invoice.belongsTo(Order, { foreignKey: 'order_id', as: 'order' });
 };
 
 // Run associations
@@ -179,5 +184,6 @@ export {
   FrontendAd,
   RefProductBrand,
   UserPermission,
-  RefPermission
+  RefPermission,
+  Invoice
 };
