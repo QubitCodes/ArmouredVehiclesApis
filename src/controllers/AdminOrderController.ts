@@ -112,9 +112,9 @@ export class AdminOrderController extends BaseController {
                 attributes: ['order_group_id'],
                 where,
                 include: includeForScope.length > 0 ? includeForScope : undefined,
-                // Match generated alias "Order"
-                group: ['order_group_id', ...includeForScope.map(() => 'items.id'), ...includeForScope.map(() => 'items->product.id'), ...includeForScope.map(() => 'items->product->category.id')],
-                order: [[sequelize.fn('MAX', sequelize.col('Order.created_at')), 'DESC']],
+                // Match resolved column names
+                group: ['order_group_id', ...includeForScope.map(() => sequelize.col('items.id')), ...includeForScope.map(() => sequelize.col('items.product.id')), ...includeForScope.map(() => sequelize.col('items.product.category.id'))],
+                order: [[sequelize.fn('MAX', sequelize.col('created_at')), 'DESC']],
                 limit,
                 offset,
             });
