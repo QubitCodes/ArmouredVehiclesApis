@@ -1015,6 +1015,40 @@ export class ProductController extends BaseController {
                 }
             });
 
+            // Handle CamelCase -> SnakeCase mapping for robustness (FormData sends camelCase from frontend)
+            const mapping: any = {
+                basePrice: 'base_price',
+                minOrderQuantity: 'min_order_quantity',
+                productionLeadTime: 'production_lead_time',
+                weightValue: 'weight_value',
+                warrantyDuration: 'warranty_duration',
+                readyStockAvailable: 'ready_stock_available',
+                requiresExportLicense: 'requires_export_license',
+                hasWarranty: 'has_warranty',
+                complianceConfirmed: 'compliance_confirmed',
+                manufacturingSource: 'manufacturing_source',
+                manufacturingSourceName: 'manufacturing_source_name',
+                vehicleFitment: 'vehicle_fitment',
+                specifications: 'specifications',
+                technicalDescription: 'technical_description',
+                controlledItemType: 'controlled_item_type',
+                subCategoryId: 'sub_category_id',
+                mainCategoryId: 'main_category_id',
+                countryOfOrigin: 'country_of_origin',
+                vehicleCompatibility: 'vehicle_compatibility',
+                isFeatured: 'is_featured',
+                isTopSelling: 'is_top_selling',
+                individualProductPricing: 'individual_product_pricing',
+                individual_product_pricing: 'individual_product_pricing',
+                brandId: 'brand_id'
+            };
+
+            Object.keys(mapping).forEach(camelKey => {
+                if (body[camelKey] !== undefined) {
+                    body[mapping[camelKey]] = body[camelKey];
+                }
+            });
+
 
             const validated = createProductSchema.parse(body);
 
@@ -1359,7 +1393,7 @@ export class ProductController extends BaseController {
             // Ensure numeric fields are numbers (FormData sends strings)
             if (body.base_price !== undefined) body.base_price = Number(body.base_price);
             if (body.weight_value !== undefined) body.weight_value = Number(body.weight_value);
-            if (body.min_order_quantity !== undefined) body.min_order_quantity = Number(body.min_order_quantity);
+            // if (body.min_order_quantity !== undefined) body.min_order_quantity = Number(body.min_order_quantity); // DEPRECATED: Now TEXT
             if (body.production_lead_time !== undefined) body.production_lead_time = Number(body.production_lead_time);
             if (body.year !== undefined) body.year = Number(body.year);
             if (body.warranty_duration !== undefined) body.warranty_duration = Number(body.warranty_duration);
