@@ -178,7 +178,13 @@ export class OnboardingController extends BaseController {
 
 			let profile = await UserProfile.findOne({ where: { user_id: user!.id } });
 			if (!profile) {
-				return this.sendError('Please complete step 0 first', 400);
+				// If no profile exists (e.g. Vendor starting directly at Step 1), create one
+				profile = await UserProfile.create({
+					user_id: user!.id,
+					onboarding_status: 'in_progress',
+					current_step: 1 // Will be updated to 2 (or 3) below
+				});
+				// return this.sendError('Please complete step 0 first', 400);
 			}
 
 			// Mapping for entity_type strings to IDs
