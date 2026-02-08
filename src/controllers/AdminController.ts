@@ -10,7 +10,9 @@ import {
     WithdrawalRequest,
     PlatformSetting,
     AuthSession,
-    UserProfile
+    UserProfile,
+    RefEntityType,
+    ReferenceModels
 } from '../models';
 import { z } from 'zod';
 import { sequelize } from '../config/database';
@@ -35,8 +37,9 @@ export class AdminController extends BaseController {
 
     /**
      * Helper: Format vendor profile with full absolute URLs for documents
+     * and human-readable country names from codes.
      */
-    private static formatVendorProfile(profile: any): any {
+    private static async formatVendorProfile(profile: any): Promise<any> {
         if (!profile) return null;
         const formatted = profile.toJSON ? profile.toJSON() : { ...profile };
 
@@ -46,6 +49,34 @@ export class AdminController extends BaseController {
                 formatted[field] = getFileUrl(formatted[field]);
             }
         });
+
+        // Map Country Codes to Names
+        // Fields that store country codes (CCA2)
+        const countryFields = ['country_of_registration', 'bank_country', 'country'];
+
+        // Fetch countries for mapping if any field is provided as a code (usually 2 chars)
+        const needsMapping = countryFields.some(f => formatted[f] && formatted[f].length <= 3);
+
+        if (needsMapping) {
+            try {
+                const countries = await ReferenceModels.RefCountry.findAll({
+                    attributes: ['code', 'name']
+                });
+                const countryMap = new Map(countries.map((c: any) => [c.code.toLowerCase(), c.name]));
+
+                countryFields.forEach(field => {
+                    const code = formatted[field];
+                    if (code && code.length <= 3) {
+                        const name = countryMap.get(code.toLowerCase());
+                        if (name) {
+                            formatted[field] = name;
+                        }
+                    }
+                });
+            } catch (err) {
+                console.error('[AdminController] Country mapping failed:', err);
+            }
+        }
 
         return formatted;
     }
@@ -129,7 +160,7 @@ export class AdminController extends BaseController {
             const admins = await User.findAndCountAll({
                 where,
                 attributes: {
-                    exclude: ['password'],
+
                     include: [
                         [
                             sequelize.literal(`(
@@ -208,7 +239,7 @@ export class AdminController extends BaseController {
                     user_type: { [Op.in]: ['admin', 'super_admin'] }
                 },
                 attributes: {
-                    exclude: ['password'],
+
                     include: [
                         [
                             sequelize.literal(`(
@@ -366,7 +397,7 @@ export class AdminController extends BaseController {
                 email,
                 phone,
                 country_code,
-                password: null as any,
+
                 user_type: 'admin',
                 email_verified: true, // Auto-verified
                 phone_verified: true, // Auto-verified
@@ -918,14 +949,14 @@ export class AdminController extends BaseController {
             const vendors = await User.findAndCountAll({
                 where,
                 attributes: {
-                    exclude: ['password'],
+
                     include: [
                         [
                             sequelize.literal(`(
                         SELECT COUNT(*)::int
                         FROM products AS p
                         WHERE p.vendor_id = "User"."id"
-                        AND p.status != 'draft'
+                        AND p.status = 'published'
                         AND p.deleted_at IS NULL
                     )`),
                             'product_count'
@@ -956,13 +987,13 @@ export class AdminController extends BaseController {
                 order: [['created_at', 'DESC']]
             });
 
-            const formattedVendors = vendors.rows.map((vendor: any) => {
+            const formattedVendors = await Promise.all(vendors.rows.map(async (vendor: any) => {
                 const v = vendor.toJSON ? vendor.toJSON() : { ...vendor };
                 if (v.profile) {
-                    v.profile = this.formatVendorProfile(v.profile);
+                    v.profile = await AdminController.formatVendorProfile(v.profile);
                 }
                 return v;
-            });
+            }));
 
             // Calculate pending count for frontend auto-filter
             const pendingCount = await User.count({
@@ -1023,8 +1054,12 @@ export class AdminController extends BaseController {
 
             const vendor = await User.findOne({
                 where: { id: params.id, user_type: 'vendor' },
-                attributes: { exclude: ['password'] },
-                include: [{ model: UserProfile, as: 'profile' }]
+                attributes: undefined,
+                include: [{
+                    model: UserProfile,
+                    as: 'profile',
+                    include: [{ model: RefEntityType, as: 'entityType' }]
+                }]
             });
 
             if (!vendor) {
@@ -1033,7 +1068,7 @@ export class AdminController extends BaseController {
 
             const v: any = vendor.toJSON ? vendor.toJSON() : { ...vendor };
             if (v.profile) {
-                v.profile = this.formatVendorProfile(v.profile);
+                v.profile = await AdminController.formatVendorProfile(v.profile);
             }
 
             return NextResponse.json({
@@ -1166,7 +1201,6 @@ export class AdminController extends BaseController {
             };
 
             if (status === 'rejected' || status === 'update_needed') {
-                updateData.rejection_reason = note;
                 updateData.rejection_reason = note;
                 // vendor.is_active = false; // Do not deactivate user on rejection, so they can login to fix profile
 
@@ -1505,7 +1539,7 @@ export class AdminController extends BaseController {
 
             const attributes = isVendor
                 ? this.VENDOR_VISIBLE_CUSTOMER_FIELDS
-                : { exclude: ['password'] };
+                : undefined;
 
             const customers = await User.findAndCountAll({
                 where,
@@ -1585,9 +1619,13 @@ export class AdminController extends BaseController {
 
             const attributes = isVendor
                 ? this.VENDOR_VISIBLE_CUSTOMER_FIELDS
-                : { exclude: ['password'] };
+                : undefined;
 
-            const include = isAdmin ? [{ model: UserProfile, as: 'profile' }] : [];
+            const include = isAdmin ? [{
+                model: UserProfile,
+                as: 'profile',
+                include: [{ model: RefEntityType, as: 'entityType' }]
+            }] : [];
 
             const customer: any = await User.findOne({
                 where: { id: params.id, user_type: 'customer' },
@@ -1877,25 +1915,17 @@ export class AdminController extends BaseController {
                         }
                     }
 
-                    // Reset Onboarding Step
-                    console.log('[DEBUG] Fields to clear:', fields_to_clear);
-                    console.log('[DEBUG] Min calculated step:', minStep);
-                    console.log('[DEBUG] Current Customer Step:', customer.onboarding_step);
 
                     if (minStep !== 99) {
                         if (customer.onboarding_step === null || customer.onboarding_step > minStep) {
-                            console.log(`[DEBUG] Updating step to ${minStep}`);
                             customer.onboarding_step = minStep;
                             updateData.current_step = minStep; // Sync both
-                        } else {
-                            console.log('[DEBUG] Not updating step (current step is lower or equal)');
                         }
                     }
                 }
 
-                console.log('[DEBUG] Saving customer...');
+
                 await customer.save();
-                console.log('[DEBUG] Customer saved.');
             } else {
                 updateData.review_note = note;
                 updateData.review_note = note;
@@ -2044,7 +2074,7 @@ export class AdminController extends BaseController {
                     {
                         model: User,
                         as: 'user',
-                        attributes: isVendor ? this.VENDOR_VISIBLE_CUSTOMER_FIELDS : { exclude: ['password'] }
+                        attributes: isVendor ? this.VENDOR_VISIBLE_CUSTOMER_FIELDS : undefined
                     }
                 ]
             });

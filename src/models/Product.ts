@@ -65,7 +65,7 @@ interface ProductAttributes {
 
   // Pricing & Stock
   base_price?: number | null;
-  shipping_charge?: number | null;
+
   packing_charge?: number | null;
   currency?: string | null;
   pricing_terms?: string[] | null;
@@ -176,7 +176,7 @@ export class Product extends Model<ProductAttributes, ProductCreationAttributes>
 
   // Pricing
   declare public base_price?: number;
-  declare public shipping_charge?: number;
+
   declare public packing_charge?: number;
   declare public currency?: string;
   declare public pricing_terms?: string[];
@@ -273,7 +273,7 @@ Product.init(
 
     // Pricing & Stock
     base_price: { type: DataTypes.DECIMAL(10, 2) },
-    shipping_charge: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+
     packing_charge: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
     currency: { type: DataTypes.TEXT, defaultValue: 'AED' },
     pricing_terms: { type: DataTypes.ARRAY(DataTypes.TEXT) },

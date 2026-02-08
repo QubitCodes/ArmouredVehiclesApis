@@ -11,7 +11,7 @@ export async function seedUsers() {
     // await sequelize.authenticate(); // Handled by runner
     // await sequelize.sync(); // Handled by runner
 
-    const passwordHash = await bcrypt.hash('password123', 10);
+
 
     const users = [
       {
@@ -21,7 +21,7 @@ export async function seedUsers() {
         phone: '9400143527',
         country_code: '+91',
         username: 'customer_9400',
-        password: passwordHash,
+
         user_type: 'customer',
         email_verified: true,
         phone_verified: true,
@@ -35,7 +35,7 @@ export async function seedUsers() {
         phone: '8281300882',
         country_code: '+91',
         username: 'vendor_8281',
-        password: passwordHash,
+
         user_type: 'vendor',
         email_verified: true,
         phone_verified: true,

@@ -1,8 +1,8 @@
 import 'dotenv/config'; // Load env vars
 import { sequelize } from '../config/database';
-import { 
-  RefCountry, 
-  RefCurrency, 
+import {
+  RefCountry,
+  RefCurrency,
   RefVendorCategory,
   RefNatureOfBusiness,
   RefEndUseMarket,
@@ -10,13 +10,33 @@ import {
   RefVerificationMethod,
   RefProofType,
   RefPaymentMethod,
-  RefFinancialInstitution
+  RefFinancialInstitution,
+  RefEntityType
 } from '../models/Reference';
 
 
 export async function seedReferences() {
   try {
     console.log('... Seeding References START');
+
+    // Entity Types
+    console.log('... Seeding Entity Types');
+    const entityTypes = [
+      { name: 'Individual', display_order: 1 },
+      { name: 'Sole Establishment', display_order: 2 },
+      { name: 'Limited Liability Company (LLC)', display_order: 3 },
+      { name: 'Public Joint Stock Company (PJSC)', display_order: 4 },
+      { name: 'Private Joint Stock Company (PrJSC)', display_order: 5 },
+      { name: 'Branch of a Foreign Company', display_order: 6 },
+      { name: 'Branch of a UAE Company', display_order: 7 },
+      { name: 'Branch of a GCC Company', display_order: 8 },
+      { name: 'Branch of a Free Zone Company', display_order: 9 },
+      { name: 'Civil Company', display_order: 10 },
+    ];
+    for (const e of entityTypes) {
+      await RefEntityType.findOrCreate({ where: { name: e.name }, defaults: e });
+    }
+    console.log('Seeded Entity Types');
 
     // Sync specific models if needed, but main seed.ts handles sync
     // await RefCountry.sync();
@@ -32,7 +52,7 @@ export async function seedReferences() {
       { name: 'Canada', code: 'CA', phone_code: '+1', flag: '🇨🇦' },
       { name: 'Germany', code: 'DE', phone_code: '+49', flag: '🇩🇪' },
     ];
-    
+
     for (const c of countries) {
       await RefCountry.findOrCreate({
         where: { code: c.code },
@@ -51,67 +71,67 @@ export async function seedReferences() {
     ];
 
     for (const c of currencies) {
-        await RefCurrency.findOrCreate({ where: { code: c.code }, defaults: c });
+      await RefCurrency.findOrCreate({ where: { code: c.code }, defaults: c });
     }
     console.log('Seeded Currencies');
 
     // Vendor Categories
     const categories = [
-        { name: 'Armored Vehicles Manufacturer' },
-        { name: 'Raw Materials Supplier' },
-        { name: 'Ballistic Glass Manufacturer' },
-        { name: 'Security Equipment Provider' },
+      { name: 'Armored Vehicles Manufacturer' },
+      { name: 'Raw Materials Supplier' },
+      { name: 'Ballistic Glass Manufacturer' },
+      { name: 'Security Equipment Provider' },
     ];
-     for (const c of categories) {
-        await RefVendorCategory.findOrCreate({ where: { name: c.name }, defaults: c });
+    for (const c of categories) {
+      await RefVendorCategory.findOrCreate({ where: { name: c.name }, defaults: c });
     }
     console.log('Seeded Vendor Categories');
-    
+
     console.log('Seeded Vendor Categories');
 
     // Nature of Business
     console.log('... Seeding Nature of Business');
     const nob = [
-        { name: 'Manufacturer' },
-        { name: 'Distributor' },
-        { name: 'Reseller' },
-        { name: 'Service Provider' },
+      { name: 'Manufacturer' },
+      { name: 'Distributor' },
+      { name: 'Reseller' },
+      { name: 'Service Provider' },
     ];
     for (const n of nob) {
-        await RefNatureOfBusiness.findOrCreate({ where: { name: n.name }, defaults: n });
+      await RefNatureOfBusiness.findOrCreate({ where: { name: n.name }, defaults: n });
     }
     console.log('Seeded Nature of Business');
 
     // Buyer Types
     console.log('... Seeding Buyer Types');
     const buyerTypes = [
-        { name: 'Individual' },
-        { name: 'Dealership' },
-        { name: 'Company' },
-        { name: 'Government' },
+      { name: 'Individual' },
+      { name: 'Dealership' },
+      { name: 'Company' },
+      { name: 'Government' },
     ];
     for (const b of buyerTypes) {
-        await RefBuyerType.findOrCreate({ where: { name: b.name }, defaults: b });
+      await RefBuyerType.findOrCreate({ where: { name: b.name }, defaults: b });
     }
     console.log('Seeded Buyer Types');
 
     // Verification Methods
     console.log('... Seeding Verification Methods');
     const verificationMethods = [
-      { 
-        name: 'Video Call', 
+      {
+        name: 'Video Call',
         description: 'Verify your physical location via a scheduled video call.',
         is_available: true,
         display_order: 1
       },
-      { 
-        name: 'In-Person Visit', 
+      {
+        name: 'In-Person Visit',
         description: 'An associate will visit your registered address.',
         is_available: true,
         display_order: 2
       },
-      { 
-        name: 'Phone Call', 
+      {
+        name: 'Phone Call',
         description: 'Verify details through a recorded phone interview.',
         is_available: true,
         display_order: 3

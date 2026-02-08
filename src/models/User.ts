@@ -9,13 +9,11 @@ interface UserAttributes {
   email: string;
   phone?: string;
   country_code?: string;
-  password?: string;
   firebase_uid?: string;
   user_type: 'customer' | 'vendor' | 'admin' | 'super_admin';
   avatar?: string;
   email_verified: boolean;
   phone_verified: boolean;
-  completion_percentage: number;
   token_version: number;
   onboarding_step: number | null;
   is_active: boolean;
@@ -28,7 +26,7 @@ interface UserAttributes {
 }
 
 // We recommend optional attributes for creation
-interface UserCreationAttributes extends Optional<UserAttributes, 'id' | 'user_type' | 'email_verified' | 'phone_verified' | 'completion_percentage' | 'token_version' | 'onboarding_step' | 'is_active'> { }
+interface UserCreationAttributes extends Optional<UserAttributes, 'id' | 'user_type' | 'email_verified' | 'phone_verified' | 'token_version' | 'onboarding_step' | 'is_active'> { }
 
 export class User extends Model<UserAttributes, UserCreationAttributes> implements UserAttributes {
   public declare id: string;
@@ -37,13 +35,11 @@ export class User extends Model<UserAttributes, UserCreationAttributes> implemen
   public declare email: string;
   public declare phone: string;
   public declare country_code: string;
-  public declare password: string;
   public declare firebase_uid: string;
   public declare user_type: 'customer' | 'vendor' | 'admin' | 'super_admin';
   public declare avatar: string;
   public declare email_verified: boolean;
   public declare phone_verified: boolean;
-  public declare completion_percentage: number;
   public declare token_version: number;
   public declare onboarding_step: number | null;
   public declare is_active: boolean;
@@ -85,10 +81,6 @@ User.init(
     country_code: {
       type: DataTypes.TEXT,
     },
-    password: {
-      type: DataTypes.TEXT,
-      allowNull: true,
-    },
     firebase_uid: {
       type: DataTypes.TEXT,
       unique: true,
@@ -108,10 +100,6 @@ User.init(
     phone_verified: {
       type: DataTypes.BOOLEAN,
       defaultValue: false,
-    },
-    completion_percentage: {
-      type: DataTypes.INTEGER,
-      defaultValue: 0,
     },
     token_version: {
       type: DataTypes.INTEGER,
@@ -145,6 +133,7 @@ User.init(
     timestamps: true,
     createdAt: 'created_at',
     updatedAt: 'updated_at',
+    deletedAt: 'deleted_at',
     paranoid: true, // soft deletes enabled
   }
 );

@@ -824,6 +824,12 @@ export class ProductController extends BaseController {
                 if (whereClause.vendor_id) {
                     // Strictly enforce PUBLISHED for vendor products shown to admin
                     whereClause.status = ProductStatus.PUBLISHED;
+                } else {
+                    // Default Admin Inventory to PUBLISHED if no status provided
+                    const statusParam = searchParams.get('status');
+                    if (!statusParam || statusParam === 'all') {
+                        whereClause.status = ProductStatus.PUBLISHED;
+                    }
                 }
             }
 
@@ -841,7 +847,9 @@ export class ProductController extends BaseController {
 
                 // Existing Filters...
                 const statusParam = searchParams.get('status');
-                if (statusParam && statusParam !== 'all') whereClause.status = statusParam;
+                if (statusParam && statusParam !== 'all') {
+                    whereClause.status = statusParam;
+                }
 
                 const approvalStatusParam = searchParams.get('approval_status');
                 if (approvalStatusParam && approvalStatusParam !== 'all') whereClause.approval_status = approvalStatusParam;

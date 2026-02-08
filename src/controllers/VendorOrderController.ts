@@ -18,8 +18,11 @@ export class VendorOrderController extends BaseController {
       const offset = (page - 1) * limit;
 
       // Logic: Get Orders that contain products by this vendor.
-
+      // Vendor only sees PAID orders
       const orders = await Order.findAndCountAll({
+        where: {
+          payment_status: 'paid'
+        },
         include: [
           { model: User, as: 'user', attributes: ['id', 'name', 'email'] },
           {
@@ -103,21 +106,16 @@ export class VendorOrderController extends BaseController {
         return this.sendError('Forbidden', 403);
       }
 
-      order.order_status = 'vendor_approved';
+      if (invoice_comments) {
+        order.invoice_comments = invoice_comments;
+      }
+      order.order_status = 'approved';
       await order.save();
 
-      // Generate Admin Invoice (Vendor → Admin)
-      let invoice = null;
-      try {
-        const { InvoiceService } = await import('../services/InvoiceService');
-        invoice = await InvoiceService.generateAdminInvoice(order.id, invoice_comments);
-      } catch (invoiceError) {
-        console.error('Failed to generate admin invoice:', invoiceError);
-        // Continue without failing the order approval
-      }
+      // Note: Admin Invoice generation is now handled when shipment is delivered
 
       return this.sendSuccess(
-        { invoice_id: invoice?.id, invoice_number: invoice?.invoice_number },
+        null,
         'Order approved successfully'
       );
     } catch (error) {
@@ -142,7 +140,7 @@ export class VendorOrderController extends BaseController {
         return this.sendError('Forbidden', 403);
       }
 
-      order.order_status = 'vendor_rejected';
+      order.order_status = 'rejected';
       await order.save();
 
       return this.sendSuccess(null, 'Order rejected successfully');

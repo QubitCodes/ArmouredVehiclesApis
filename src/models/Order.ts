@@ -8,13 +8,14 @@ interface OrderAttributes {
   id: string; // UUID
   order_id?: string | null; // 8 digit number
   user_id: string;
-  order_status: 'order_received' | 'vendor_approved' | 'vendor_rejected' | 'pending_review' | 'pending_approval' | 'rejected' | 'approved' | 'cancelled';
+  order_status: 'order_received' | 'approved' | 'rejected' | 'admin_rejected' | 'cancelled';
   total_amount: number;
   currency: string;
   type: 'direct' | 'request';
   payment_status?: 'pending' | 'paid' | 'failed' | 'refunded' | null;
-  shipment_status?: 'pending' | 'vendor_processing' | 'vendor_shipped' | 'admin_received' | 'processing' | 'shipped' | 'delivered' | 'returned' | 'cancelled' | null;
+  shipment_status?: 'pending' | 'processing' | 'shipped' | 'delivered' | 'returned' | 'cancelled' | null;
   comments?: string | null;
+  invoice_comments?: string | null;
   tracking_number?: string | null;
   shipment_id?: string | null;
   label_url?: string | null;
@@ -39,13 +40,14 @@ export class Order extends Model<OrderAttributes, OrderCreationAttributes> imple
   declare public id: string;
   declare public order_id?: string | null;
   declare public user_id: string;
-  declare public order_status: 'order_received' | 'vendor_approved' | 'vendor_rejected' | 'approved' | 'rejected' | 'cancelled';
+  declare public order_status: 'order_received' | 'approved' | 'rejected' | 'admin_rejected' | 'cancelled';
   declare public total_amount: number;
   declare public currency: string;
   declare public type: 'direct' | 'request';
   declare public payment_status?: 'pending' | 'paid' | 'failed' | 'refunded' | null;
-  declare public shipment_status?: 'pending' | 'vendor_processing' | 'vendor_shipped' | 'admin_received' | 'processing' | 'shipped' | 'delivered' | 'returned' | 'cancelled' | null;
+  declare public shipment_status?: 'pending' | 'processing' | 'shipped' | 'delivered' | 'returned' | 'cancelled' | null;
   declare public comments?: string | null;
+  declare public invoice_comments?: string | null;
   declare public tracking_number?: string | null;
   declare public shipment_id?: string | null;
   declare public label_url?: string | null;
@@ -83,7 +85,7 @@ Order.init(
       allowNull: false,
     },
     order_status: {
-      type: DataTypes.ENUM('order_received', 'vendor_approved', 'vendor_rejected', 'approved', 'rejected', 'cancelled'),
+      type: DataTypes.ENUM('order_received', 'approved', 'rejected', 'admin_rejected', 'cancelled'),
       defaultValue: 'order_received',
     },
     total_amount: {
@@ -104,11 +106,15 @@ Order.init(
       defaultValue: null,
     },
     shipment_status: {
-      type: DataTypes.ENUM('pending', 'vendor_processing', 'vendor_shipped', 'admin_received', 'processing', 'shipped', 'delivered', 'returned', 'cancelled'),
+      type: DataTypes.ENUM('pending', 'processing', 'shipped', 'delivered', 'returned', 'cancelled'),
       allowNull: true,
       defaultValue: null,
     },
     comments: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    invoice_comments: {
       type: DataTypes.TEXT,
       allowNull: true,
     },

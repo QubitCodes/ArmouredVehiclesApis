@@ -73,8 +73,13 @@ export class WebhookController extends BaseController {
 			if (cartId && userId) {
 				// New Direct Checkout - Convert Cart to Order
 				console.log(`[Stripe Webhook] Converting Cart ${cartId} for User ${userId} with Group ${orderGroupId}`);
+
+				const shippingMeta = session.metadata?.shippingDetails;
+				const shippingCosts = shippingMeta ? JSON.parse(shippingMeta) : undefined;
+
 				orders = await OrderService.convertCartToOrder(userId, cartId, orderGroupId, {
-					addressId: addressId || undefined
+					addressId: addressId || undefined,
+					shippingCosts
 				});
 			} else {
 				// Existing orders (Purchase Request or Retry)

@@ -166,7 +166,7 @@ export const getApiDocs = async () => {
               total_amount: { type: 'number' },
               currency: { type: 'string' },
               type: { type: 'string', enum: ['direct', 'request'] },
-              order_status: { type: 'string', enum: ['order_received', 'vendor_approved', 'vendor_rejected', 'approved', 'rejected', 'cancelled'] },
+              order_status: { type: 'string', enum: ['order_received', 'approved', 'rejected', 'admin_rejected', 'cancelled'] },
               payment_status: { type: 'string', enum: ['pending', 'paid', 'failed', 'refunded'] },
               shipment_status: { type: 'string', enum: ['pending', 'processing', 'shipped', 'delivered', 'returned', 'cancelled'] },
               comments: { type: 'string' },

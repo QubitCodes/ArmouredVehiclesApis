@@ -9,7 +9,7 @@ const controller = new OnboardingController();
  *   post:
  *     tags: [Onboarding]
  *     summary: Save Step 4 - Account Preferences
- *     description: Saves selling categories, currency preferences, and creates vendor password
+ *     description: Saves selling categories and currency preferences
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -23,7 +23,7 @@ const controller = new OnboardingController();
  *               registerAs: { type: string, default: "Verified Supplier" }
  *               preferredCurrency: { type: string, example: "AED" }
  *               sponsorContent: { type: boolean }
- *               password: { type: string, minLength: 8, description: Required unless isDraft }
+
  *               isDraft: { type: boolean, description: If true, saves as draft without validation }
  *     responses:
  *       200:

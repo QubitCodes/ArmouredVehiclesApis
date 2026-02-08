@@ -203,7 +203,8 @@ export class InvoiceService {
      */
     static async generateCustomerInvoice(
         orderId: string,
-        comments?: string | null
+        comments: string | null = null,
+        paymentStatus: 'paid' | 'unpaid' = 'paid'
     ): Promise<Invoice> {
         // Fetch order with customer details
         const order = await Order.findByPk(orderId, {
@@ -295,7 +296,7 @@ export class InvoiceService {
 
             comments: comments || null,
             terms_conditions: terms,
-            payment_status: 'paid', // Customer invoice only generated when paid
+            payment_status: paymentStatus, // 'paid' or 'unpaid'
             access_token: accessToken
         });
 
@@ -304,7 +305,7 @@ export class InvoiceService {
 
     /**
      * Updates admin invoice payment status to 'paid'
-     * Called when shipment_status = 'admin_received' AND payment_status = 'paid'
+     * Called when shipment_status = 'delivered' AND payment_status = 'paid'
      */
     static async markAdminInvoicePaid(orderId: string): Promise<Invoice | null> {
         const invoice = await Invoice.findOne({
@@ -395,4 +396,24 @@ export class InvoiceService {
             include: [{ model: Order, as: 'order' }]
         });
     }
+    /**
+ * Updates customer invoice payment status to 'paid'
+ */
+    static async markCustomerInvoicePaid(orderId: string): Promise<Invoice | null> {
+        const invoice = await Invoice.findOne({
+            where: {
+                order_id: orderId,
+                invoice_type: 'customer',
+                payment_status: 'unpaid'
+            }
+        });
+
+        if (invoice) {
+            invoice.payment_status = 'paid';
+            await invoice.save();
+        }
+
+        return invoice;
+    }
 }
+

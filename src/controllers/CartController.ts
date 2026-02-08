@@ -1,7 +1,7 @@
 
 import { NextRequest } from 'next/server';
 import { BaseController } from './BaseController';
-import { Cart, CartItem, Product, ProductMedia, ProductPricingTier, Category } from '../models';
+import { Cart, CartItem, Product, ProductMedia, ProductPricingTier, Category, ProductSpecification, User, UserProfile } from '../models';
 import { verifyAccessToken } from '../utils/jwt';
 import { applyCommission } from '../utils/priceHelper';
 import { Op } from 'sequelize';
@@ -109,15 +109,22 @@ export class CartController extends BaseController {
 						include: [
 							{ model: ProductMedia, as: 'media', limit: 1 },
 							{ model: ProductPricingTier, as: 'pricing_tiers' },
+							{ model: ProductSpecification, as: 'product_specifications' },
 							{ model: Category, as: 'category', attributes: ['id', 'name', 'is_controlled'] },
 							{ model: Category, as: 'main_category', attributes: ['id', 'name', 'is_controlled'] },
-							{ model: Category, as: 'sub_category', attributes: ['id', 'name', 'is_controlled'] }
+							{ model: Category, as: 'sub_category', attributes: ['id', 'name', 'is_controlled'] },
+							{
+								model: User,
+								as: 'vendor',
+								attributes: ['id', 'name', 'email'],
+								include: [{ model: UserProfile, as: 'profile', attributes: ['company_name', 'city', 'country'] }]
+							}
 						]
 					}
 				]
 			});
 
-			// Format items to include is_controlled and ensure helper format
+			// Format items to include is_controlled, dimensions, and ensure helper format
 			const formattedItems = items.map((item: any) => {
 				const plainItem = item.toJSON();
 				const p = applyCommission(plainItem.product);
@@ -148,16 +155,97 @@ export class CartController extends BaseController {
 					if (!currentPrice && basePrice) {
 						p.price = basePrice;
 					}
+
+					// --- Dimension Calculation (Server-Side) ---
+					const dims = this.calculateItemDimensions(p);
+					plainItem.dimensions = dims;
+					plainItem.formatted_dimensions = `${dims.length}x${dims.width}x${dims.height} ${dims.unit}`;
 				}
 				return plainItem;
 			});
 
-			return this.sendSuccess({ cart, items: formattedItems });
+			// Group by Vendor
+			const groupedItems = formattedItems.reduce((acc: any, item: any) => {
+				const vid = item.product?.vendor_id || 'admin';
+				if (!acc[vid]) acc[vid] = [];
+				acc[vid].push(item);
+				return acc;
+			}, {});
+
+			return this.sendSuccess({
+				cart: groupedItems
+			});
 		} catch (error: any) {
 			if (error.message === 'TOKEN_EXPIRED') return this.sendError('Token expired', 210, [], undefined, req);
 			if (error.message === 'TOKEN_MISSING') return this.sendError('Authentication required', 210, [], undefined, req);
 			return this.sendError(String((error as any).message), 500, [], undefined, req);
 		}
+	}
+
+	/**
+	 * Parse Dimensions Helper
+	 */
+	private calculateItemDimensions(p: any) {
+		let l = Number(p.dimension_length || 0);
+		let wid = Number(p.dimension_width || 0);
+		let h = Number(p.dimension_height || 0);
+		let unit = 'CM'; // Default return unit
+
+		// 1. If columns have data, use them (Assuming CM or converted)
+		if (l > 0 && wid > 0 && h > 0) {
+			return { length: l, width: wid, height: h, unit };
+		}
+
+		// 2. Search Specifications
+		let specsToSearch: any[] = [];
+		if (Array.isArray(p.product_specifications)) {
+			specsToSearch = [...p.product_specifications];
+		}
+		if (typeof p.specifications === 'string' && p.specifications.trim().startsWith('[')) {
+			try {
+				const parsed = JSON.parse(p.specifications);
+				if (Array.isArray(parsed)) specsToSearch = [...specsToSearch, ...parsed];
+			} catch (e) { }
+		}
+		// From 'sizes' array (e.g. "5x10x15mm")
+		if (Array.isArray(p.sizes)) {
+			p.sizes.forEach((s: any) => {
+				if (typeof s === 'string') specsToSearch.push({ label: 'size', value: s });
+			});
+		}
+
+		specsToSearch.forEach((spec: any) => {
+			const label = (spec.label || '').toLowerCase();
+			const valStr = String(spec.value || '').toLowerCase();
+			const val = parseFloat(valStr.replace(/[^\d.]/g, ''));
+
+			if (!isNaN(val) && val > 0) {
+				if (l === 0 && (label.includes('length') || label === 'l')) l = val;
+				else if (wid === 0 && (label.includes('width') || label === 'w')) wid = val;
+				else if (h === 0 && (label.includes('height') || label === 'h')) h = val;
+			}
+
+			if (label.includes('dimension') || label === 'size') {
+				const parts = valStr.split(/[x*]/).map((s: string) => parseFloat(s.trim()));
+				if (parts.length === 3 && parts.every((n: number) => !isNaN(n))) {
+					let multiplier = 1;
+					if (valStr.includes('mm')) multiplier = 0.1;
+					else if (valStr.includes('m') && !valStr.includes('mm') && !valStr.includes('cm')) multiplier = 100;
+					else if (valStr.includes('in') || valStr.includes('"')) multiplier = 2.54;
+
+					if (l === 0) l = parts[0] * multiplier;
+					if (wid === 0) wid = parts[1] * multiplier;
+					if (h === 0) h = parts[2] * multiplier;
+				}
+			}
+		});
+
+		// 3. Fallback
+		if (l <= 0) l = 1;
+		if (wid <= 0) wid = 1;
+		if (h <= 0) h = 1;
+
+		return { length: l, width: wid, height: h, unit };
 	}
 
 	/**

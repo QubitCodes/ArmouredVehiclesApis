@@ -83,7 +83,7 @@ export class AuthController extends BaseController {
       const user = await User.findOne({
         where: whereClause,
         include: [{ model: UserProfile, as: 'profile' }],
-        paranoid: false
+        paranoid: true
       });
 
       if (!user) {
@@ -156,12 +156,10 @@ export class AuthController extends BaseController {
 
       // 2. Find User in DB
       // Search by Firebase UID first (strongest link)
-      console.log(`[AUTH DEBUG] Looking for user with UID: ${uid}`);
       let user = await User.findOne({
         where: { firebase_uid: uid },
         include: [{ model: UserProfile, as: 'profile' }]
       });
-      console.log(`[AUTH DEBUG] First Lookup Result:`, user ? { id: user.id, isActive: user.is_active, email: user.email } : 'NULL');
 
       // 3. Fallback: Search by Email or Phone if not linked yet
       if (!user) {
@@ -229,7 +227,6 @@ export class AuthController extends BaseController {
         const permissionService = new PermissionService();
         const permissions = await permissionService.getUserPermissionNames(user.id);
 
-        console.log(`[AUTH] Firebase Login Success for User: ${user.email}`);
 
         return this.sendSuccess({
           user: {
@@ -287,7 +284,6 @@ export class AuthController extends BaseController {
 
       const { uid, email, phone_number, email_verified } = decodedToken;
 
-      console.log(`[AUTH DEBUG] registerWithFirebase: UID=${uid}, Email=${email}, Phone=${phone_number}`);
 
       if (!uid || uid.length > 128) {
         console.error('[AUTH ERROR] Decoded UID is invalid or too long (resembles token?)', uid);
@@ -332,7 +328,7 @@ export class AuthController extends BaseController {
         phone: finalPhone,
         country_code: finalCountryCode || '+971',
         firebase_uid: uid,
-        password: undefined, // No password for firebase users 
+
         user_type: (userType || 'customer') as 'customer' | 'vendor',
         email_verified: email_verified || false,
         phone_verified: !!phone_number,

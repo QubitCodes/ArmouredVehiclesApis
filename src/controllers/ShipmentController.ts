@@ -64,12 +64,14 @@ const DimensionsSchema = z.object({
 
 /**
  * Schema for rate calculation request
+ * FromAddress and contacts are optional - will use admin warehouse if not provided
  */
 const RateRequestSchema = z.object({
-    fromAddress: AddressSchema,
-    fromContact: ContactSchema,
+    vendorId: z.string().optional(), // Added vendorId
+    fromAddress: AddressSchema.optional(),
+    fromContact: ContactSchema.optional(),
     toAddress: AddressSchema,
-    toContact: ContactSchema,
+    toContact: ContactSchema.optional(),
     weight: WeightSchema,
     dimensions: DimensionsSchema,
     shipDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
@@ -100,6 +102,7 @@ export class ShipmentController extends BaseController {
     /**
      * POST /api/v1/shipment/rate
      * Calculate shipping rates between two addresses
+     * If fromAddress is not provided, uses admin warehouse address
      */
     async calculateRate(req: NextRequest) {
         try {
@@ -119,7 +122,83 @@ export class ShipmentController extends BaseController {
                 return this.sendError('Validation failed', 201, validation.error.issues);
             }
 
-            const input: RateRequestInput = validation.data;
+            let { vendorId, fromAddress, fromContact, toAddress, toContact, weight, dimensions, shipDate } = validation.data;
+
+            // Determine Origin Address
+            if (!fromAddress || !fromContact) {
+                if (vendorId && vendorId !== 'admin') {
+                    // Fetch Vendor Address
+                    const vendorUser = await User.findByPk(vendorId, {
+                        include: [{ model: UserProfile, as: 'profile' }]
+                    });
+
+                    if (vendorUser && (vendorUser as any).profile) {
+                        const vendorProfile = (vendorUser as any).profile;
+
+                        const country = vendorProfile.country || 'United Arab Emirates';
+                        const isUAE = country === 'United Arab Emirates' || country === 'UAE';
+
+                        const street = vendorProfile.address_line1 || vendorProfile.address_line_1 || vendorProfile.street; // Fixed typo
+                        const city = vendorProfile.city || (isUAE ? 'Dubai' : '');
+                        const postalCode = vendorProfile.postal_code || '00000';
+                        const stateCode = vendorProfile.state || vendorProfile.city || (isUAE ? 'DU' : '');
+
+                        // Validate Critical Fields
+                        if (!street || !city || (postalCode === '00000' && !isUAE)) {
+                            console.error('[Shipment] Incomplete Vendor Address:', { street, city, postalCode, country });
+                            return this.sendError(`Vendor profile incomplete. Missing address details for ${vendorUser.name}.`, 310);
+                        }
+
+                        fromAddress = {
+                            streetLines: FedExService.formatStreetLines([street, vendorProfile.address_line_2]),
+                            city: city,
+                            stateOrProvinceCode: stateCode,
+                            postalCode: postalCode,
+                            countryCode: isUAE ? 'AE' : (vendorProfile.country_code || (country ? country.substring(0, 2).toUpperCase() : 'AE'))
+                        };
+
+
+
+                        fromContact = {
+                            personName: vendorUser.name || 'Vendor',
+                            phoneNumber: vendorUser.phone || vendorProfile.phone || '0000000000',
+                            emailAddress: vendorUser.email,
+                            companyName: vendorProfile.company_name
+                        };
+                    } else {
+                        // Fallback or Error? 
+                        // For rate calc, maybe fallback to Admin is safer if vendor bad data, 
+                        // or return error. Let's return error to be explicit.
+                        return this.sendError('Vendor address not found', 310);
+                    }
+                } else {
+                    // Use Admin Warehouse
+                    const adminAddress = await FedExService.getAdminAddress();
+                    if (!adminAddress) {
+                        return this.sendError('Admin address not configured', 302);
+                    }
+                    fromAddress = fromAddress || adminAddress.address;
+                    fromContact = fromContact || adminAddress.contact;
+                }
+            }
+
+            // If toContact not provided, use a default
+            if (!toContact) {
+                toContact = {
+                    personName: 'Customer',
+                    phoneNumber: '0000000000'
+                };
+            }
+
+            const input: RateRequestInput = {
+                fromAddress,
+                fromContact,
+                toAddress,
+                toContact,
+                weight,
+                dimensions,
+                shipDate
+            };
 
             // Call FedEx Rate API
             const result = await FedExService.getRates(input);
@@ -181,7 +260,7 @@ export class ShipmentController extends BaseController {
             }
 
             const customerAddress: FedExAddress = {
-                streetLines: [profile.address_line_1 || profile.street, profile.address_line_2].filter(Boolean) as string[],
+                streetLines: FedExService.formatStreetLines([profile.address_line_1 || profile.street, profile.address_line_2]),
                 city: profile.city,
                 stateOrProvinceCode: profile.state || profile.city,
                 postalCode: profile.postal_code || '00000',
@@ -254,21 +333,75 @@ export class ShipmentController extends BaseController {
                 return this.sendError('Order not found', 310);
             }
 
-            // Determine pickup address based on shipment flow
-            // - If vendor is scheduling (vendor_processing): pickup from vendor, deliver to admin
-            // - If admin is scheduling (processing): pickup from admin, deliver to customer
+            // Determine pickup address
+            // Simplified Flow: Pickup from Source (Vendor/Admin) -> Deliver to Customer
             let pickupAddress: FedExAddress;
             let pickupContact: FedExContact;
-            let recipientAddress: FedExAddress;
-            let recipientContact: FedExContact;
 
-            const isVendorPickup = order.shipment_status === 'vendor_processing';
-            const isAdminPickup = order.shipment_status === 'processing';
+            // Target: Customer Address
+            // If user/profile is null (e.g., sub-order), try fetching from parent order
+            let customerUser = (order as any).user;
+            let customerProfile = customerUser?.profile;
 
-            if (isVendorPickup) {
-                // Vendor → Admin flow
-                // Pickup from vendor
-                const vendorUser = await User.findByPk(order.vendor_id!, {
+
+
+            // If user wasn't loaded with order, fetch directly
+            if (!customerUser && order.user_id) {
+                customerUser = await User.findByPk(order.user_id, {
+                    include: [{ model: UserProfile, as: 'profile' }]
+                });
+                customerProfile = (customerUser as any)?.profile;
+
+            }
+
+            if (!customerProfile && order.order_group_id) {
+                // Fetch parent order to get user info
+                // order_group_id can be either UUID or 8-digit order_id, try both approaches
+                const isUuid = order.order_group_id.includes('-');
+
+                const parentOrder = isUuid
+                    ? await Order.findByPk(order.order_group_id, {
+                        include: [{ model: User, as: 'user', include: [{ model: UserProfile, as: 'profile' }] }]
+                    })
+                    : await Order.findOne({
+                        where: { order_id: order.order_group_id },
+                        include: [{ model: User, as: 'user', include: [{ model: UserProfile, as: 'profile' }] }]
+                    });
+
+                customerUser = (parentOrder as any)?.user;
+                customerProfile = customerUser?.profile;
+
+            }
+
+            if (!customerProfile) {
+                console.error('No profile found. Order:', order.id, 'user_id:', order.user_id, 'group_id:', order.order_group_id);
+                return this.sendError('Customer profile not found', 310);
+            }
+
+            // Validate required address fields
+            const streetLine1 = customerProfile.address_line1 || customerProfile.city || 'Business Address';
+            if (!streetLine1) {
+                return this.sendError('Customer address is incomplete. Street address is required.', 201);
+            }
+
+            const recipientAddress: FedExAddress = {
+                streetLines: FedExService.formatStreetLines([streetLine1, customerProfile.address_line_2]),
+                city: customerProfile.city || 'Dubai',
+                stateOrProvinceCode: customerProfile.state || customerProfile.city || 'DXB',
+                postalCode: customerProfile.postal_code || '00000',
+                countryCode: customerProfile.country === 'United Arab Emirates' ? 'AE' : customerProfile.country?.substring(0, 2)?.toUpperCase() || 'AE'
+            };
+
+            const recipientContact: FedExContact = {
+                personName: customerUser.name || 'Customer',
+                phoneNumber: customerProfile.phone || customerUser.phone || '0000000000',
+                emailAddress: customerUser.email
+            };
+
+            // Source: Vendor or Admin
+            if (order.vendor_id && order.vendor_id !== 'admin') {
+                // Pickup from Vendor
+                const vendorUser = await User.findByPk(order.vendor_id, {
                     include: [{ model: UserProfile, as: 'profile' }]
                 });
 
@@ -281,12 +414,24 @@ export class ShipmentController extends BaseController {
                     return this.sendError('Vendor profile not found', 310);
                 }
 
+                // Validate Critical Vendor Address Fields
+                const vStreet = vendorProfile.address_line_1 || vendorProfile.address_line1 || vendorProfile.street;
+                const vCity = vendorProfile.city;
+                const vState = vendorProfile.state || vendorProfile.city;
+                const vPostal = vendorProfile.postal_code;
+                const vCountry = vendorProfile.country;
+
+                if (!vStreet || !vCity) {
+                    console.error('[Shipment] Incomplete Vendor Address:', { vStreet, vCity, vPostal, vCountry });
+                    return this.sendError(`Vendor profile address is incomplete. Please update vendor profile (Street, City, Country).`, 201);
+                }
+
                 pickupAddress = {
-                    streetLines: [vendorProfile.address_line_1 || vendorProfile.street, vendorProfile.address_line_2].filter(Boolean) as string[],
-                    city: vendorProfile.city || 'Dubai',
-                    stateOrProvinceCode: vendorProfile.state || vendorProfile.city || 'DXB',
-                    postalCode: vendorProfile.postal_code || '00000',
-                    countryCode: vendorProfile.country === 'United Arab Emirates' ? 'AE' : vendorProfile.country?.substring(0, 2) || 'AE'
+                    streetLines: FedExService.formatStreetLines([vStreet, vendorProfile.address_line_2]),
+                    city: vCity || 'Dubai',
+                    stateOrProvinceCode: vState || 'DXB',
+                    postalCode: vPostal || '00000',
+                    countryCode: vCountry === 'United Arab Emirates' ? 'AE' : (vCountry?.substring(0, 2)?.toUpperCase() || 'AE')
                 };
 
                 pickupContact = {
@@ -296,18 +441,8 @@ export class ShipmentController extends BaseController {
                     companyName: vendorProfile.company_name
                 };
 
-                // Deliver to admin
-                const adminAddress = await FedExService.getAdminAddress();
-                if (!adminAddress) {
-                    return this.sendError('Admin address not configured', 302);
-                }
-
-                recipientAddress = adminAddress.address;
-                recipientContact = adminAddress.contact;
-
-            } else if (isAdminPickup) {
-                // Admin → Customer flow
-                // Pickup from admin
+            } else {
+                // Pickup from Admin Warehouse
                 const adminAddress = await FedExService.getAdminAddress();
                 if (!adminAddress) {
                     return this.sendError('Admin address not configured', 302);
@@ -315,29 +450,6 @@ export class ShipmentController extends BaseController {
 
                 pickupAddress = adminAddress.address;
                 pickupContact = adminAddress.contact;
-
-                // Deliver to customer
-                const customerProfile = (order as any).user?.profile;
-                if (!customerProfile) {
-                    return this.sendError('Customer profile not found', 310);
-                }
-
-                recipientAddress = {
-                    streetLines: [customerProfile.address_line_1 || customerProfile.street, customerProfile.address_line_2].filter(Boolean) as string[],
-                    city: customerProfile.city,
-                    stateOrProvinceCode: customerProfile.state || customerProfile.city,
-                    postalCode: customerProfile.postal_code || '00000',
-                    countryCode: customerProfile.country === 'United Arab Emirates' ? 'AE' : customerProfile.country?.substring(0, 2) || 'AE'
-                };
-
-                recipientContact = {
-                    personName: (order as any).user?.name || 'Customer',
-                    phoneNumber: (order as any).user?.phone || '0000000000',
-                    emailAddress: (order as any).user?.email
-                };
-
-            } else {
-                return this.sendError('Invalid shipment status for pickup scheduling', 400);
             }
 
             // Create shipment first to get label and tracking number
@@ -374,28 +486,29 @@ export class ShipmentController extends BaseController {
             }
 
             // Update order with shipment details
+            // NOTE: Status stays at 'processing' until FedEx webhook confirms pickup
             const shipmentDetails = {
                 ...(order.shipment_details as object || {}),
-                [isVendorPickup ? 'vendor_shipment' : 'customer_shipment']: {
+                customer_shipment: {
                     tracking_number: shipmentResult.data.trackingNumber,
                     shipment_id: shipmentResult.data.shipmentId,
                     label_url: shipmentResult.data.labelUrl,
                     pickup_confirmation: pickupResult.data?.confirmationCode,
                     pickup_date: pickupDate,
-                    created_at: new Date().toISOString()
+                    pickup_scheduled_at: new Date().toISOString(),
+                    status: 'pickup_scheduled', // Waiting for FedEx webhook
+                    pickup_address_source: (order.vendor_id && order.vendor_id !== 'admin') ? 'vendor' : 'admin'
                 }
             };
 
-            // Update order
-            if (isVendorPickup) {
-                order.shipment_status = 'vendor_shipped';
-            } else {
-                order.shipment_status = 'shipped';
-                order.tracking_number = shipmentResult.data.trackingNumber;
-                order.shipment_id = shipmentResult.data.shipmentId;
-                order.label_url = shipmentResult.data.labelUrl;
-            }
+            // Store tracking number in main field for easy lookup
+            order.tracking_number = shipmentResult.data.trackingNumber;
+            order.shipment_id = shipmentResult.data.shipmentId;
+            order.label_url = shipmentResult.data.labelUrl;
 
+            // Update shipment status to processing (pickup scheduled)
+            // Webhook will update to shipped when FedEx picks up
+            order.shipment_status = 'processing';
             order.shipment_details = shipmentDetails;
             await order.save();
 
@@ -407,7 +520,8 @@ export class ShipmentController extends BaseController {
 
         } catch (error) {
             console.error('Schedule Pickup Error:', error);
-            return this.sendError('Failed to schedule pickup', 300);
+            const errorMessage = error instanceof Error ? error.message : 'Failed to schedule pickup';
+            return this.sendError(errorMessage, 300);
         }
     }
 
@@ -574,6 +688,115 @@ export class ShipmentController extends BaseController {
         } catch (error) {
             console.error('Check FedEx Availability Error:', error);
             return this.sendError('Failed to check FedEx availability', 300);
+        }
+    }
+
+    // ========================================================================
+    // FEDEX WEBHOOK HANDLER
+    // ========================================================================
+
+    /**
+     * POST /api/v1/shipment/webhook
+     * Handle FedEx tracking webhooks for automatic status updates
+     * 
+     * FedEx sends tracking events when:
+     * - Package is picked up → Update to vendor_shipped or shipped
+     * - Package is delivered → Update to delivered + store delivery date
+     */
+    async handleWebhook(req: NextRequest) {
+        try {
+            const body = await req.json();
+
+            console.log('[FedEx Webhook] Received:', JSON.stringify(body, null, 2));
+
+            // FedEx webhook payload structure
+            const trackingNumber = body.trackingNumber || body.tracking_number || body.trackingInfo?.trackingNumber;
+            const eventType = body.eventType || body.event_type || body.scanEvent?.eventType;
+            const eventDescription = body.eventDescription || body.event_description || body.scanEvent?.eventDescription;
+
+            if (!trackingNumber) {
+                console.warn('[FedEx Webhook] No tracking number in payload');
+                return this.sendSuccess({ received: true }, 'Webhook received (no tracking number)');
+            }
+
+            // Find order by tracking number (check both main and shipment_details)
+            let order = await Order.findOne({
+                where: { tracking_number: trackingNumber }
+            });
+
+            // If not found in main field, search in shipment_details JSON
+            if (!order) {
+                const orders = await Order.findAll({
+                    where: {
+                        shipment_details: {
+                            [Symbol.for('sequelize.Op.ne')]: null
+                        }
+                    }
+                });
+
+                for (const o of orders) {
+                    const details = o.shipment_details as any;
+                    if (details?.vendor_shipment?.tracking_number === trackingNumber ||
+                        details?.customer_shipment?.tracking_number === trackingNumber) {
+                        order = o;
+                        break;
+                    }
+                }
+            }
+
+            if (!order) {
+                console.warn(`[FedEx Webhook] Order not found for tracking: ${trackingNumber}`);
+                return this.sendSuccess({ received: true }, 'Webhook received (order not found)');
+            }
+
+            // Process event based on type
+            const eventTypeLower = (eventType || '').toLowerCase();
+            const eventDescLower = (eventDescription || '').toLowerCase();
+
+            // PICKUP events: Package picked up by FedEx
+            if (eventTypeLower.includes('pickup') || eventTypeLower === 'pk' ||
+                eventDescLower.includes('picked up') || eventDescLower.includes('package picked up')) {
+
+                if (order.shipment_status === 'processing') {
+                    order.shipment_status = 'shipped';
+                    console.log(`[FedEx Webhook] Order ${order.id}: processing → shipped`);
+                }
+            }
+
+            // DELIVERED events: Package delivered
+            if (eventTypeLower === 'dl' || eventTypeLower.includes('delivered') ||
+                eventDescLower.includes('delivered')) {
+
+                order.shipment_status = 'delivered';
+                // Store delivery date for return period countdown
+                const deliveryDate = body.eventTimestamp || body.scanEvent?.date || new Date().toISOString();
+                const shipmentDetails = (order.shipment_details as any) || {};
+
+                order.shipment_details = {
+                    ...shipmentDetails,
+                    delivery_date: deliveryDate,
+                    delivered_at: deliveryDate
+                };
+                console.log(`[FedEx Webhook] Order ${order.id}: → delivered at ${deliveryDate}`);
+            }
+
+            // IN_TRANSIT events (optional logging)
+            if (eventTypeLower.includes('transit') || eventTypeLower === 'it') {
+                console.log(`[FedEx Webhook] Order ${order.id}: In transit - ${eventDescription}`);
+            }
+
+            await order.save();
+
+            return this.sendSuccess({
+                received: true,
+                order_id: order.id,
+                new_status: order.shipment_status
+            }, 'Webhook processed successfully');
+
+        } catch (error) {
+            console.error('[FedEx Webhook] Error:', error);
+            // Always return 200 to FedEx to prevent retries for parsing errors
+            return this.sendSuccess({ received: true, error: 'Processing error' }, 'Webhook received with error');
         }
     }
 }

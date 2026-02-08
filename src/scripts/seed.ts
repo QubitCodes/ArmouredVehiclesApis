@@ -11,7 +11,7 @@ async function seed() {
     await sequelize.authenticate();
     console.log('✅ Database connected');
 
-    await sequelize.sync(); // Ensure tables exist and match models
+    await sequelize.sync({ alter: true }); // Ensure tables exist and match models
     console.log('✅ Database synced');
 
     await seedReferences();

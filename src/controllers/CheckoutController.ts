@@ -114,7 +114,7 @@ export class CheckoutController extends BaseController {
             }
 
             const body = data || await req.json().catch(() => ({}));
-            const { addressId } = body;
+            const { addressId, shippingDetails } = body;
             const isEmbedded = true;
 
             const { vatPercent } = await this.getPlatformSettings();
@@ -155,16 +155,7 @@ export class CheckoutController extends BaseController {
                     currency: 'aed'
                 });
 
-                if (Number(item.product.shipping_charge) > 0) {
-                    const val = Number(item.product.shipping_charge) * (1 + (vatPercent / 100));
-                    allStripeItems.push({
-                        name: 'Shipping Charges',
-                        amount: Math.round(val * 100),
-                        quantity: qty,
-                        currency: 'aed'
-                    });
-                }
-
+                // Note: Per-product legacy shipping charge is IGNORED in favor of shippingDetails
                 if (Number(item.product.packing_charge) > 0) {
                     const val = Number(item.product.packing_charge) * (1 + (vatPercent / 100));
                     allStripeItems.push({
@@ -176,6 +167,26 @@ export class CheckoutController extends BaseController {
                 }
             }
 
+            // Add Grouped Shipping Items from Frontend Selection
+            if (shippingDetails && typeof shippingDetails === 'object') {
+                Object.entries(shippingDetails).forEach(([vendorId, details]: any) => {
+                    const cost = Number(details.total) || 0;
+                    if (cost > 0) {
+                        const val = cost * (1 + (vatPercent / 100));
+                        allStripeItems.push({
+                            name: `Shipping (${details.method || 'Standard'})`,
+                            amount: Math.round(val * 100),
+                            quantity: 1,
+                            currency: 'aed'
+                        });
+                    }
+                    subtotal += cost; // Approximate for high-value check
+                });
+            } else {
+                // Fallback (or Error): If no shipping details provided for a shipment order
+                // Maybe warn? For now proceed, assuming 0 shipping if not provided.
+            }
+
             const isHighValue = subtotal >= 10000;
             const isRequest = isComplianceRequest || isHighValue;
 
@@ -183,7 +194,8 @@ export class CheckoutController extends BaseController {
                 // For Purchase Requests, create orders immediately
                 const createdOrders = await OrderService.convertCartToOrder(user.id, cart.id, orderGroupId, {
                     addressId,
-                    isRequest: true
+                    isRequest: true,
+                    shippingCosts: shippingDetails
                 });
 
                 let frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
@@ -212,7 +224,8 @@ export class CheckoutController extends BaseController {
                         orderGroupId: orderGroupId,
                         cartId: cart.id,
                         addressId: addressId || '',
-                        userId: user.id
+                        userId: user.id,
+                        shippingDetails: shippingDetails ? JSON.stringify(shippingDetails) : ''
                     },
                     isEmbedded ? {
                         uiMode: 'embedded',
@@ -258,6 +271,7 @@ export class CheckoutController extends BaseController {
             const cartId = session.metadata?.cartId;
             const addressId = session.metadata?.addressId;
             const userId = session.metadata?.userId;
+            const shippingMeta = session.metadata?.shippingDetails;
 
             if (!orderGroupId) return this.sendError('Order Group ID is missing in session', 400);
 
@@ -270,9 +284,12 @@ export class CheckoutController extends BaseController {
                 // Ensure the user verifying is the one who owns the session
                 if (userId !== user.id) return this.sendError('Forbidden', 403);
 
+                const shippingCosts = shippingMeta ? JSON.parse(shippingMeta) : undefined;
+
                 // Convert Cart to Order (Idempotent)
                 orders = await OrderService.convertCartToOrder(userId, cartId, orderGroupId, {
-                    addressId: addressId || undefined
+                    addressId: addressId || undefined,
+                    shippingCosts
                 });
             } else {
                 // If already converted or failed, find orders by group ID

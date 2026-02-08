@@ -5,6 +5,7 @@ import { Op } from 'sequelize';
 import { User, PlatformSetting } from '../models';
 import { verifyAccessToken } from '../utils/jwt';
 import { PermissionService } from '../services/PermissionService';
+import { CurrencyService } from '../services/CurrencyService';
 
 export class ReferenceController extends BaseController {
 
@@ -163,13 +164,6 @@ export class ReferenceController extends BaseController {
         return this.sendError('Item not found', 404);
       }
 
-      // We can just destroy, assuming the model has paranoid: true (soft delete) if configured, 
-      // or actually delete if it's just reference data.
-      // Checking typical reference implementation: mostly simple tables.
-      // Let's assume hard delete is OK for unused refs, but safety first:
-      // Ideally we check for usage, but that requires knowing where it's used.
-      // For now, we will perform a destroy.
-
       await item.destroy();
 
       return this.sendSuccess(null, 'Item deleted successfully');
@@ -193,12 +187,27 @@ export class ReferenceController extends BaseController {
   /**
    * Get public platform settings
    * GET /api/v1/references/settings
+   * 
+   * Also triggers currency sync in background if 24+ hours since last sync
    */
   async getSettings(req: NextRequest) {
     try {
+      // Trigger currency sync in background (non-blocking)
+      // Only runs if 24+ hours since last sync and homepage sync is enabled
+      CurrencyService.triggerHomepageSync();
+
       const vatSetting = await PlatformSetting.findOne({ where: { key: 'vat_percentage' } });
+
+      // Get USD rate for frontend conversion (e.g. FedEx rates)
+      // Stored as 1 AED = X USD (e.g. 0.2723)
+      const usdRate = await CurrencyService.getRate('USD');
+
       return this.sendSuccess({
         vat_percentage: vatSetting ? parseFloat(vatSetting.value) : 5,
+        currency_rates: {
+          AED_TO_USD: usdRate || 0.2723, // Default fallback
+          USD_TO_AED: usdRate ? (1 / usdRate) : 3.6725 // Calculated multiplier
+        }
       });
     } catch (error: any) {
       console.error('Settings Fetch Error:', error);

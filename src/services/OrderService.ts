@@ -26,13 +26,16 @@ export class OrderService {
      * Convert a Cart into one or more Orders (grouped by vendor)
      * This method is idempotent based on orderGroupId.
      */
-    static async convertCartToOrder(userId: string, cartId: string, orderGroupId: string, options: { addressId?: string, isRequest?: boolean } = {}) {
+    static async convertCartToOrder(userId: string, cartId: string, orderGroupId: string, options: {
+        addressId?: string,
+        isRequest?: boolean,
+        shippingCosts?: Record<string, { total: number, method: string }>
+    } = {}) {
         const t = await sequelize.transaction();
         try {
-            // 1. Idempotency Check: Check if orders already exist for this group
+            // 1. Idempotency Check
             const existingOrders = await Order.findAll({ where: { order_group_id: orderGroupId }, transaction: t });
             if (existingOrders.length > 0) {
-                console.log(`[OrderService] Orders for group ${orderGroupId} already exist. Skipping creation.`);
                 await t.rollback();
                 return existingOrders;
             }
@@ -83,7 +86,6 @@ export class OrderService {
                         quantity: item.quantity,
                         price: price,
                         product_name: item.product.name,
-                        shipping_charge: item.product.shipping_charge,
                         packing_charge: item.product.packing_charge
                     });
                 }
@@ -105,6 +107,7 @@ export class OrderService {
             try {
                 for (const [vendorId, items] of vendorGroups) {
                     const actualVendorId = vendorId === 'admin' ? null : vendorId;
+                    const shippingInfo = options.shippingCosts?.[vendorId] || options.shippingCosts?.[actualVendorId || 'admin'];
 
                     let groupSubtotal = 0;
                     let groupShipping = 0;
@@ -113,9 +116,17 @@ export class OrderService {
                     items.forEach(i => {
                         const qty = i.quantity;
                         groupSubtotal += i.price * qty;
-                        groupShipping += (Number(i.shipping_charge) || 0) * qty;
+                        // Legacy shipping_charge removed as per user request
+                        // if (!shippingInfo) {
+                        //     groupShipping += (Number(i.shipping_charge) || 0) * qty;
+                        // }
                         groupPacking += (Number(i.packing_charge) || 0) * qty;
                     });
+
+                    // Use provided dynamic shipping if available
+                    if (shippingInfo) {
+                        groupShipping = Number(shippingInfo.total) || 0;
+                    }
 
                     const taxableAmount = groupSubtotal + groupShipping + groupPacking;
                     const vatAmount = (taxableAmount * vatPercent) / 100;
@@ -139,7 +150,10 @@ export class OrderService {
                         type: options.isRequest ? 'request' : 'direct',
                         order_status: 'order_received',
                         payment_status: options.isRequest ? null : 'pending',
-                        shipment_details: shipmentDetails,
+                        shipment_details: {
+                            ...shipmentDetails,
+                            service_method: shippingInfo?.method
+                        },
                         status_history: [{
                             status: 'order_received',
                             payment_status: options.isRequest ? null : 'pending',
@@ -162,13 +176,10 @@ export class OrderService {
                 await cart.update({ status: 'converted' }, { transaction: t });
 
                 await t.commit();
-                console.log(`[OrderService] Successfully converted Cart ${cartId} to Order Group ${orderGroupId}`);
                 return createdOrders;
 
             } catch (createError: any) {
-                // If unique constraint error, it means a race condition occurred and another process created the orders
-                if (createError.name === 'SequelizeUniqueConstraintError' || createError.name === 'SequelizeUniqueConstraintError') {
-                    console.warn(`[OrderService] Race condition detected for group ${orderGroupId}. Re-fetching orders.`);
+                if (createError.name === 'SequelizeUniqueConstraintError') {
                     await t.rollback();
                     return await Order.findAll({ where: { order_group_id: orderGroupId } });
                 }
@@ -176,7 +187,6 @@ export class OrderService {
             }
 
         } catch (error) {
-            // Already handled rollback for race condition above, but general safety here
             try { await t.rollback(); } catch (e) { }
             console.error("[OrderService] Conversion failed:", error);
             throw error;

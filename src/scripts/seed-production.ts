@@ -2,8 +2,7 @@ import 'dotenv/config';
 import { sequelize } from '../config/database';
 import { v4 as uuidv4 } from 'uuid';
 
-// Default password hash for 'password123'
-const PASSWORD_HASH = '$2b$10$P.wO.wW/t.wO.wW/t.wO.wW/t.wO.wW/t.wO.wW/t.wO.wW/t.wO.w'; 
+
 
 async function seedProduction() {
   const queryInterface = sequelize.getQueryInterface();
@@ -70,13 +69,13 @@ async function seedProduction() {
 
     // --- 4. System Users (Super Admin) ---
     const superAdminId = uuidv4();
-    
+
     await queryInterface.bulkInsert('users', [{
       id: superAdminId,
       name: 'System Super Admin',
       username: 'superadmin',
       email: 'admin@platform.com',
-      password: PASSWORD_HASH, // 'password123'
+
       user_type: 'super_admin',
       email_verified: true,
       phone_verified: true,

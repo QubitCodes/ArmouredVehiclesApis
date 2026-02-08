@@ -564,7 +564,7 @@ export class AdminOrderController extends BaseController {
 
             const { id } = await params;
             const body = await req.json();
-            const {
+            let {
                 order_status, // mapped to 'status' in DB usually? Old file uses 'status'
                 status, // Support both
                 payment_status,
@@ -576,6 +576,9 @@ export class AdminOrderController extends BaseController {
                 label_url,
                 invoice_comments // Optional invoice comments for approval
             } = body;
+
+            // Map legacy statuses if frontend sends them
+            // Legacy normalization removed
 
             const effectiveStatus = status || order_status;
 
@@ -643,8 +646,8 @@ export class AdminOrderController extends BaseController {
             const prevShipmentStatus = order.shipment_status;
 
             // --- FINANCIAL LOGIC ---
-            // 1. Lock Funds on DISPATCH (Vendor Shipped)
-            if (shipment_status === 'vendor_shipped' && (order.shipment_status as string) !== 'vendor_shipped') {
+            // 1. Lock Funds on DISPATCH (Shipped)
+            if (shipment_status === 'shipped' && (order.shipment_status as string) !== 'shipped') {
                 if (order.payment_status === 'paid' && order.vendor_id) {
                     const commissionRate = 0.10; // TODO: Fetch from PlatformSettings or Vendor Profile
                     const total = Number(order.total_amount);
@@ -674,6 +677,7 @@ export class AdminOrderController extends BaseController {
             if (tracking_number !== undefined) order.tracking_number = tracking_number;
             if (shipment_id !== undefined) order.shipment_id = shipment_id;
             if (label_url !== undefined) order.label_url = label_url;
+            if (invoice_comments !== undefined) order.invoice_comments = invoice_comments;
 
 
             // 2. Status History
@@ -703,36 +707,37 @@ export class AdminOrderController extends BaseController {
                 // order_status changing to 'approved' AND payment_status is 'paid'
                 const isNowApproved = effectiveStatus === 'approved' && prevOrderStatus !== 'approved';
                 const isPaid = (payment_status === 'paid') || (order.payment_status === 'paid');
+                const isPaymentJustPaid = payment_status === 'paid' && prevPaymentStatus !== 'paid';
 
-                if (isNowApproved && isPaid) {
-                    // Generate Customer Invoice (Admin → Customer)
-                    generatedInvoice = await InvoiceService.generateCustomerInvoice(order.id, invoice_comments);
-                    console.log(`Generated customer invoice: ${generatedInvoice?.invoice_number}`);
-                }
+                // Generate Customer Invoice:
+                // 1. When status becomes approved AND verified paid (Legacy/Strict flow)
+                // 2. OR When payment status becomes paid (Standard flow)
+                if ((isNowApproved && isPaid) || isPaymentJustPaid) {
+                    // Check if invoice already exists
+                    const existingCustInvoice = await InvoiceService.getInvoicesByOrderId(order.id);
+                    const custInvoice = existingCustInvoice.find(i => i.invoice_type === 'customer');
 
-                // Check for admin invoice generation conditions (if admin changes status to vendor_approved)
-                const isNowVendorApproved = effectiveStatus === 'vendor_approved' && prevOrderStatus !== 'vendor_approved';
-                if (isNowVendorApproved) {
-                    // Generate Admin Invoice (Vendor → Admin) - but check if it already exists?
-                    // generateAdminInvoice has its own numbering and creation logic
-                    const existingAdminInvoice = await Invoice.findOne({ where: { order_id: order.id, invoice_type: 'admin' } });
-                    if (!existingAdminInvoice) {
-                        const adminInvoice = await InvoiceService.generateAdminInvoice(order.id, invoice_comments);
-                        console.log(`Generated admin invoice: ${adminInvoice?.invoice_number}`);
-                        // If we didn't generate customer invoice, we can return this one
-                        if (!generatedInvoice) generatedInvoice = adminInvoice;
+                    if (!custInvoice) {
+                        generatedInvoice = await InvoiceService.generateCustomerInvoice(order.id, invoice_comments || order.invoice_comments, 'paid');
+                        console.log(`Generated customer invoice: ${generatedInvoice?.invoice_number}`);
+                    } else if (custInvoice.payment_status !== 'paid') {
+                        // Mark as paid if existing
+                        const updated = await InvoiceService.markCustomerInvoicePaid(order.id);
+                        if (updated) generatedInvoice = updated;
                     }
                 }
 
-                // Check for admin invoice payment status update:
-                // shipment_status changing to 'admin_received' AND payment_status is 'paid'
-                const isNowAdminReceived = shipment_status === 'admin_received' && prevShipmentStatus !== 'admin_received';
+                // Generate Admin Invoice (Vendor Payout):
+                // When shipment_status changes to 'delivered'
+                const isNowDelivered = shipment_status === 'delivered' && prevShipmentStatus !== 'delivered';
 
-                if (isNowAdminReceived && isPaid) {
-                    // Mark Admin Invoice as Paid
-                    updatedAdminInvoice = await InvoiceService.markAdminInvoicePaid(order.id);
-                    if (updatedAdminInvoice) {
-                        console.log(`Marked admin invoice as paid: ${updatedAdminInvoice.invoice_number}`);
+                if (isNowDelivered) {
+                    const existingAdminInvoice = await Invoice.findOne({ where: { order_id: order.id, invoice_type: 'admin' } });
+                    if (!existingAdminInvoice) {
+                        const adminInvoice = await InvoiceService.generateAdminInvoice(order.id, invoice_comments || order.invoice_comments);
+                        console.log(`Generated admin invoice: ${adminInvoice?.invoice_number}`);
+                        // If we didn't generate customer invoice in this request, return admin invoice
+                        if (!generatedInvoice) generatedInvoice = adminInvoice;
                     }
                 }
             } catch (invoiceError) {
@@ -747,11 +752,6 @@ export class AdminOrderController extends BaseController {
                     id: generatedInvoice.id,
                     invoice_number: generatedInvoice.invoice_number,
                     type: generatedInvoice.invoice_type
-                } : undefined,
-                admin_invoice_updated: updatedAdminInvoice ? {
-                    id: updatedAdminInvoice.id,
-                    invoice_number: updatedAdminInvoice.invoice_number,
-                    payment_status: updatedAdminInvoice.payment_status
                 } : undefined
             });
 

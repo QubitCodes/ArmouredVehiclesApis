@@ -7,6 +7,7 @@ import { Product, ProductMedia, ProductPricingTier, ProductStatus } from './Prod
 import { ProductSpecification } from './ProductSpecification';
 import { OtpVerification } from './OtpVerification';
 import { UserProfile } from './UserProfile';
+import { RefEntityType } from './RefEntityType';
 import { Address } from './Address';
 import { Review } from './Review';
 import { Cart, CartItem } from './Cart';
@@ -89,6 +90,8 @@ const initAssociations = () => {
   // User <-> UserProfile
   User.hasOne(UserProfile, { foreignKey: 'user_id', as: 'profile' });
   UserProfile.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+  UserProfile.belongsTo(RefEntityType, { foreignKey: 'entity_type', as: 'entityType' });
+  RefEntityType.hasMany(UserProfile, { foreignKey: 'entity_type', as: 'profiles' });
   UserProfile.belongsTo(ReferenceModels.RefBuyerType, { foreignKey: 'type_of_buyer', as: 'buyerType' });
   UserProfile.belongsTo(ReferenceModels.RefProcurementPurpose, { foreignKey: 'procurement_purpose', as: 'procurementPurpose' });
   UserProfile.belongsTo(ReferenceModels.RefEndUserType, { foreignKey: 'end_user_type', as: 'endUserType' });
@@ -165,6 +168,7 @@ export {
   ProductSpecification,
   OtpVerification,
   UserProfile,
+  RefEntityType,
   Address,
   Review,
   ReferenceModels,
