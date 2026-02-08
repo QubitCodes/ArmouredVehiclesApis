@@ -50,6 +50,20 @@ export class AdminController extends BaseController {
             }
         });
 
+        // Map Relation Names (Flatten nested objects)
+        if (formatted.buyerType?.name) {
+            formatted.type_of_buyer = formatted.buyerType.name;
+        }
+        if (formatted.procurementPurpose?.name) {
+            formatted.procurement_purpose = formatted.procurementPurpose.name;
+        }
+        if (formatted.endUserType?.name) {
+            formatted.end_user_type = formatted.endUserType.name;
+        }
+        if (formatted.entityType?.description) {
+            formatted.entity_type = formatted.entityType.description;
+        }
+
         // Map Country Codes to Names
         // Fields that store country codes (CCA2)
         const countryFields = ['country_of_registration', 'bank_country', 'country'];
@@ -77,6 +91,14 @@ export class AdminController extends BaseController {
                 console.error('[AdminController] Country mapping failed:', err);
             }
         }
+
+        console.log('[DEBUG] formatVendorProfile Result:', {
+            id: formatted.id,
+            buyer: formatted.type_of_buyer,
+            purpose: formatted.procurement_purpose,
+            endUser: formatted.end_user_type,
+            buyerTypeRaw: formatted.buyerType
+        });
 
         return formatted;
     }
@@ -1624,7 +1646,12 @@ export class AdminController extends BaseController {
             const include = isAdmin ? [{
                 model: UserProfile,
                 as: 'profile',
-                include: [{ model: RefEntityType, as: 'entityType' }]
+                include: [
+                    { model: RefEntityType, as: 'entityType' },
+                    { model: ReferenceModels.RefBuyerType, as: 'buyerType' },
+                    { model: ReferenceModels.RefProcurementPurpose, as: 'procurementPurpose' },
+                    { model: ReferenceModels.RefEndUserType, as: 'endUserType' }
+                ]
             }] : [];
 
             const customer: any = await User.findOne({
@@ -1670,7 +1697,12 @@ export class AdminController extends BaseController {
             if (isAdmin) {
                 const c: any = customer.toJSON ? customer.toJSON() : { ...customer };
                 if (c.profile) {
-                    c.profile = this.formatVendorProfile(c.profile);
+                    // Pass the MODEL instance if available in memory, but here we likely have plain object if toJSON was called on customer.
+                    // Ideally we should pass customer.profile (the model) to formatVendorProfile if formatVendorProfile expects model.
+                    // But formatVendorProfile handles plain object too. 
+                    // However, toJSON() of customer includes profile which includes relations. 
+                    // So c.profile has buyerType object.
+                    c.profile = await AdminController.formatVendorProfile(c.profile);
                 }
                 responseData = c;
             }
