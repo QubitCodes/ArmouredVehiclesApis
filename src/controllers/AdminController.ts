@@ -669,6 +669,8 @@ export class AdminController extends BaseController {
                 subValue?: string;
                 icon: string;
                 theme: string;
+                category?: string;
+                description?: string;
             }
 
             const items: DashboardWidget[] = [];
@@ -690,7 +692,9 @@ export class AdminController extends BaseController {
                 items.push({
                     type: 'stat_card', width: 1, title: 'Total Revenue',
                     value: formatCurrency(revenueTotal), subValue: `${formatCurrency(revenueMonthly)} this month`,
-                    icon: 'DollarSign', theme: 'emerald'
+                    icon: 'DollarSign', theme: 'emerald',
+                    category: 'Revenue',
+                    description: 'Gross revenue calculated as the sum of (Subtotal + Shipping + Packing + VAT) for all paid orders.'
                 });
 
                 // Orders
@@ -699,7 +703,9 @@ export class AdminController extends BaseController {
                 items.push({
                     type: 'stat_card', width: 1, title: 'Total Orders',
                     value: ordersTotal, subValue: `${ordersMonthly} this month`,
-                    icon: 'ShoppingCart', theme: 'orange'
+                    icon: 'ShoppingCart', theme: 'orange',
+                    category: 'Orders',
+                    description: 'All orders received, including pending and completed.'
                 });
 
                 // Customers
@@ -708,21 +714,27 @@ export class AdminController extends BaseController {
                 items.push({
                     type: 'stat_card', width: 1, title: 'Total Customers',
                     value: customersTotal, subValue: `${customersMonthly} served this month`,
-                    icon: 'Users', theme: 'blue'
+                    icon: 'Users', theme: 'blue',
+                    category: 'Customers',
+                    description: 'Unique customers who have purchased from your store.'
                 });
 
                 // Products
                 const productsTotal = await Product.count({ where: { vendor_id: user.id } });
                 items.push({
                     type: 'stat_card', width: 1, title: 'Total Products',
-                    value: productsTotal, icon: 'Package', theme: 'purple'
+                    value: productsTotal, icon: 'Package', theme: 'purple',
+                    category: 'Products',
+                    description: 'Total number of products listed in your catalog.'
                 });
 
                 // Low Stock
                 const lowStock = await Product.count({ where: { vendor_id: user.id, stock: { [Op.lt]: 5 } } });
                 items.push({
                     type: 'stat_card', width: 1, title: 'Low Stock Products',
-                    value: lowStock, icon: 'AlertCircle', theme: 'red'
+                    value: lowStock, icon: 'AlertCircle', theme: 'red',
+                    category: 'Products',
+                    description: 'Products with less than 5 units in stock.'
                 });
 
             } else {
@@ -741,12 +753,29 @@ export class AdminController extends BaseController {
 
                 // --- VENDOR WIDGETS ---
                 if (hasPerm('vendor.view')) {
-                    const totalVendors = await User.count({ where: vendorWhere });
-                    const monthlyVendors = await User.count({ where: { ...vendorWhere, created_at: { [Op.gte]: startOfMonth } } });
+                    const profileFilter = {
+                        model: UserProfile,
+                        as: 'profile',
+                        where: { onboarding_status: { [Op.ne]: 'in_progress' } },
+                        required: true
+                    };
+
+                    const totalVendors = await User.count({
+                        where: vendorWhere,
+                        include: [profileFilter]
+                    });
+
+                    const monthlyVendors = await User.count({
+                        where: { ...vendorWhere, created_at: { [Op.gte]: startOfMonth } },
+                        include: [profileFilter]
+                    });
+
                     items.push({
                         type: 'stat_card', width: 1, title: 'Total Vendors',
                         value: totalVendors, subValue: `${monthlyVendors} new this month`,
-                        icon: 'Store', theme: 'blue'
+                        icon: 'Store', theme: 'blue',
+                        category: 'Vendors',
+                        description: 'Total vendors with submitted profiles. Excludes "in-progress" / draft applications.'
                     });
 
                     const activeVendors = await User.count({
@@ -759,7 +788,9 @@ export class AdminController extends BaseController {
                     });
                     items.push({
                         type: 'stat_card', width: 1, title: 'Active Vendors',
-                        value: activeVendors, icon: 'UserCheck', theme: 'green'
+                        value: activeVendors, icon: 'UserCheck', theme: 'green',
+                        category: 'Vendors',
+                        description: 'Vendors with Approved status and Active account.'
                     });
                 }
 
@@ -771,7 +802,9 @@ export class AdminController extends BaseController {
                     });
                     items.push({
                         type: 'stat_card', width: 1, title: 'Pending Vendors',
-                        value: pendingVendors, icon: 'Clock', theme: 'amber'
+                        value: pendingVendors, icon: 'Clock', theme: 'amber',
+                        category: 'Vendors',
+                        description: 'Vendors awaiting admin verification.'
                     });
 
                     const inProgressVendors = await User.count({
@@ -780,7 +813,9 @@ export class AdminController extends BaseController {
                     });
                     items.push({
                         type: 'stat_card', width: 1, title: 'In-Progress Vendors',
-                        value: inProgressVendors, icon: 'Loader', theme: 'yellow'
+                        value: inProgressVendors, icon: 'Loader', theme: 'yellow',
+                        category: 'Vendors',
+                        description: 'Vendors currently in the drafting stage (profile not submitted).'
                     });
                 }
 
@@ -789,23 +824,49 @@ export class AdminController extends BaseController {
                     const controlledFilter = { model: UserProfile, as: 'profile', where: { controlled_items: true }, required: true };
 
                     const controlledTotal = await User.count({ where: vendorWhere, include: [controlledFilter] });
-                    items.push({ type: 'stat_card', width: 1, title: 'Controlled Vendors', value: controlledTotal, icon: 'Shield', theme: 'indigo' });
+                    items.push({
+                        type: 'stat_card', width: 1, title: 'Controlled Vendors',
+                        value: controlledTotal, icon: 'Shield', theme: 'indigo', category: 'Controlled Area',
+                        description: 'Vendors dealing with Controlled Items (Sensitive Goods).'
+                    });
 
                     const controlledPending = await User.count({
                         where: vendorWhere,
                         include: [{ ...controlledFilter, where: { ...controlledFilter.where, onboarding_status: 'pending_verification' } }]
                     });
-                    items.push({ type: 'stat_card', width: 1, title: 'Pending Controlled Vendors', value: controlledPending, icon: 'ShieldAlert', theme: 'amber' });
+                    items.push({
+                        type: 'stat_card', width: 1, title: 'Pending Controlled Vendors',
+                        value: controlledPending, icon: 'ShieldAlert', theme: 'amber', category: 'Controlled Area',
+                        description: 'Controlled Vendors awaiting specialized verification.'
+                    });
                 }
+
 
                 // --- CUSTOMER WIDGETS ---
                 if (hasPerm('customer.view')) {
-                    const totalCustomers = await User.count({ where: customerWhere });
-                    const monthlyCustomers = await User.count({ where: { ...customerWhere, created_at: { [Op.gte]: startOfMonth } } });
+                    const profileFilter = {
+                        model: UserProfile,
+                        as: 'profile',
+                        where: { onboarding_status: { [Op.ne]: 'in_progress' } },
+                        required: true
+                    };
+
+                    const totalCustomers = await User.count({
+                        where: customerWhere,
+                        include: [profileFilter]
+                    });
+
+                    const monthlyCustomers = await User.count({
+                        where: { ...customerWhere, created_at: { [Op.gte]: startOfMonth } },
+                        include: [profileFilter]
+                    });
+
                     items.push({
                         type: 'stat_card', width: 1, title: 'Total Customers',
                         value: totalCustomers, subValue: `${monthlyCustomers} new this month`,
-                        icon: 'Users', theme: 'indigo'
+                        icon: 'Users', theme: 'indigo',
+                        category: 'Customers',
+                        description: 'Total customers with submitted profiles. Excludes incomplete registrations.'
                     });
                 }
 
@@ -814,13 +875,21 @@ export class AdminController extends BaseController {
                         where: customerWhere,
                         include: [{ model: UserProfile, as: 'profile', where: { onboarding_status: 'pending_verification' }, required: true }]
                     });
-                    items.push({ type: 'stat_card', width: 1, title: 'Pending Customers', value: pendingCustomers, icon: 'UserPlus', theme: 'amber' });
+                    items.push({
+                        type: 'stat_card', width: 1, title: 'Pending Customers',
+                        value: pendingCustomers, icon: 'UserPlus', theme: 'amber', category: 'Customers',
+                        description: 'Customers awaiting admin verification.'
+                    });
 
                     const inProgressCustomers = await User.count({
                         where: customerWhere,
                         include: [{ model: UserProfile, as: 'profile', where: { onboarding_status: 'in_progress' }, required: true }]
                     });
-                    items.push({ type: 'stat_card', width: 1, title: 'In-Progress Customers', value: inProgressCustomers, icon: 'Loader', theme: 'yellow' });
+                    items.push({
+                        type: 'stat_card', width: 1, title: 'In-Progress Customers',
+                        value: inProgressCustomers, icon: 'Loader', theme: 'yellow', category: 'Customers',
+                        description: 'Customers incomplete/draft registrations.'
+                    });
                 }
 
                 // Controlled Customer Stats (if admin has controlled.approve permission)
@@ -829,20 +898,32 @@ export class AdminController extends BaseController {
 
                     // Total Controlled Customers
                     const controlledTotalCustomers = await User.count({ where: customerWhere, include: [controlledFilter] });
-                    items.push({ type: 'stat_card', width: 1, title: 'Controlled Customers', value: controlledTotalCustomers, icon: 'Shield', theme: 'indigo' });
+                    items.push({
+                        type: 'stat_card', width: 1, title: 'Controlled Customers',
+                        value: controlledTotalCustomers, icon: 'Shield', theme: 'indigo', category: 'Controlled Area',
+                        description: 'Customers purchasing Controlled Items.'
+                    });
 
                     // Pending Controlled Customers
                     const controlledPendingCustomers = await User.count({
                         where: customerWhere,
                         include: [{ ...controlledFilter, where: { ...controlledFilter.where, onboarding_status: 'pending_verification' } }]
                     });
-                    items.push({ type: 'stat_card', width: 1, title: 'Pending Controlled Customers', value: controlledPendingCustomers, icon: 'ShieldAlert', theme: 'amber' });
+                    items.push({
+                        type: 'stat_card', width: 1, title: 'Pending Controlled Customers',
+                        value: controlledPendingCustomers, icon: 'ShieldAlert', theme: 'amber', category: 'Controlled Area',
+                        description: 'Controlled Customers awaiting specialized verification.'
+                    });
                 }
 
                 // --- PRODUCT WIDGETS ---
                 if (hasPerm('product.view')) {
                     const totalProducts = await Product.count();
-                    items.push({ type: 'stat_card', width: 1, title: 'Total Products', value: totalProducts, icon: 'Package', theme: 'purple' });
+                    items.push({
+                        type: 'stat_card', width: 1, title: 'Total Products',
+                        value: totalProducts, icon: 'Package', theme: 'purple', category: 'Products',
+                        description: 'Total number of products across all vendors.'
+                    });
                 }
 
                 // --- ORDER / REVENUE WIDGETS ---
@@ -852,7 +933,9 @@ export class AdminController extends BaseController {
                     items.push({
                         type: 'stat_card', width: 1, title: 'Total Orders',
                         value: totalOrders, subValue: `${monthlyOrders} this month`,
-                        icon: 'ShoppingCart', theme: 'orange'
+                        icon: 'ShoppingCart', theme: 'orange',
+                        category: 'Orders & Revenue',
+                        description: 'Total number of orders placed on the platform.'
                     });
 
                     const totalRevenue = await Order.sum('total_amount', { where: { payment_status: 'paid' } }) || 0;
@@ -860,7 +943,9 @@ export class AdminController extends BaseController {
                     items.push({
                         type: 'stat_card', width: 1, title: 'Total Revenue',
                         value: formatCurrency(totalRevenue), subValue: `${formatCurrency(monthlyRevenue)} this month`,
-                        icon: 'DollarSign', theme: 'emerald'
+                        icon: 'DollarSign', theme: 'emerald',
+                        category: 'Orders & Revenue',
+                        description: 'Total platform revenue calculated as the sum of (Subtotal + Shipping + Packing + VAT) for all paid orders.'
                     });
                 }
             }
