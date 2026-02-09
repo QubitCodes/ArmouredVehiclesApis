@@ -308,19 +308,78 @@ export class AdminOrderController extends BaseController {
                             model: OrderItem,
                             as: 'items',
                             include: [{ model: Product, as: 'product', include: ['media'] }]
-                        }
+                        },
+                        { model: Invoice, as: 'invoices' } // Include invoices to check for consolidated ones
                     ]
                 });
             }
 
             if (!order) return controller.sendError('Order not found', 404);
 
-            // Fetch Grouped Orders if this is part of a group (and User is Admin)
+            // Calculate Platform-wide Group Totals if Admin
+            const orderJson = order.toJSON() as any;
+
             if (user!.user_type !== 'vendor' && order.order_group_id) {
                 const groupedOrders = await Order.findAll({
-                    where: {
-                        order_group_id: order.order_group_id
-                    },
+                    where: { order_group_id: order.order_group_id },
+                    include: [
+                        { model: OrderItem, as: 'items', include: [{ model: Product, as: 'product', include: ['media'] }] }
+                    ]
+                });
+
+                orderJson.group_total_amount = groupedOrders.reduce((sum, o) => sum + Number(o.total_amount || 0), 0);
+                orderJson.group_vat_amount = groupedOrders.reduce((sum, o) => sum + Number(o.vat_amount || 0), 0);
+                orderJson.group_admin_commission = groupedOrders.reduce((sum, o) => {
+                    const total = Number(o.total_amount || 0);
+                    const percent = Number(o.admin_commission || 0);
+                    return sum + (total * (percent / 100));
+                }, 0);
+            }
+
+            // Role-specific Total Overrides
+            if (user!.user_type === 'vendor') {
+                // If the user is a vendor, we calculate the "Vendor Share" totals
+                // total_amount = base_price sum + shipping + packing + vat_on_vendor_share
+                const items = orderJson.items || [];
+                const subtotalBase = items.reduce((sum: number, item: any) => sum + (Number(item.base_price || 0) * item.quantity), 0);
+                const shipping = Number(orderJson.total_shipping || 0);
+                const packing = Number(orderJson.total_packing || 0);
+
+                // Recalculate VAT on the Vendor Share (Base Price + Shipping + Packing)
+                const vatRate = 0.05; // Fixed 5% as per system requirements
+                const recalculatedVat = (subtotalBase + shipping + packing) * vatRate;
+                const vendorTotal = subtotalBase + shipping + packing + recalculatedVat;
+
+                orderJson.total_amount = vendorTotal.toFixed(2);
+                orderJson.vat_amount = recalculatedVat.toFixed(2);
+                orderJson.is_vendor_view = true;
+            } else {
+                // For Admin, we provide the calculated commission amount for the specific sub-order
+                const total = Number(orderJson.total_amount || 0);
+                const percent = Number(orderJson.admin_commission || 0);
+                orderJson.calculated_admin_commission = (total * (percent / 100)).toFixed(2);
+            }
+
+            // Transform Main Order Images and prepare for response
+            if (orderJson.items) {
+                orderJson.items = orderJson.items.map((item: any) => {
+                    if (item.product) {
+                        let imageUrl = null;
+                        if (item.product.media && item.product.media.length > 0) {
+                            const cover = item.product.media.find((m: any) => m.is_cover);
+                            imageUrl = cover ? cover.url : item.product.media[0].url;
+                        }
+                        item.product.image = getFileUrl(imageUrl || item.product.image);
+                    }
+                    if (item.image) item.image = getFileUrl(item.image);
+                    return item;
+                });
+            }
+
+            // Attach Grouped Orders if Admin
+            if (user!.user_type !== 'vendor' && order.order_group_id) {
+                const groupedOrdersDetails = await Order.findAll({
+                    where: { order_group_id: order.order_group_id },
                     include: [
                         { model: User, as: 'user', attributes: ['name', 'email', 'phone'] },
                         {
@@ -338,27 +397,9 @@ export class AdminOrderController extends BaseController {
                     order: [['created_at', 'DESC']]
                 });
 
-                // Attach to response
-                const orderJson = order.toJSON() as any;
-
-                // Transform Main Order Images
-                if (orderJson.items) {
-                    orderJson.items = orderJson.items.map((item: any) => {
-                        if (item.product) {
-                            let imageUrl = null;
-                            if (item.product.media && item.product.media.length > 0) {
-                                const cover = item.product.media.find((m: any) => m.is_cover);
-                                imageUrl = cover ? cover.url : item.product.media[0].url;
-                            }
-                            item.product.image = getFileUrl(imageUrl || item.product.image);
-                        }
-                        if (item.image) item.image = getFileUrl(item.image);
-                        return item;
-                    });
-                }
-
-                orderJson.grouped_orders = groupedOrders.map((sub: any) => {
+                orderJson.grouped_orders = groupedOrdersDetails.map((sub: any) => {
                     const subJson = sub.toJSON();
+                    // Process images for sub-orders...
                     if (subJson.items) {
                         subJson.items = subJson.items.map((item: any) => {
                             if (item.product) {
@@ -373,33 +414,15 @@ export class AdminOrderController extends BaseController {
                             return item;
                         });
                     }
+                    // Calculate individual sub-order commission for admin view
+                    const sTotal = Number(subJson.total_amount || 0);
+                    const sPercent = Number(subJson.admin_commission || 0);
+                    subJson.calculated_admin_commission = (sTotal * (sPercent / 100)).toFixed(2);
                     return subJson;
                 });
-
-                // Calculate group totals
-                orderJson.group_total_amount = groupedOrders.reduce((sum, o) => sum + Number(o.total_amount || 0), 0);
-                orderJson.group_admin_commission = groupedOrders.reduce((sum, o) => sum + Number(o.admin_commission || 0), 0);
-
-                return controller.sendSuccess(orderJson);
             }
 
-            const singleOrderJson = order.toJSON() as any;
-            if (singleOrderJson.items) {
-                singleOrderJson.items = singleOrderJson.items.map((item: any) => {
-                    if (item.product) {
-                        let imageUrl = null;
-                        if (item.product.media && item.product.media.length > 0) {
-                            const cover = item.product.media.find((m: any) => m.is_cover);
-                            imageUrl = cover ? cover.url : item.product.media[0].url;
-                        }
-                        item.product.image = getFileUrl(imageUrl || item.product.image);
-                    }
-                    if (item.image) item.image = getFileUrl(item.image);
-                    return item;
-                });
-            }
-
-            return controller.sendSuccess(singleOrderJson);
+            return controller.sendSuccess(orderJson);
 
         } catch (error: any) {
             return new AdminOrderController().sendError(error.message, 500);
@@ -647,24 +670,105 @@ export class AdminOrderController extends BaseController {
             const prevShipmentStatus = order.shipment_status;
 
             // --- FINANCIAL LOGIC ---
-            // 1. Lock Funds on DISPATCH (Shipped)
+            // --- FINANCIAL LOGIC ---
+            // 1. Lock Funds - MOVED TO PAYMENT EVENT (Below)
+            // DISABLED LEGACY LOGIC:
+            /*
             if (shipment_status === 'shipped' && (order.shipment_status as string) !== 'shipped') {
                 if (order.payment_status === 'paid' && order.vendor_id) {
-                    const commissionRate = 0.10; // TODO: Fetch from PlatformSettings or Vendor Profile
-                    const total = Number(order.total_amount);
-                    const commission = total * commissionRate;
-                    const vendorEarning = total - commission;
+                     // ... 
+                }
+            }
+            */
 
-                    await FinanceService.creditWallet(
-                        order.vendor_id,
-                        vendorEarning,
-                        'vendor_earning',
-                        `Earning for Order #${order.order_id}`,
-                        { orderId: order.id },
-                        order.user_id, // Source is Customer
-                        true, // LOCKED
-                        order.id
-                    );
+            // 1. Lock Funds Trigger: (Order becomes APPROVED AND is PAID)
+            const isBecomingApproved = (effectiveStatus === 'approved' && order.order_status !== 'approved');
+            const isBecomingPaid = (payment_status === 'paid' && prevPaymentStatus !== 'paid');
+            const currentStatus = effectiveStatus || order.order_status;
+            const currentPaymentStatus = payment_status || order.payment_status;
+
+            if ((isBecomingApproved && currentPaymentStatus === 'paid') || (isBecomingPaid && currentStatus === 'approved')) {
+                try {
+                    const total = Number(order.total_amount);
+
+                    // NEW LOGIC: Vendor gets exactly their Share (Base + Shipping + Packing + VAT on net)
+                    // Admin gets the remainder (Markup + VAT on Markup)
+                    const items = await OrderItem.findAll({ where: { order_id: order.id } });
+                    const subtotalBase = items.reduce((sum: number, item: any) => sum + (Number(item.base_price || 0) * item.quantity), 0);
+                    const shipping = Number(order.total_shipping || 0);
+                    const packing = Number(order.total_packing || 0);
+                    const vatRate = 0.05; // 5% VAT
+
+                    const vendorTaxable = subtotalBase + shipping + packing;
+                    const vendorVat = vendorTaxable * vatRate;
+                    const vendorEarning = vendorTaxable + vendorVat; // AED 157.50 in the user's scenario
+
+                    const adminCommissionAmount = total - vendorEarning; // The remainder (Markup)
+
+                    // Find a valid Admin to receive the commission
+                    const { Op } = require('sequelize');
+                    const adminUser = await User.findOne({
+                        where: {
+                            user_type: { [Op.or]: ['admin', 'super_admin'] }
+                        },
+                        order: [['user_type', 'DESC']] // Prefer super_admin
+                    });
+
+                    // Target Vendor setup
+                    const targetVendorId = order.vendor_id && order.vendor_id !== 'admin'
+                        ? order.vendor_id
+                        : adminUser?.id;
+
+                    // 1. Credit Vendor Earning
+                    if (targetVendorId) {
+                        await FinanceService.creditWallet(
+                            targetVendorId,
+                            vendorEarning,
+                            'vendor_earning',
+                            `Earning for Order #${order.order_id}`,
+                            { orderId: order.id },
+                            order.user_id,
+                            true, // LOCKED
+                            order.id
+                        );
+                        console.log(`[AdminOrder] Credited Vendor ${targetVendorId}: ${vendorEarning} (LOCKED)`);
+                    }
+
+                    // 2. Credit Admin Commission (Must go to Admin Wallet, NOT Vendor Wallet)
+                    // Ensure adminUser is NOT the same as targetVendorId if possible
+                    if (adminCommissionAmount > 0 && adminUser && adminUser.id !== targetVendorId) {
+                        await FinanceService.creditWallet(
+                            adminUser.id,
+                            adminCommissionAmount,
+                            'commission',
+                            `Commission for Order #${order.order_id}`,
+                            { orderId: order.id },
+                            order.vendor_id,
+                            true, // LOCKED - Unlocked on delivery
+                            order.id
+                        );
+                        console.log(`[AdminOrder] Credited Admin ${adminUser.id}: ${adminCommissionAmount} (LOCKED)`);
+                    } else if (adminCommissionAmount > 0 && adminUser) {
+                        // If vendor IS the admin, we still record it but as the platform's earn
+                        console.log(`[AdminOrder] Admin is same as Vendor, skipping separate commission credit to avoid double-charging or same-wallet redundancy if logic allows.`);
+                    }
+                } catch (finError) {
+                    console.error('[AdminOrder] Financial Locking logic failed:', finError);
+                }
+            }
+
+            // 2. Delivery Event (Unlock Funds)
+            // Trigger: Shipment becomes 'delivered'
+            if (shipment_status === 'delivered' && prevShipmentStatus !== 'delivered') {
+                try {
+                    const unlocked = await FinanceService.unlockFundsForOrder(order.id);
+                    if (unlocked > 0) {
+                        console.log(`[AdminOrder] Unlocked ${unlocked} funds for Order ${order.id}`);
+                    } else {
+                        console.log(`[AdminOrder] No locked funds found/unlocked for Order ${order.id}`);
+                    }
+                } catch (unlockError) {
+                    console.error('[AdminOrder] Unlock funds failed:', unlockError);
                 }
             }
 

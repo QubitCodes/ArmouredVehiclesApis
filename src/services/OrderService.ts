@@ -184,8 +184,10 @@ export class OrderService {
                     const taxableAmount = groupSubtotal + groupShipping + groupPacking;
                     const vatAmount = (taxableAmount * vatPercent) / 100;
 
-                    // Admin Commission is the markup (Difference between customer price and vendor base price)
-                    const adminCommission = (actualVendorId === null) ? 0 : (groupSubtotal - groupBaseSubtotal);
+                    // Admin Commission is now stored as a PERCENTAGE (from product)
+                    // We take it from the first item's product commission as they are grouped by vendor
+                    const firstProduct = items[0]?.product_details;
+                    const commissionPercent = Number(firstProduct?.commission) || 0;
                     const groupTotal = taxableAmount + vatAmount;
 
                     // Generate 8-digit Order ID if not single vendor
@@ -198,7 +200,7 @@ export class OrderService {
                         vendor_id: actualVendorId,
                         total_amount: groupTotal,
                         vat_amount: vatAmount,
-                        admin_commission: adminCommission,
+                        admin_commission: commissionPercent, // Storing percentage here
                         total_shipping: groupShipping,
                         total_packing: groupPacking,
                         currency: 'AED',

@@ -4,7 +4,7 @@ import { BaseController } from './BaseController';
 import { StripeService } from '../services/StripeService';
 import { InvoiceService } from '../services/InvoiceService';
 import { OrderService } from '../services/OrderService';
-import { Order, OrderItem } from '../models';
+import { Order, OrderItem, User } from '../models';
 import { sequelize } from '../config/database';
 
 export class WebhookController extends BaseController {

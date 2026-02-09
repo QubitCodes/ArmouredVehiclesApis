@@ -8,9 +8,9 @@ export class FinanceService {
      * Ensure a user has a wallet. If not, create one.
      */
     static async ensureWallet(userId: string, transaction?: SequelizeTransaction): Promise<UserWallet> {
-        const wallet = await UserWallet.findOne({ 
+        const wallet = await UserWallet.findOne({
             where: { user_id: userId },
-            transaction 
+            transaction
         });
 
         if (wallet) return wallet;
@@ -27,8 +27,8 @@ export class FinanceService {
      * If 'locked' is true, funds go to locked_balance.
      */
     static async creditWallet(
-        userId: string, 
-        amount: number, 
+        userId: string,
+        amount: number,
         type: 'purchase' | 'commission' | 'vendor_earning' | 'refund' | 'adjustment',
         description: string,
         metadata: any = {},
@@ -119,7 +119,56 @@ export class FinanceService {
     }
 
     /**
-     * Unlock funds that have passed their unlock_at time
+     * Unlock funds specifically for a delivered order
+     */
+    static async unlockFundsForOrder(orderId: string, dbTransaction?: SequelizeTransaction): Promise<number> {
+        const t = dbTransaction || await sequelize.transaction();
+        let totalUnlocked = 0;
+
+        try {
+            // Find ALL locked transactions for this order
+            const transactions = await Transaction.findAll({
+                where: {
+                    order_id: orderId,
+                    status: 'locked'
+                },
+                transaction: t
+            });
+
+            for (const trx of transactions) {
+                if (trx.destination_user_id) {
+                    const wallet = await UserWallet.findOne({
+                        where: { user_id: trx.destination_user_id },
+                        transaction: t
+                    });
+
+                    if (wallet) {
+                        const amount = Number(trx.amount);
+
+                        // Move from locked to available
+                        await wallet.decrement('locked_balance', { by: amount, transaction: t });
+                        await wallet.increment('balance', { by: amount, transaction: t });
+
+                        // Update Transaction Status
+                        await trx.update({ status: 'completed' }, { transaction: t });
+
+                        totalUnlocked += amount;
+                        console.log(`[FinanceService] Unlocked ${amount} for User ${trx.destination_user_id} (Order ${orderId})`);
+                    }
+                }
+            }
+
+            if (!dbTransaction) await t.commit();
+            return totalUnlocked;
+
+        } catch (error) {
+            if (!dbTransaction) await t.rollback();
+            throw error;
+        }
+    }
+
+    /**
+     * Unlock funds that have passed their unlock_at time (Automated fallback)
      */
     static async processUnlockFunds(): Promise<{ unlockedCount: number, totalAmount: number }> {
         const t = await sequelize.transaction();
@@ -142,14 +191,14 @@ export class FinanceService {
             for (const trx of lockedTransactions) {
                 if (!trx.destination_user_id) continue;
 
-                const wallet = await UserWallet.findOne({ 
+                const wallet = await UserWallet.findOne({
                     where: { user_id: trx.destination_user_id },
-                    transaction: t 
+                    transaction: t
                 });
 
                 if (wallet) {
                     const amount = Number(trx.amount);
-                    
+
                     // Move from locked to available
                     await wallet.decrement('locked_balance', { by: amount, transaction: t });
                     await wallet.increment('balance', { by: amount, transaction: t });
@@ -175,9 +224,9 @@ export class FinanceService {
      * Calculate unlock date based on Platform Settings
      */
     private static async calculateUnlockDate(transaction?: SequelizeTransaction): Promise<Date> {
-        const setting = await PlatformSetting.findOne({ 
+        const setting = await PlatformSetting.findOne({
             where: { key: 'product_return_period' },
-            transaction 
+            transaction
         });
 
         const days = setting && setting.value ? parseInt(setting.value) : 10; // Default 10 days
@@ -196,14 +245,22 @@ export class FinanceService {
     /**
      * Get Transaction History
      */
-    static async getTransactionHistory(userId: string, limit: number = 20, offset: number = 0) {
+    static async getTransactionHistory(userId: string, limit: number = 20, offset: number = 0, excludeTypes: string[] = []) {
+        const whereClause: any = {
+            [Op.or]: [
+                { source_user_id: userId },
+                { destination_user_id: userId }
+            ]
+        };
+
+        if (excludeTypes.length > 0) {
+            whereClause.type = {
+                [Op.notIn]: excludeTypes
+            };
+        }
+
         return await Transaction.findAndCountAll({
-            where: {
-                [Op.or]: [
-                    { source_user_id: userId },
-                    { destination_user_id: userId }
-                ]
-            },
+            where: whereClause,
             order: [['created_at', 'DESC']],
             limit,
             offset,
@@ -221,11 +278,11 @@ export class FinanceService {
         // FinancialLog is likely in ../models but not imported in FinanceService.ts
         // I will rely on auto-import or fix imports in next step if generic
         // Actually, better to fix imports first.
-        return await FinancialLog.findAndCountAll({ 
-             where: { user_id: userId },
-             order: [['created_at', 'DESC']],
-             limit,
-             offset
-        }); 
+        return await FinancialLog.findAndCountAll({
+            where: { user_id: userId },
+            order: [['created_at', 'DESC']],
+            limit,
+            offset
+        });
     }
 }

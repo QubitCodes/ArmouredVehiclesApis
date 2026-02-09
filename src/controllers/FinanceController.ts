@@ -40,7 +40,8 @@ export class FinanceController extends BaseController {
             const limit = parseInt(searchParams.get('limit') || '20');
             const offset = (page - 1) * limit;
 
-            const { count, rows } = await FinanceService.getTransactionHistory(user!.id, limit, offset);
+            const excludeTypes = user!.user_type === 'vendor' ? ['commission'] : [];
+            const { count, rows } = await FinanceService.getTransactionHistory(user!.id, limit, offset, excludeTypes);
 
             return this.sendSuccess(rows, 'Transactions retrieved', 200, {
                 total: count,
@@ -113,12 +114,12 @@ export class FinanceController extends BaseController {
 
             // Debit Wallet
             await FinanceService.debitWallet(
-                 withdrawal.user_id,
-                 withdrawal.amount,
-                 'payout', // Using payout type for withdrawal
-                 `Withdrawal Processed (Ref: ${transactionReference || 'N/A'})`,
-                 { withdrawalRequestId: withdrawal.id, adminId: user!.id },
-                 null 
+                withdrawal.user_id,
+                withdrawal.amount,
+                'payout', // Using payout type for withdrawal
+                `Withdrawal Processed (Ref: ${transactionReference || 'N/A'})`,
+                { withdrawalRequestId: withdrawal.id, adminId: user!.id },
+                null
             );
 
             // Update Request
@@ -141,7 +142,7 @@ export class FinanceController extends BaseController {
      * List user's withdrawal requests
      */
     static async getWithdrawals(req: NextRequest) {
-         try {
+        try {
             const controller = new FinanceController();
             const { user, error } = await controller.verifyAuth(req);
             if (error) return error;
