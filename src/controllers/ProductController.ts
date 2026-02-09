@@ -1942,7 +1942,7 @@ export class ProductController extends BaseController {
                 ],
             });
 
-            const formatted = this.formatProduct(products);
+            const formatted = await this.formatProduct(products);
             const masked = this.maskProducts(formatted, user);
 
             return this.sendSuccess(masked, 'Success', 200, { placeholder_image: getFileUrl('/placeholder.svg') });
@@ -1980,7 +1980,7 @@ export class ProductController extends BaseController {
                 return this.sendSuccess(null);
             }
 
-            const formatted = this.formatProduct(products);
+            const formatted = await this.formatProduct(products);
             return this.sendSuccess(this.maskProducts(formatted, user), 'Success', 200, { placeholder_image: getFileUrl('/placeholder.svg') });
         } catch (error: any) {
             return this.sendError(String((error as any).message), 500);
@@ -2021,7 +2021,7 @@ export class ProductController extends BaseController {
                     { model: ProductMedia, as: 'media', where: { is_cover: true }, required: false },
                 ],
             });
-            const formatted = this.formatProduct(similar);
+            const formatted = await this.formatProduct(similar);
             return this.sendSuccess(this.maskProducts(formatted, user));
         } catch (error: any) {
             return this.sendError(String((error as any).message), 500);
@@ -2048,7 +2048,7 @@ export class ProductController extends BaseController {
                 ],
             });
 
-            const formatted = this.formatProduct(products);
+            const formatted = await this.formatProduct(products);
             return this.sendSuccess(this.maskProducts(formatted, user));
         } catch (error: any) {
             return this.sendError(String((error as any).message), 500);

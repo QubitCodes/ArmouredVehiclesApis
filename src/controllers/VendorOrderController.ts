@@ -117,15 +117,11 @@ export class VendorOrderController extends BaseController {
         const { InvoiceService } = await import('../services/InvoiceService');
         const { Invoice } = await import('../models');
 
-        // Logic: Generate both invoices upon vendor approval
-        // Admin to Customer Invoice (Paid)
-        const existingInvoices = await InvoiceService.getInvoicesByOrderId(order.id);
-        const custInvoice = existingInvoices.find((i: any) => i.invoice_type === 'customer');
-        if (!custInvoice) {
-          await InvoiceService.generateCustomerInvoice(order.id, invoice_comments || order.invoice_comments, 'paid');
-        }
+        // Logic: Generate Vendor Invoice upon approval
+        // Customer Invoice is now generated centrally at Checkout (consolidated)
 
         // Vendor to Admin Invoice (Unpaid)
+        const existingInvoices = await InvoiceService.getInvoicesByOrderId(order.id);
         const adminInvoice = existingInvoices.find((i: any) => i.invoice_type === 'admin');
         if (!adminInvoice) {
           await InvoiceService.generateAdminInvoice(order.id, invoice_comments || order.invoice_comments);

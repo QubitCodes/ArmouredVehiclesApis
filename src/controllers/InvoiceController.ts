@@ -4,6 +4,7 @@ import { InvoiceService } from '../services/InvoiceService';
 import { Invoice, Order, OrderItem, User, UserProfile, Address } from '../models';
 import { Product } from '../models/Product';
 import { getFileUrl } from '../utils/fileUrl';
+import { Op } from 'sequelize';
 
 /**
  * InvoiceController
@@ -68,7 +69,9 @@ export class InvoiceController extends BaseController {
 				return this.sendError('Forbidden', 403);
 			}
 
-			const invoices = await InvoiceService.getInvoicesByOrderId(orderId);
+			const invoices = order.order_group_id
+				? await InvoiceService.getInvoicesByGroupId(order.order_group_id)
+				: await InvoiceService.getInvoicesByOrderId(orderId);
 
 			// Filter based on user type
 			let filteredInvoices = invoices;
@@ -76,8 +79,15 @@ export class InvoiceController extends BaseController {
 				// Customers can only see customer invoices
 				filteredInvoices = invoices.filter(inv => inv.invoice_type === 'customer');
 			} else if (isVendor && !isAdmin) {
-				// Vendors can only see admin invoices (their invoices to admin)
-				filteredInvoices = invoices.filter(inv => inv.invoice_type === 'admin');
+				// Vendors can only see admin invoices (their invoices to admin) linked to THEIR order
+				// However, getInvoicesByGroupId returns ALL vendor invoices in the group.
+				// We must strictly filter to show ONLY invoices where order.vendor_id === user.id
+				filteredInvoices = invoices.filter(inv => {
+					// We need to check the order associated with the invoice
+					// The service include adds 'order' to the invoice object
+					const invOrder = (inv as any).order;
+					return inv.invoice_type === 'admin' && invOrder && invOrder.vendor_id === user!.id;
+				});
 			}
 
 			return this.sendSuccess(filteredInvoices, 'Invoices fetched successfully');
@@ -188,7 +198,7 @@ export class InvoiceController extends BaseController {
 			}
 
 			// Fetch order with items for line items
-			const order = await Order.findByPk(invoice.order_id, {
+			let order = await Order.findByPk(invoice.order_id, {
 				include: [
 					{
 						model: OrderItem,
@@ -196,7 +206,77 @@ export class InvoiceController extends BaseController {
 						include: [{ model: Product, as: 'product' }]
 					}
 				]
-			}) as Order & { items?: (OrderItem & { product?: Product })[] };
+			}) as any;
+
+			// If Customer Invoice, we must fetch ALL sibling orders in the group to show consolidated items
+			if (invoice.invoice_type === 'customer' && order && order.order_group_id) {
+				console.log(`[InvoiceController] Consolidating items for Group ID: ${order.order_group_id}`);
+
+				// 1. Get all Order IDs in the group (Admin + Vendor)
+				const groupOrders = await Order.findAll({
+					where: { order_group_id: order.order_group_id },
+					attributes: ['id']
+				});
+				const groupOrderIds = groupOrders.map(o => o.id);
+				console.log(`[InvoiceController] Found group order IDs: ${groupOrderIds.join(', ')}`);
+
+				// 2. Fetch ALL items for these orders directly
+				const allItems = await OrderItem.findAll({
+					where: { order_id: { [Op.in]: groupOrderIds } },
+					include: [{ model: Product, as: 'product' }]
+				});
+
+				console.log(`[InvoiceController] Total consolidated items: ${allItems.length}`);
+
+				// Start with the primary order object
+				// We clone strict JSON to avoid Sequelize instance issues
+				const consolidatedOrder = order.toJSON ? order.toJSON() : { ...order };
+
+				if (allItems.length > 0) {
+					consolidatedOrder.items = allItems;
+				} else {
+					console.warn(`[InvoiceController] Consolidation returned 0 items. Keeping primary order items (${order.items?.length || 0}).`);
+				}
+
+				order = consolidatedOrder;
+			} else {
+				console.log(`[InvoiceController] No consolidation. Type: ${invoice.invoice_type}, Group: ${order?.order_group_id}`);
+			}
+
+			// Fallback: If items are empty, try manual fetch using order_group_id if available, else order_id
+			// We check 'order' as it might have been updated by consolidation
+			if (!order.items || order.items.length === 0) {
+				console.warn(`[InvoiceController] Items list is empty for Order ${order.id}. Attempting manual recovery.`);
+
+				let manualItems: OrderItem[] = [];
+
+				if (invoice.invoice_type === 'customer' && order.order_group_id) {
+					console.log(`[InvoiceController] Recovering items for Group ID: ${order.order_group_id}`);
+					// Find all order IDs in the group
+					const groupOrders = await Order.findAll({
+						where: { order_group_id: order.order_group_id },
+						attributes: ['id']
+					});
+					const groupOrderIds = groupOrders.map(o => o.id);
+
+					manualItems = await OrderItem.findAll({
+						where: { order_id: { [Op.in]: groupOrderIds } },
+						include: [{ model: Product, as: 'product' }]
+					});
+				} else {
+					manualItems = await OrderItem.findAll({
+						where: { order_id: order.id },
+						include: [{ model: Product, as: 'product' }]
+					});
+				}
+
+				if (manualItems.length > 0) {
+					order.items = manualItems;
+					console.log(`[InvoiceController] Recovered ${manualItems.length} items via manual query`);
+				} else {
+					console.error(`[InvoiceController] FAILED to recover items for Order ${order.id}`);
+				}
+			}
 
 			// Build invoice HTML
 			const html = this.buildInvoiceHtml(invoice, order);
@@ -215,10 +295,6 @@ export class InvoiceController extends BaseController {
 	/**
 	 * GET /api/v1/invoices/view/:token/html
 	 * Public HTML rendering via token
-	 */
-	/**
-	 * GET /api/v1/invoices/view/:token/html
-	 * Public HTML rendering via token
 	 * UPDATED: Now enforces STRICT access control by verifying the user session.
 	 * Even though it uses a "token", the user must be logged in as a relevant party.
 	 */
@@ -234,55 +310,14 @@ export class InvoiceController extends BaseController {
 			}
 
 			// 2. Perform strict authorization check
-			// We manually check auth here because this route might have been excluded from global middleware
-			// or we need specific logic (Vendor A vs Vendor B).
-
 			const { user, error } = await this.verifyAuth(req);
 
 			if (error || !user) {
-				// If no user, we CANNOT show the invoice based on user requirements.
-				// However, if the frontend is just an iframe, returning 401 might break the UI in an ugly way.
-				// But security comes first. The frontend page should handle the 401 by redirecting to login.
 				return this.sendError('Authentication required to view this invoice', 401);
 			}
 
-			// 3. User is logged in. Check if they are allowed to see THIS invoice.
-			const isAdmin = ['admin', 'super_admin'].includes(user.user_type);
-
-			if (isAdmin) {
-				// Admins can see everything. Pass.
-			} else {
-				// Get order details to check relationships
-				const order = await Order.findByPk(invoice.order_id);
-				if (!order) {
-					return this.sendError('Invoice order not found', 404);
-				}
-
-				const isAddressee = order.user_id === user.id; // Customer
-				const isIssuer = order.vendor_id === user.id; // Vendor
-
-				// Rule: "Must only be accessible by either parties"
-				// Vendor Invoice: Vendor (Issuer) & Admin
-				// Customer Invoice: Customer (Addressee) & Admin
-
-				if (invoice.invoice_type === 'admin') {
-					// Vendor -> Admin
-					if (!isIssuer) {
-						return this.sendError('Access denied. Only the issuing vendor can view this invoice.', 403);
-					}
-				} else if (invoice.invoice_type === 'customer') {
-					// Admin -> Customer
-					if (!isAddressee) {
-						return this.sendError('Access denied. Only the customer can view this invoice.', 403);
-					}
-				} else {
-					// Fallback safety
-					return this.sendError('Access denied', 403);
-				}
-			}
-
-			// 4. Authorized. Fetch full details and render.
-			const fullOrder = await Order.findByPk(invoice.order_id, {
+			// 3. Fetch order with items early to check permissions AND consolidation
+			let order = await Order.findByPk(invoice.order_id, {
 				include: [
 					{
 						model: OrderItem,
@@ -290,23 +325,99 @@ export class InvoiceController extends BaseController {
 						include: [{ model: Product, as: 'product' }]
 					}
 				]
-			}) as Order & { items?: (OrderItem & { product?: Product })[] };
+			}) as any;
 
-			// Fallback: If items are empty, try manual fetch using UUID
-			if (!fullOrder.items || fullOrder.items.length === 0) {
-				const manualItems = await OrderItem.findAll({
-					where: { order_id: fullOrder.id },
+			if (!order) {
+				return this.sendError('Invoice order not found', 404);
+			}
+
+			// 3b. Consolidate items if Customer Invoice (SAME LOGIC AS renderInvoiceHtml)
+			if (invoice.invoice_type === 'customer' && order.order_group_id) {
+				console.log(`[InvoiceTokenController] Consolidating items for Group ID: ${order.order_group_id}`);
+
+				// 1. Get all Order IDs in the group
+				const groupOrders = await Order.findAll({
+					where: { order_group_id: order.order_group_id },
+					attributes: ['id']
+				});
+				const groupOrderIds = groupOrders.map(o => o.id);
+				console.log(`[InvoiceTokenController] Found group order IDs: ${groupOrderIds.join(', ')}`);
+
+				// 2. Fetch ALL items directly
+				const allItems = await OrderItem.findAll({
+					where: { order_id: { [Op.in]: groupOrderIds } },
 					include: [{ model: Product, as: 'product' }]
 				});
-				if (manualItems.length > 0) {
-					fullOrder.items = manualItems;
-					console.log(`[InvoiceController] Recovered ${manualItems.length} items via manual query for Order ${fullOrder.id}`);
+
+				console.log(`[InvoiceTokenController] Total consolidated items: ${allItems.length}`);
+
+				const consolidatedOrder = order.toJSON ? order.toJSON() : { ...order };
+
+				if (allItems.length > 0) {
+					consolidatedOrder.items = allItems;
 				} else {
-					console.log(`[InvoiceController] No items found even with manual query for Order ${fullOrder.id}`);
+					console.warn(`[InvoiceTokenController] Consolidation returned 0 items. Keeping primary order items (${order.items?.length || 0}).`);
+				}
+
+				order = consolidatedOrder;
+			}
+
+			// 4. Permission Check
+			const isAdmin = ['admin', 'super_admin'].includes(user.user_type);
+
+			if (!isAdmin) {
+				const isAddressee = order.user_id === user.id; // Customer
+				const isIssuer = order.vendor_id === user.id; // Vendor
+
+				if (invoice.invoice_type === 'admin') {
+					if (!isIssuer) return this.sendError('Access denied', 403);
+				} else if (invoice.invoice_type === 'customer') {
+					if (!isAddressee) return this.sendError('Access denied', 403);
+				} else {
+					return this.sendError('Access denied', 403);
 				}
 			}
 
-			const html = this.buildInvoiceHtml(invoice, fullOrder);
+			// 5. Render
+			// Use the prepared order object
+			const finalOrder = order as Order & { items?: (OrderItem & { product?: Product })[] };
+
+			// Fallback: If items are empty, try manual fetch using order_group_id if available, else order_id
+
+			if (!finalOrder.items || finalOrder.items.length === 0) {
+				console.warn(`[InvoiceTokenController] Items list is empty for Order ${finalOrder.id}. Attempting manual recovery.`);
+
+				let manualItems: OrderItem[] = [];
+
+				if (invoice.invoice_type === 'customer' && finalOrder.order_group_id) {
+					console.log(`[InvoiceTokenController] Recovering items for Group ID: ${finalOrder.order_group_id}`);
+					// Find all order IDs in the group
+					const groupOrders = await Order.findAll({
+						where: { order_group_id: finalOrder.order_group_id },
+						attributes: ['id']
+					});
+					const groupOrderIds = groupOrders.map(o => o.id);
+
+					manualItems = await OrderItem.findAll({
+						where: { order_id: { [Op.in]: groupOrderIds } },
+						include: [{ model: Product, as: 'product' }]
+					});
+				} else {
+					manualItems = await OrderItem.findAll({
+						where: { order_id: finalOrder.id },
+						include: [{ model: Product, as: 'product' }]
+					});
+				}
+
+				if (manualItems.length > 0) {
+					finalOrder.items = manualItems;
+					console.log(`[InvoiceTokenController] Recovered ${manualItems.length} items via manual query`);
+				} else {
+					console.error(`[InvoiceTokenController] FAILED to recover items for Order ${finalOrder.id}`);
+				}
+			}
+
+			const html = this.buildInvoiceHtml(invoice, finalOrder);
 
 			return new Response(html, {
 				headers: {

@@ -5,6 +5,7 @@ import { Op, literal } from 'sequelize';
 import { FinanceService } from '../services/FinanceService';
 import { getFileUrl } from '../utils/fileUrl';
 import { PermissionService } from '../services/PermissionService';
+import { InvoiceService } from '../services/InvoiceService';
 
 export class AdminOrderController extends BaseController {
 
@@ -708,21 +709,35 @@ export class AdminOrderController extends BaseController {
                 const isPaid = (payment_status === 'paid') || (order.payment_status === 'paid');
                 const isPaymentJustPaid = payment_status === 'paid' && prevPaymentStatus !== 'paid';
 
-                // Condition for generation: Newly approved and paid, OR just paid (if already approved)
-                if ((isNowApproved && isPaid) || (isPaymentJustPaid && order.order_status === 'approved')) {
-                    const existingInvoices = await InvoiceService.getInvoicesByOrderId(order.id);
+                // Condition for generation: Newly approved and paid, OR just paid (regardless of approval status, as per requirement)
+                // We want to ensure that if it becomes paid, we generate the invoice. 
+                // Checks:
+                // 1. Just became PAID (isPaymentJustPaid)
+                // 2. Just became APPROVED and is already PAID (isNowApproved && isPaid)
+
+                if (isPaymentJustPaid || (isNowApproved && isPaid)) {
+                    // Check for invoices at the GROUP level to prevent duplicates
+                    const existingInvoices = order.order_group_id
+                        ? await InvoiceService.getInvoicesByGroupId(order.order_group_id)
+                        : await InvoiceService.getInvoicesByOrderId(order.id);
 
                     // 1. Customer Invoice (Paid)
                     const custInvoice = existingInvoices.find(i => i.invoice_type === 'customer');
                     if (!custInvoice) {
+                        // Consolidate Invoice (Safe to call even if triggered by sub-order)
                         generatedInvoice = await InvoiceService.generateCustomerInvoice(order.id, invoice_comments || order.invoice_comments, 'paid');
-                        console.log(`Generated customer invoice: ${generatedInvoice?.invoice_number}`);
+                        console.log(`Generated customer invoice (Payment/Approval Trigger): ${generatedInvoice?.invoice_number}`);
                     } else if (custInvoice.payment_status !== 'paid' && isPaid) {
                         const updated = await InvoiceService.markCustomerInvoicePaid(order.id);
                         if (updated) generatedInvoice = updated;
                     }
 
                     // 2. Admin/Vendor Invoice (Unpaid initially)
+                    // Admin invoice usually requires Approval + Payment, or just Approval? 
+                    // Requirement: "Admin → Customer was generated... as soon as a customer completes payment"
+                    // We'll keep Admin invoice aligned with Customer invoice generation for now, 
+                    // but it might strictly depend on 'approved' status for validity. 
+                    // However, if paid, it implies a level of validity. Let's generate it to be safe.
                     const adminInvoice = existingInvoices.find(i => i.invoice_type === 'admin');
                     if (!adminInvoice && order.vendor_id && order.vendor_id !== 'admin') {
                         const newAdminInvoice = await InvoiceService.generateAdminInvoice(order.id, invoice_comments || order.invoice_comments);
@@ -756,6 +771,65 @@ export class AdminOrderController extends BaseController {
             });
 
         } catch (error: any) {
+            return new AdminOrderController().sendError(error.message, 500);
+        }
+    }
+
+    /**
+     * POST /api/v1/admin/orders/:id/invoice
+     * Manually trigger generation of Consolidated Customer Invoice
+     */
+    static async generateInvoice(req: NextRequest, { params }: { params: any }) {
+        try {
+            const controller = new AdminOrderController();
+            const { user, error } = await controller.verifyAuth(req);
+            if (error) return error;
+
+            if (user!.user_type !== 'admin' && user!.user_type !== 'super_admin') {
+                return controller.sendError('Forbidden', 403);
+            }
+
+            // Permission Check
+            if (user!.user_type === 'admin') {
+                const permissionService = new PermissionService();
+                const hasManage = await permissionService.hasPermission(user!.id, 'order.manage');
+                const hasControlled = await permissionService.hasPermission(user!.id, 'order.controlled.approve');
+
+                if (!hasManage && !hasControlled) {
+                    return controller.sendError('Forbidden: Missing permissions', 403);
+                }
+            }
+
+            const { id } = await params;
+            // Parse body safely
+            let comments = null;
+            try {
+                const body = await req.json();
+                comments = body.comments;
+            } catch (e) {
+                // Ignore JSON parse error, body might be empty
+            }
+
+            const order = await Order.findByPk(id);
+            if (!order) return controller.sendError('Order not found', 404);
+
+            // Generate Customer Invoice (Consolidated by Group ID logic inside service)
+            // Force 'paid' status as this is an admin override action
+            const invoice = await InvoiceService.generateCustomerInvoice(order.id, comments || null, 'paid');
+
+            return controller.sendSuccess({
+                message: 'Customer invoice generated successfully',
+                invoice: {
+                    id: invoice.id,
+                    invoice_number: invoice.invoice_number,
+                    type: invoice.invoice_type
+                }
+            });
+
+        } catch (error: any) {
+            console.error('Manual Invoice Generation Error:', error);
+            // Return success even if duplicate to handle idempotency gracefully if needed, 
+            // but here we let the error propagate if it's a real failure. 
             return new AdminOrderController().sendError(error.message, 500);
         }
     }
