@@ -8,6 +8,8 @@ import { verifyAccessToken } from '../utils/jwt';
 import { sequelize } from '../config/database';
 import { StripeService } from '../services/StripeService';
 import { v4 as uuidv4 } from 'uuid';
+import { applyCommission } from '../utils/priceHelper';
+import { UserProfile } from '../models';
 
 export class CheckoutController extends BaseController {
 
@@ -139,28 +141,41 @@ export class CheckoutController extends BaseController {
 
             // Calculate Totals for Stripe and High Value check
             let subtotal = 0;
+            let totalVat = 0;
             const allStripeItems: any[] = [];
+
+            // Fetch user profile for discount
+            const userProfile = await UserProfile.findOne({ where: { user_id: user.id } });
+            const discountPercent = userProfile?.discount || 0;
 
             for (const item of cart.items) {
                 if (!item.product) continue;
-                const price = Number(item.product.base_price) || 0;
-                const qty = item.quantity;
-                subtotal += price * qty;
 
-                const unitPriceWithTax = price * (1 + (vatPercent / 100));
+                // Use applyCommission to get the customer-facing price (inflation included)
+                const formattedProduct = await applyCommission(item.product, discountPercent);
+                const price = Number(formattedProduct.price) || 0;
+
+                const qty = item.quantity;
+                subtotal += price * qty; // Total price customer pays (before VAT)
+
+                // Accumulate VAT
+                totalVat += (price * (vatPercent / 100)) * qty;
+
                 allStripeItems.push({
                     name: item.product.name,
-                    amount: Math.round(unitPriceWithTax * 100),
+                    amount: Math.round(price * 100),
                     quantity: qty,
                     currency: 'aed'
                 });
 
                 // Note: Per-product legacy shipping charge is IGNORED in favor of shippingDetails
                 if (Number(item.product.packing_charge) > 0) {
-                    const val = Number(item.product.packing_charge) * (1 + (vatPercent / 100));
+                    const packingPrice = Number(item.product.packing_charge);
+                    totalVat += (packingPrice * (vatPercent / 100)) * qty;
+
                     allStripeItems.push({
                         name: 'Packing Charges',
-                        amount: Math.round(val * 100),
+                        amount: Math.round(packingPrice * 100),
                         quantity: qty,
                         currency: 'aed'
                     });
@@ -172,15 +187,26 @@ export class CheckoutController extends BaseController {
                 Object.entries(shippingDetails).forEach(([vendorId, details]: any) => {
                     const cost = Number(details.total) || 0;
                     if (cost > 0) {
-                        const val = cost * (1 + (vatPercent / 100));
+                        totalVat += (cost * (vatPercent / 100));
+
                         allStripeItems.push({
                             name: `Shipping (${details.method || 'Standard'})`,
-                            amount: Math.round(val * 100),
+                            amount: Math.round(cost * 100),
                             quantity: 1,
                             currency: 'aed'
                         });
                     }
                     subtotal += cost; // Approximate for high-value check
+                });
+            }
+
+            // Add VAT Line Item
+            if (totalVat > 0) {
+                allStripeItems.push({
+                    name: `VAT (${vatPercent}%)`,
+                    amount: Math.round(totalVat * 100),
+                    quantity: 1,
+                    currency: 'aed'
                 });
             } else {
                 // Fallback (or Error): If no shipping details provided for a shipment order
@@ -443,22 +469,17 @@ export class CheckoutController extends BaseController {
             }
 
             // Now build items
+            let totalVatAccumulated = 0;
             for (const order of orders) {
+                totalVatAccumulated += (Number(order.vat_amount) || 0);
+
                 for (const item of (order.items || [])) {
                     const price = Number(item.price) || 0;
                     const quantity = Number(item.quantity) || 1;
 
-                    const unitPriceWithTax = price * (1 + (vatPercent / 100));
-                    const finalAmount = Math.round(unitPriceWithTax * 100);
-
-                    if (finalAmount <= 0) {
-                        console.error(`[RETRY ERROR] Invalid Amount Item: Price=${price}, Qty=${quantity}, VAT=${vatPercent}, Calc=${finalAmount}`);
-                        return this.sendError('Invalid item amount detected. Please contact support.', 400);
-                    }
-
                     allStripeItems.push({
                         name: item.product_name || 'Product',
-                        amount: isNaN(finalAmount) ? 0 : finalAmount,
+                        amount: Math.round(price * 100),
                         quantity: quantity,
                         currency: 'aed'
                     });
@@ -466,11 +487,9 @@ export class CheckoutController extends BaseController {
 
                 if ((Number(order.total_shipping) || 0) > 0) {
                     const shipping = Number(order.total_shipping) || 0;
-                    const val = shipping * (1 + (vatPercent / 100));
-                    const finalAmount = Math.round(val * 100);
                     allStripeItems.push({
                         name: 'Shipping Charges',
-                        amount: isNaN(finalAmount) ? 0 : finalAmount,
+                        amount: Math.round(shipping * 100),
                         quantity: 1,
                         currency: 'aed'
                     });
@@ -478,15 +497,23 @@ export class CheckoutController extends BaseController {
 
                 if ((Number(order.total_packing) || 0) > 0) {
                     const packing = Number(order.total_packing) || 0;
-                    const val = packing * (1 + (vatPercent / 100));
-                    const finalAmount = Math.round(val * 100);
                     allStripeItems.push({
                         name: 'Packing Charges',
-                        amount: isNaN(finalAmount) ? 0 : finalAmount,
+                        amount: Math.round(packing * 100),
                         quantity: 1,
                         currency: 'aed'
                     });
                 }
+            }
+
+            // Final VAT
+            if (totalVatAccumulated > 0) {
+                allStripeItems.push({
+                    name: `VAT (${vatPercent}%)`,
+                    amount: Math.round(totalVatAccumulated * 100),
+                    quantity: 1,
+                    currency: 'aed'
+                });
             }
 
             if (allStripeItems.length === 0) {

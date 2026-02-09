@@ -124,10 +124,14 @@ export class CartController extends BaseController {
 				]
 			});
 
+			// Fetch user profile for discount (if applicable)
+			const userProfile = userId ? await UserProfile.findOne({ where: { user_id: userId } }) : null;
+			const discountPercent = userProfile?.discount || 0;
+
 			// Format items to include is_controlled, dimensions, and ensure helper format
-			const formattedItems = items.map((item: any) => {
+			const formattedItems = await Promise.all(items.map(async (item: any) => {
 				const plainItem = item.toJSON();
-				const p = applyCommission(plainItem.product);
+				const p = await applyCommission(plainItem.product, discountPercent);
 
 				if (p) {
 					// Calculate is_controlled
@@ -160,9 +164,12 @@ export class CartController extends BaseController {
 					const dims = this.calculateItemDimensions(p);
 					plainItem.dimensions = dims;
 					plainItem.formatted_dimensions = `${dims.length}x${dims.width}x${dims.height} ${dims.unit}`;
+
+					// Re-assign formatted product back to item
+					plainItem.product = p;
 				}
 				return plainItem;
-			});
+			}));
 
 			// Group by Vendor
 			const groupedItems = formattedItems.reduce((acc: any, item: any) => {

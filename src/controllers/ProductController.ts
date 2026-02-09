@@ -128,8 +128,8 @@ export class ProductController extends BaseController {
      * Helper: Format Product (Transform Sequelize Instance to JSON and attach Media URLs)
      * Decoupled from Access Control
      */
-    private formatProduct(data: any | any[]) {
-        const fmt = (item: any) => {
+    private async formatProduct(data: any | any[], discountPercent: number = 0) {
+        const fmt = async (item: any) => {
             if (!item) return null;
             // Ensure we have a POJO
             let p = item;
@@ -213,15 +213,16 @@ export class ProductController extends BaseController {
             );
 
             // Apply Commission Calculation (Inflates price and removes commission field)
-            p = applyCommission(p);
+            p = await applyCommission(p, discountPercent);
 
             return p;
         };
 
         if (Array.isArray(data)) {
-            return data.map(d => fmt(d)).filter(d => d !== null);
+            const results = await Promise.all(data.map(d => fmt(d)));
+            return results.filter(d => d !== null);
         }
-        return fmt(data);
+        return await fmt(data);
     }
 
     /**
@@ -591,7 +592,10 @@ export class ProductController extends BaseController {
             }
 
             // Format first (JSON + Media) -> Then Mask
-            const formattedRows = this.formatProduct(rows);
+            const userProfile = user?.profile || (user ? await UserProfile.findOne({ where: { user_id: user.id } }) : null);
+            const discount = userProfile?.discount || 0;
+
+            const formattedRows = await this.formatProduct(rows, discount);
             const maskedRows = this.maskProducts(formattedRows, user);
 
             return this.sendSuccess(maskedRows, 'Success', 200, {
@@ -948,7 +952,7 @@ export class ProductController extends BaseController {
                 distinct: true
             });
 
-            const formattedRows = this.formatProduct(rows);
+            const formattedRows = await this.formatProduct(rows);
             // No masking for admin/vendor own products
             return this.sendSuccess(formattedRows, 'Success', 200, {
                 total: count,
@@ -1251,7 +1255,7 @@ export class ProductController extends BaseController {
             //    return this.sendError('Product not available for review (Draft status)', 403);
             // }
 
-            const formatted = this.formatProduct(fullProduct);
+            const formatted = await this.formatProduct(fullProduct);
             return this.sendSuccess(formatted, 'Success', 200, { placeholder_image: getFileUrl('/placeholder.svg') });
 
         } catch (error: any) {
@@ -1299,7 +1303,10 @@ export class ProductController extends BaseController {
                 return this.sendError('Product not found', 404);
             }
 
-            const formatted = this.formatProduct(product);
+            const userProfile = user?.profile || (user ? await UserProfile.findOne({ where: { user_id: user.id } }) : null);
+            const discount = userProfile?.discount || 0;
+
+            const formatted = await this.formatProduct(product, discount);
             const maskedProduct = this.maskProducts(formatted, user);
 
             return this.sendSuccess(maskedProduct, 'Success', 200, { placeholder_image: getFileUrl('/placeholder.svg') });

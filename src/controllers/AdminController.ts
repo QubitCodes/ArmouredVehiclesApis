@@ -2209,4 +2209,43 @@ export class AdminController extends BaseController {
             return NextResponse.json({ success: false, message: 'Failed to fetch order', debug: error?.message }, { status: 500 });
         }
     }
+    // PATCH /api/v1/admin/customers/:id/profile
+    // Update customer profile fields (Admin only, e.g. specialized discount)
+    static async updateCustomerProfile(req: NextRequest, { params }: { params: { id: string } }) {
+        try {
+            const customerId = params.id;
+            if (!customerId) return responseHandler.error('Invalid ID', 200, [], undefined, req);
+
+            const body = await req.json();
+
+            // Validate specialized discount
+            if (body.discount !== undefined) {
+                const discount = Number(body.discount);
+                if (isNaN(discount) || discount < 0 || discount > 3) {
+                    return responseHandler.error('Specialized discount must be between 0 and 3%', 200, [], undefined, req);
+                }
+                body.discount = discount;
+            }
+
+            // Fetch profile
+            const profile = await UserProfile.findOne({ where: { user_id: customerId } });
+            if (!profile) return responseHandler.error('Customer profile not found', 310, [], undefined, req);
+
+            // Update allowed fields
+            const allowedFields = ['discount'];
+            const updateData: any = {};
+            allowedFields.forEach(field => {
+                if (body[field] !== undefined) {
+                    updateData[field] = body[field];
+                }
+            });
+
+            await profile.update(updateData);
+
+            return responseHandler.success(profile, 'Customer profile updated successfully', 103, undefined, req);
+
+        } catch (error: any) {
+            return responseHandler.handleError(error, req);
+        }
+    }
 }

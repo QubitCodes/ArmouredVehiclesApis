@@ -112,7 +112,27 @@ export class VendorOrderController extends BaseController {
       order.order_status = 'approved';
       await order.save();
 
-      // Note: Admin Invoice generation is now handled when shipment is delivered
+      // --- INVOICE GENERATION LOGIC ---
+      try {
+        const { InvoiceService } = await import('../services/InvoiceService');
+        const { Invoice } = await import('../models');
+
+        // Logic: Generate both invoices upon vendor approval
+        // Admin to Customer Invoice (Paid)
+        const existingInvoices = await InvoiceService.getInvoicesByOrderId(order.id);
+        const custInvoice = existingInvoices.find((i: any) => i.invoice_type === 'customer');
+        if (!custInvoice) {
+          await InvoiceService.generateCustomerInvoice(order.id, invoice_comments || order.invoice_comments, 'paid');
+        }
+
+        // Vendor to Admin Invoice (Unpaid)
+        const adminInvoice = existingInvoices.find((i: any) => i.invoice_type === 'admin');
+        if (!adminInvoice) {
+          await InvoiceService.generateAdminInvoice(order.id, invoice_comments || order.invoice_comments);
+        }
+      } catch (invoiceError) {
+        console.error('Vendor Approval Invoice Generation Failed:', invoiceError);
+      }
 
       return this.sendSuccess(
         null,

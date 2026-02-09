@@ -191,7 +191,9 @@ interface OrderItemAttributes {
   vendor_id?: string | null;
   quantity: number;
   price: number;
+  base_price: number;
   product_name: string; // Snapshot
+  product_details?: any | null; // Snapshot
   created_at?: Date;
   updated_at?: Date;
 }
@@ -205,7 +207,9 @@ export class OrderItem extends Model<OrderItemAttributes, OrderItemCreationAttri
   public vendor_id?: string | null;
   public quantity!: number;
   public price!: number;
+  public base_price!: number;
   public product_name!: string;
+  public product_details?: any | null;
 
   public readonly product?: Product;
 }
@@ -238,9 +242,18 @@ OrderItem.init(
       type: DataTypes.DECIMAL(10, 2),
       allowNull: false,
     },
+    base_price: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: false,
+      defaultValue: 0,
+    },
     product_name: {
       type: DataTypes.STRING,
       allowNull: false,
+    },
+    product_details: {
+      type: DataTypes.JSONB,
+      allowNull: true,
     },
   },
   {

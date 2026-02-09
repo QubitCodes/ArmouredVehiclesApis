@@ -619,7 +619,7 @@ export class AdminOrderController extends BaseController {
                     const customerProfile = sensitiveCheck.user?.profile;
                     const isUAECustomer = customerProfile ? ['UAE', 'United Arab Emirates'].includes(customerProfile.country) : false;
 
-                    const hasControlledItems = sensitiveCheck.items.some((i: any) => i.product?.category?.is_controlled === true);
+                    const hasControlledItems = (sensitiveCheck.items || []).some((i: any) => i.product?.category?.is_controlled === true);
 
                     if (hasControlledItems && isUAECustomer) {
                         // Strict Permission Required
@@ -702,42 +702,42 @@ export class AdminOrderController extends BaseController {
 
             try {
                 const { InvoiceService } = await import('../services/InvoiceService');
-
-                // Check for customer invoice generation conditions:
-                // order_status changing to 'approved' AND payment_status is 'paid'
+                // --- INVOICE GENERATION LOGIC ---
+                // Rule 1: Generate BOTH invoices when the order is approved
                 const isNowApproved = effectiveStatus === 'approved' && prevOrderStatus !== 'approved';
                 const isPaid = (payment_status === 'paid') || (order.payment_status === 'paid');
                 const isPaymentJustPaid = payment_status === 'paid' && prevPaymentStatus !== 'paid';
 
-                // Generate Customer Invoice:
-                // 1. When status becomes approved AND verified paid (Legacy/Strict flow)
-                // 2. OR When payment status becomes paid (Standard flow)
-                if ((isNowApproved && isPaid) || isPaymentJustPaid) {
-                    // Check if invoice already exists
-                    const existingCustInvoice = await InvoiceService.getInvoicesByOrderId(order.id);
-                    const custInvoice = existingCustInvoice.find(i => i.invoice_type === 'customer');
+                // Condition for generation: Newly approved and paid, OR just paid (if already approved)
+                if ((isNowApproved && isPaid) || (isPaymentJustPaid && order.order_status === 'approved')) {
+                    const existingInvoices = await InvoiceService.getInvoicesByOrderId(order.id);
 
+                    // 1. Customer Invoice (Paid)
+                    const custInvoice = existingInvoices.find(i => i.invoice_type === 'customer');
                     if (!custInvoice) {
                         generatedInvoice = await InvoiceService.generateCustomerInvoice(order.id, invoice_comments || order.invoice_comments, 'paid');
                         console.log(`Generated customer invoice: ${generatedInvoice?.invoice_number}`);
-                    } else if (custInvoice.payment_status !== 'paid') {
-                        // Mark as paid if existing
+                    } else if (custInvoice.payment_status !== 'paid' && isPaid) {
                         const updated = await InvoiceService.markCustomerInvoicePaid(order.id);
                         if (updated) generatedInvoice = updated;
                     }
+
+                    // 2. Admin/Vendor Invoice (Unpaid initially)
+                    const adminInvoice = existingInvoices.find(i => i.invoice_type === 'admin');
+                    if (!adminInvoice && order.vendor_id && order.vendor_id !== 'admin') {
+                        const newAdminInvoice = await InvoiceService.generateAdminInvoice(order.id, invoice_comments || order.invoice_comments);
+                        console.log(`Generated admin invoice: ${newAdminInvoice?.invoice_number}`);
+                        if (!generatedInvoice) generatedInvoice = newAdminInvoice;
+                    }
                 }
 
-                // Generate Admin Invoice (Vendor Payout):
-                // When shipment_status changes to 'delivered'
+                // Rule 2: Mark Admin Invoice as PAID only when delivered
                 const isNowDelivered = shipment_status === 'delivered' && prevShipmentStatus !== 'delivered';
-
                 if (isNowDelivered) {
-                    const existingAdminInvoice = await Invoice.findOne({ where: { order_id: order.id, invoice_type: 'admin' } });
-                    if (!existingAdminInvoice) {
-                        const adminInvoice = await InvoiceService.generateAdminInvoice(order.id, invoice_comments || order.invoice_comments);
-                        console.log(`Generated admin invoice: ${adminInvoice?.invoice_number}`);
-                        // If we didn't generate customer invoice in this request, return admin invoice
-                        if (!generatedInvoice) generatedInvoice = adminInvoice;
+                    const updated = await InvoiceService.markAdminInvoicePaid(order.id);
+                    if (updated) {
+                        console.log(`Marked admin invoice as paid for order: ${order.id}`);
+                        if (!generatedInvoice) generatedInvoice = updated;
                     }
                 }
             } catch (invoiceError) {

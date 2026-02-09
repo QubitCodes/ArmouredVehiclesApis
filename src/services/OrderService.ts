@@ -1,6 +1,7 @@
 
-import { Cart, CartItem, Order, OrderItem, Product, User, PlatformSetting, Address } from '../models';
+import { Cart, CartItem, Order, OrderItem, Product, User, PlatformSetting, Address, UserProfile } from '../models';
 import { sequelize } from '../config/database';
+import { applyCommission } from '../utils/priceHelper';
 
 export class OrderService {
 
@@ -70,22 +71,38 @@ export class OrderService {
             const vendorGroups = new Map<string, any[]>();
             const consolidatedItems = new Map<string, any>();
 
+            // Fetch user specific discount
+            const userProfile = await UserProfile.findOne({ where: { user_id: userId }, transaction: t });
+            const discountPercent = userProfile?.discount || 0;
+
             for (const item of cart.items) {
                 if (!item.product) continue;
 
                 const productId = item.product_id;
-                const price = Number(item.product.base_price) || 0;
+
+                // Get inflated price for customer
+                const formattedProduct = await applyCommission(item.product, discountPercent);
+                const inflatedPrice = Number(formattedProduct.price) || 0;
+                const basePrice = Number(item.product.base_price) || 0;
 
                 if (consolidatedItems.has(productId)) {
                     const existing = consolidatedItems.get(productId);
                     existing.quantity += item.quantity;
                 } else {
+                    // Create product snapshot (excluding large media arrays)
+                    const productSnapshot = (item.product.toJSON ? item.product.toJSON() : { ...item.product }) as any;
+                    delete productSnapshot.media;
+                    delete productSnapshot.product_media;
+                    delete productSnapshot.gallery;
+
                     consolidatedItems.set(productId, {
                         product_id: productId,
                         vendor_id: item.product.vendor_id,
                         quantity: item.quantity,
-                        price: price,
+                        price: inflatedPrice, // Customer pays this
+                        base_price: basePrice, // Vendor base price
                         product_name: item.product.name,
+                        product_details: productSnapshot, // Archive snapshot
                         packing_charge: item.product.packing_charge
                     });
                 }
@@ -110,16 +127,14 @@ export class OrderService {
                     const shippingInfo = options.shippingCosts?.[vendorId] || options.shippingCosts?.[actualVendorId || 'admin'];
 
                     let groupSubtotal = 0;
+                    let groupBaseSubtotal = 0;
                     let groupShipping = 0;
                     let groupPacking = 0;
 
                     items.forEach(i => {
                         const qty = i.quantity;
                         groupSubtotal += i.price * qty;
-                        // Legacy shipping_charge removed as per user request
-                        // if (!shippingInfo) {
-                        //     groupShipping += (Number(i.shipping_charge) || 0) * qty;
-                        // }
+                        groupBaseSubtotal += (i.base_price || i.price) * qty;
                         groupPacking += (Number(i.packing_charge) || 0) * qty;
                     });
 
@@ -130,7 +145,9 @@ export class OrderService {
 
                     const taxableAmount = groupSubtotal + groupShipping + groupPacking;
                     const vatAmount = (taxableAmount * vatPercent) / 100;
-                    const adminCommission = (actualVendorId === null) ? 0 : (groupSubtotal * commPercent) / 100;
+
+                    // Admin Commission is the markup (Difference between customer price and vendor base price)
+                    const adminCommission = (actualVendorId === null) ? 0 : (groupSubtotal - groupBaseSubtotal);
                     const groupTotal = taxableAmount + vatAmount;
 
                     // Generate 8-digit Order ID if not single vendor

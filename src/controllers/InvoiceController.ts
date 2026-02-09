@@ -352,11 +352,35 @@ export class InvoiceController extends BaseController {
 			});
 		};
 
+		const orderSubtotal = items.reduce((sum: number, i: any) => sum + (Number(i.price || 0) * (i.quantity || 1)), 0);
+
 		const itemRows = items.map((item: any, index: number) => {
-			// Safe property access
-			const name = item.product_name || item.name || (item.product ? item.product.name : 'Item');
+			// Use snapshot from product_details if available, otherwise fallback
+			const snapshot = item.product_details || {};
+			const name = snapshot.name || item.product_name || item.name || (item.product ? item.product.name : 'Item');
 			const qty = item.quantity || 1;
-			const price = Number(item.price || 0);
+
+			// Logic:
+			// Customer Invoice (type: customer): price = item.price (Base + Platform Fee)
+			// Vendor Invoice (type: admin): price = item.price - (share of admin_commission)
+			let price = Number(item.price || item['price'] || 0);
+
+			if (invoice.invoice_type === 'admin') {
+				const adminCommission = order ? (Number(order.admin_commission) || 0) : 0;
+				if (adminCommission > 0 && orderSubtotal > 0) {
+					// Proportional distribution of commission
+					const itemTotal = price * qty;
+					const itemShareOfCommission = (itemTotal / orderSubtotal) * adminCommission;
+					const unitCommission = itemShareOfCommission / qty;
+					price = price - unitCommission;
+				} else {
+					// Fallback to base_price columns if no commission balance recorded on order
+					const bp = item.base_price ?? item['base_price'] ?? null;
+					const pbp = snapshot.base_price ?? item.product?.base_price ?? null;
+					price = (bp !== null ? Number(bp) : (pbp !== null ? Number(pbp) : price));
+				}
+			}
+
 			const total = price * qty;
 
 			return `
@@ -368,6 +392,15 @@ export class InvoiceController extends BaseController {
 				<td class="text-right">${formatCurrency(total)}</td>
 			</tr>
 		`}).join('');
+
+		// Calculate Platform Fees for footer (Customer Invoice only)
+		const platformFees = invoice.invoice_type === 'customer'
+			? items.reduce((sum: number, item: any) => {
+				const base = Number(item.base_price || item.product?.base_price || item.price);
+				const unit = Number(item.price);
+				return sum + ((unit - base) * (item.quantity || 1));
+			}, 0)
+			: 0;
 
 		return `
 <!DOCTYPE html>
@@ -752,12 +785,18 @@ ${invoice.addressee_email ? `Email: ${invoice.addressee_email}` : ''}</div>
 		<div class="totals-section">
 			<div class="totals-box">
 				<div class="totals-row">
-					<span class="totals-label">Subtotal</span>
-					<span class="totals-value">${formatCurrency(Number(invoice.subtotal))}</span>
+					<span class="totals-label">${invoice.invoice_type === 'admin' ? 'Subtotal' : 'Subtotal (Base Price)'}</span>
+					<span class="totals-value">${formatCurrency(Number(invoice.subtotal) - (invoice.invoice_type === 'customer' ? platformFees : 0))}</span>
 				</div>
+				${invoice.invoice_type === 'customer' && platformFees > 0 ? `
+				<div class="totals-row">
+					<span class="totals-label">Platform Fees</span>
+					<span class="totals-value">${formatCurrency(platformFees)}</span>
+				</div>
+				` : ''}
 				${Number(invoice.vat_amount) > 0 ? `
 				<div class="totals-row">
-					<span class="totals-label">VAT</span>
+					<span class="totals-label">VAT (5%)</span>
 					<span class="totals-value">${formatCurrency(Number(invoice.vat_amount))}</span>
 				</div>
 				` : ''}
@@ -774,7 +813,7 @@ ${invoice.addressee_email ? `Email: ${invoice.addressee_email}` : ''}</div>
 				</div>
 				` : ''}
 				<div class="totals-row total-row">
-					<span>Total Due</span>
+					<span>Grand Total</span>
 					<span>${formatCurrency(Number(invoice.total_amount))}</span>
 				</div>
 			</div>

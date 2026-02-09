@@ -99,6 +99,9 @@ export interface UserProfileAttributes {
 	updated_at?: Date;
 	deleted_at?: Date | null;
 	delete_reason?: string | null;
+
+	// SPECIALIZED DISCOUNT
+	discount?: number;
 }
 
 /**
@@ -196,6 +199,8 @@ export class UserProfile extends Model<UserProfileAttributes, UserProfileCreatio
 	public declare readonly updated_at: Date;
 	public declare readonly deleted_at: Date | null;
 	public declare delete_reason: string | null;
+
+	public declare discount?: number;
 }
 
 UserProfile.init(
@@ -319,7 +324,10 @@ UserProfile.init(
 
 		// SOFT DELETE
 		deleted_at: { type: DataTypes.DATE },
-		delete_reason: { type: DataTypes.TEXT }
+		delete_reason: { type: DataTypes.TEXT },
+
+		// SPECIALIZED DISCOUNT
+		discount: { type: DataTypes.DECIMAL(5, 2), defaultValue: 0 }
 	},
 	{
 		sequelize,
