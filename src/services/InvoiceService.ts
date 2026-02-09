@@ -199,43 +199,75 @@ export class InvoiceService {
     /**
      * Generates Customer Invoice (Admin → Customer)
      * Called when admin approves an order AND payment is confirmed
-     * Amounts include admin commission (full order total)
+     * AGGREGATES all orders in the same group into one invoice
      */
     static async generateCustomerInvoice(
         orderId: string,
         comments: string | null = null,
         paymentStatus: 'paid' | 'unpaid' = 'paid'
     ): Promise<Invoice> {
-        // Fetch order with customer details
-        const order = await Order.findByPk(orderId, {
-            include: [
-                { model: OrderItem, as: 'items' },
-                {
-                    model: User, as: 'user', include: [
-                        { model: UserProfile, as: 'profile' },
-                        { model: Address, as: 'addresses' }
-                    ]
-                }
-            ]
-        }) as Order & { user?: User & { profile?: UserProfile; addresses?: Address[] }; items?: OrderItem[] };
+        // Fetch the initial order to get group ID and user details
+        const initialOrder = await Order.findByPk(orderId);
 
-        if (!order) {
+        if (!initialOrder) {
             throw new Error('Order not found');
         }
+
+        const orderGroupId = initialOrder.order_group_id;
+
+        // Fetch ALL orders in this group to aggregate totals
+        // We include user/profile from the first found order (they should be identical)
+        let allGroupOrders: (Order & { user?: User & { profile?: UserProfile; addresses?: Address[] }; items?: OrderItem[] })[] = [];
+
+        if (orderGroupId) {
+            allGroupOrders = await Order.findAll({
+                where: { order_group_id: orderGroupId },
+                include: [
+                    { model: OrderItem, as: 'items' },
+                    {
+                        model: User, as: 'user', include: [
+                            { model: UserProfile, as: 'profile' },
+                            { model: Address, as: 'addresses' }
+                        ]
+                    }
+                ]
+            }) as any;
+        } else {
+            // If no group ID, it's a single order. Re-fetch with includes to be safe/consistent
+            const single = await Order.findByPk(orderId, {
+                include: [
+                    { model: OrderItem, as: 'items' },
+                    {
+                        model: User, as: 'user', include: [
+                            { model: UserProfile, as: 'profile' },
+                            { model: Address, as: 'addresses' }
+                        ]
+                    }
+                ]
+            }) as any;
+            if (single) allGroupOrders = [single];
+        }
+
+        if (allGroupOrders.length === 0) {
+            throw new Error('No orders found for group');
+        }
+
+        // Use the first order for customer details (same customer for all)
+        const primaryOrder = allGroupOrders[0];
 
         // Get admin details (admin is the issuer)
         const adminDetails = await this.getAdminDetails();
         const terms = await this.getTermsConditions('customer');
 
         // Customer is the addressee
-        const customer = order.user;
+        const customer = primaryOrder.user;
         const customerProfile = customer?.profile;
 
         let shippingAddress: any = null;
 
         // Priority 1: Check order.shipment_details (Snapshot of address at checkout)
-        if (order.shipment_details && Object.keys(order.shipment_details).length > 0) {
-            shippingAddress = order.shipment_details;
+        if (primaryOrder.shipment_details && Object.keys(primaryOrder.shipment_details).length > 0) {
+            shippingAddress = primaryOrder.shipment_details;
         }
         // Priority 2: Fallback to default address from profile
         else {
@@ -259,19 +291,34 @@ export class InvoiceService {
         const addresseeName = customerProfile?.company_name || customer?.name || 'Customer';
         const addresseeAddress = customerAddressStr || this.formatProfileAddress(customerProfile);
 
-        // Full amounts (including commission)
-        const totalAmount = Number(order.total_amount);
-        const vatAmount = Number(order.vat_amount) || 0;
-        const shippingAmount = Number(order.total_shipping) || 0;
-        const packingAmount = Number(order.total_packing) || 0;
-        const subtotal = totalAmount - vatAmount - shippingAmount - packingAmount;
+        // AGGREGATE AMOUNTS
+        let totalAmount = 0;
+        let vatAmount = 0;
+        let shippingAmount = 0;
+        let packingAmount = 0;
+        let subtotal = 0;
+
+        for (const order of allGroupOrders) {
+            const tAmount = Number(order.total_amount) || 0;
+            const tVat = Number(order.vat_amount) || 0;
+            const tShip = Number(order.total_shipping) || 0;
+            const tPack = Number(order.total_packing) || 0;
+
+            totalAmount += tAmount;
+            vatAmount += tVat;
+            shippingAmount += tShip;
+            packingAmount += tPack;
+
+            // Subtotal for this order
+            subtotal += (tAmount - tVat - tShip - tPack);
+        }
 
         const invoiceNumber = await this.generateInvoiceNumber('customer');
         const accessToken = this.generateAccessToken();
 
         const invoice = await Invoice.create({
             invoice_number: invoiceNumber,
-            order_id: orderId,
+            order_id: primaryOrder.id, // Link to primary order (logic handles finding siblings)
             invoice_type: 'customer',
 
             // Customer is addressee
@@ -292,7 +339,7 @@ export class InvoiceService {
             shipping_amount: shippingAmount,
             packing_amount: packingAmount,
             total_amount: totalAmount,
-            currency: order.currency,
+            currency: primaryOrder.currency,
 
             comments: comments || null,
             terms_conditions: terms,
@@ -330,6 +377,22 @@ export class InvoiceService {
     static async getInvoicesByOrderId(orderId: string): Promise<Invoice[]> {
         return Invoice.findAll({
             where: { order_id: orderId },
+            order: [['created_at', 'ASC']]
+        });
+    }
+
+    /**
+     * Get all invoices for an order group
+     * Useful for Admin/Customer views to see all invoices in the bundle
+     */
+    static async getInvoicesByGroupId(orderGroupId: string): Promise<Invoice[]> {
+        return Invoice.findAll({
+            include: [{
+                model: Order,
+                as: 'order',
+                where: { order_group_id: orderGroupId },
+                required: true
+            }],
             order: [['created_at', 'ASC']]
         });
     }

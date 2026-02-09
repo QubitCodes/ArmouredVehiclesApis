@@ -34,26 +34,64 @@ export class OrderService {
     } = {}) {
         const t = await sequelize.transaction();
         try {
-            // 1. Idempotency Check
+            // 1. Fetch Cart - ROW LOCKING APPLIED
+            // We lock the cart row immediately without includes to avoid SQL errors
+            // (e.g., "FOR UPDATE cannot be applied to the nullable side of an outer join").
+            const cart = await Cart.findOne({
+                where: { id: cartId, user_id: userId },
+                transaction: t,
+                lock: true // FOR UPDATE - ensures only one process converts this cart
+            });
+
+            if (!cart) {
+                await t.rollback();
+                throw new Error('Cart not found');
+            }
+
+            // 1.1 Fetch Items and Products separately within the same transaction
+            const cartItems = await CartItem.findAll({
+                where: { cart_id: cart.id },
+                include: [{ model: Product, as: 'product' }],
+                transaction: t
+            });
+
+            // Attach items to cart object for compatibility with existing logic
+            (cart as any).items = cartItems;
+
+            // 2. Check if this specific Cart instance was already converted
+            // If it was, we MUST NOT create new orders.
+            if (cart.status === 'converted') {
+                console.log(`[OrderService] Cart ${cartId} already converted. Searching for orders belonging to group ${orderGroupId}...`);
+
+                // We rollback the current transaction to clear any REPEATABLE_READ snapshot
+                // that might be hiding the freshly committed orders from another process.
+                await t.rollback();
+
+                // Find existing orders without a transaction snapshot
+                const existing = await Order.findAll({ where: { order_group_id: orderGroupId } });
+
+                if (existing.length === 0) {
+                    console.warn(`[OrderService] Cart ${cartId} is converted but no orders found for ${orderGroupId}. Likely converted by a different checkout session.`);
+                } else {
+                    console.log(`[OrderService] Found ${existing.length} existing orders for ${orderGroupId} after concurrent check.`);
+                }
+
+                return existing;
+            }
+
+            // 3. Primary Idempotency Check (Specific Group ID)
+            // Just in case the same checkout session is somehow reused across different carts (unlikely)
             const existingOrders = await Order.findAll({ where: { order_group_id: orderGroupId }, transaction: t });
             if (existingOrders.length > 0) {
+                console.log(`[OrderService] Order Group ${orderGroupId} already exists. Returning existing records.`);
                 await t.rollback();
                 return existingOrders;
             }
 
-            // 2. Fetch Cart with Items and Products
-            const cart = await Cart.findOne({
-                where: { id: cartId, user_id: userId },
-                include: [{
-                    model: CartItem,
-                    as: 'items',
-                    include: [{ model: Product, as: 'product' }]
-                }],
-                transaction: t
-            });
-
-            if (!cart || !cart.items || cart.items.length === 0) {
-                throw new Error("Cart not found or empty");
+            if (!cart.items || cart.items.length === 0) {
+                // For safety, if it's not converted but has no items, it's an error
+                await t.rollback();
+                throw new Error("Cart is empty");
             }
 
             // 3. Prepare Shipment Details
