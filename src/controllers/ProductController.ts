@@ -1206,11 +1206,11 @@ export class ProductController extends BaseController {
                         { model: ProductSpecification, as: 'product_specifications' }
                     ]
                 });
-                const formatted = this.formatProduct(reloaded);
+                const formatted = await this.formatProduct(reloaded);
                 return this.sendSuccess(formatted, 'Product created', 201, { placeholder_image: getFileUrl('/placeholder.svg') });
             } else {
                 await this.syncSpecifications(product.id, body);
-                const formatted = this.formatProduct(product);
+                const formatted = await this.formatProduct(product);
                 return this.sendSuccess(formatted, 'Product created', 201, { placeholder_image: getFileUrl('/placeholder.svg') });
             }
 
@@ -1580,7 +1580,7 @@ export class ProductController extends BaseController {
                     { model: Category, as: 'category' }
                 ]
             });
-            const formatted = this.formatProduct(updatedProduct);
+            const formatted = await this.formatProduct(updatedProduct);
             return this.sendSuccess(formatted, "Product updated successfully");
 
         } catch (error) {
@@ -2344,7 +2344,7 @@ export class ProductController extends BaseController {
 
             await product.save();
 
-            return this.sendSuccess(this.formatProduct(product), `Product ${status} successfully`);
+            return this.sendSuccess(await this.formatProduct(product), `Product ${status} successfully`);
 
         } catch (error: any) {
             return this.sendError(String((error as any).message), 500);
