@@ -115,6 +115,8 @@ interface ProductAttributes {
 
   created_at?: Date;
   updated_at?: Date;
+  deleted_at?: Date | null;
+  // delete_reason?: string | null;
 }
 
 interface ProductCreationAttributes extends Optional<ProductAttributes, 'id' | 'status' | 'created_at' | 'updated_at'> { }
@@ -224,6 +226,8 @@ export class Product extends Model<ProductAttributes, ProductCreationAttributes>
 
   declare public readonly created_at: Date;
   declare public readonly updated_at: Date;
+  declare public readonly deleted_at?: Date | null;
+  // declare public delete_reason?: string | null;
 }
 
 Product.init(
@@ -323,6 +327,8 @@ Product.init(
 
     created_at: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
     updated_at: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
+    deleted_at: { type: DataTypes.DATE, allowNull: true },
+    // delete_reason: { type: DataTypes.TEXT, allowNull: true },
   },
   {
     sequelize,
@@ -331,6 +337,8 @@ Product.init(
 
     createdAt: 'created_at',
     updatedAt: 'updated_at',
+    paranoid: true,
+    deletedAt: 'deleted_at',
   }
 );
 

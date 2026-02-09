@@ -171,13 +171,27 @@ export class CartController extends BaseController {
 				return plainItem;
 			}));
 
-			// Group by Vendor
+			// Group by Vendor and filter out items with no product (deleted)
 			const groupedItems = formattedItems.reduce((acc: any, item: any) => {
+				if (!item.product) return acc; // Filter out items with missing/deleted products
+
 				const vid = item.product?.vendor_id || 'admin';
 				if (!acc[vid]) acc[vid] = [];
 				acc[vid].push(item);
 				return acc;
 			}, {});
+
+			// Proactive Cleanup: Remove items with deleted products from DB async (don't block response)
+			const deletedItemIds = formattedItems
+				.filter((item: any) => !item.product)
+				.map((item: any) => item.id);
+
+			if (deletedItemIds.length > 0) {
+				console.log(`[CART] Cleaning up ${deletedItemIds.length} items with deleted products`);
+				CartItem.destroy({ where: { id: { [Op.in]: deletedItemIds } } }).catch(err => {
+					console.error('[CART] Failed to cleanup deleted product items:', err);
+				});
+			}
 
 			return this.sendSuccess({
 				cart: groupedItems
