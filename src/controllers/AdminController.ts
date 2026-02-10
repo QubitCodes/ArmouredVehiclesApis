@@ -1252,7 +1252,7 @@ export class AdminController extends BaseController {
             }
 
             const body = await req.json();
-            const { status, note, fields_to_clear } = body;
+            const { status, note, fields_to_clear, target_step } = body;
 
             const validStatuses = ['approved_general', 'approved_controlled', 'rejected', 'update_needed'];
             if (!validStatuses.includes(status)) {
@@ -1343,6 +1343,8 @@ export class AdminController extends BaseController {
                         'preferred_currency': 5
                     };
 
+                    const NON_NULLABLE_FIELDS = new Set(['controlled_items']);
+
                     let minStep = 99;
 
                     for (const field of fields_to_clear) {
@@ -1378,12 +1380,21 @@ export class AdminController extends BaseController {
                             }
                         }
 
-                        // Clear Field in Update Data
-                        updateData[field] = null;
+                        // Clear Field in Update Data (only if nullable)
+                        if (!NON_NULLABLE_FIELDS.has(field)) {
+                            if (field === 'nature_of_business' || field === 'license_types' || field === 'end_use_markets' || field === 'operating_countries') {
+                                updateData[field] = [];
+                            } else {
+                                updateData[field] = null;
+                            }
+                        }
                     }
 
-                    // Reset Onboarding Step
-                    if (minStep !== 99) {
+                    // Reset Onboarding Step (Prioritize Manual Override)
+                    if (target_step !== undefined && target_step !== null) {
+                        vendor.onboarding_step = target_step;
+                        updateData.current_step = target_step;
+                    } else if (minStep !== 99) {
                         // Ensure we are tracking step. If minStep < current step, revert.
                         // Even if current step is null (completed), revert to minStep.
                         if (vendor.onboarding_step === null || vendor.onboarding_step > minStep) {
@@ -1888,7 +1899,7 @@ export class AdminController extends BaseController {
             }
 
             const body = await req.json();
-            const { status, note, fields_to_clear } = body;
+            const { status, note, fields_to_clear, target_step } = body;
 
             const validStatuses = ['approved_general', 'approved_controlled', 'rejected', 'in_progress', 'pending_verification', 'update_needed'];
             if (!validStatuses.includes(status)) {
@@ -2025,15 +2036,22 @@ export class AdminController extends BaseController {
                             }
                         }
 
-                        // Clear Field
-                        updateData[field] = null;
-                        if (field === 'nature_of_business' || field === 'license_types' || field === 'end_use_markets' || field === 'operating_countries' || field === 'selling_categories') {
-                            updateData[field] = [];
+                        // Clear Field (only if nullable)
+                        const NON_NULLABLE_FIELDS = new Set(['controlled_items']);
+                        if (!NON_NULLABLE_FIELDS.has(field)) {
+                            if (field === 'nature_of_business' || field === 'license_types' || field === 'end_use_markets' || field === 'operating_countries' || field === 'selling_categories') {
+                                updateData[field] = [];
+                            } else {
+                                updateData[field] = null;
+                            }
                         }
                     }
 
 
-                    if (minStep !== 99) {
+                    if (target_step !== undefined && target_step !== null) {
+                        customer.onboarding_step = target_step;
+                        updateData.current_step = target_step;
+                    } else if (minStep !== 99) {
                         if (customer.onboarding_step === null || customer.onboarding_step > minStep) {
                             customer.onboarding_step = minStep;
                             updateData.current_step = minStep; // Sync both
