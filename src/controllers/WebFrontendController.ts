@@ -11,7 +11,7 @@ export class WebFrontendController extends BaseController {
         try {
             const authHeader = req.headers.get('authorization');
             if (!authHeader || !authHeader.startsWith('Bearer ')) return { error: 'Unauthorized', status: 401 };
-            
+
             const token = authHeader.split(' ')[1];
             const decoded: any = verifyAccessToken(token);
             if (!decoded) return { error: 'Invalid Token', status: 401 };
@@ -42,15 +42,15 @@ export class WebFrontendController extends BaseController {
             // Check auth to see if admin
             const authHeader = req.headers.get('authorization');
             let isAdmin = false;
-            
+
             if (authHeader && authHeader.startsWith('Bearer ')) {
                 try {
-                     const token = authHeader.split(' ')[1];
-                     const decoded: any = verifyAccessToken(token);
-                     const user = await User.findByPk(decoded?.userId || decoded?.sub);
-                     if (user && ['admin', 'super_admin'].includes(user.user_type)) {
-                         isAdmin = true;
-                     }
+                    const token = authHeader.split(' ')[1];
+                    const decoded: any = verifyAccessToken(token);
+                    const user = await User.findByPk(decoded?.userId || decoded?.sub);
+                    if (user && ['admin', 'super_admin'].includes(user.user_type)) {
+                        isAdmin = true;
+                    }
                 } catch (e) { /* ignore */ }
             }
 
@@ -126,7 +126,7 @@ export class WebFrontendController extends BaseController {
             if (!slider) return this.sendError('Slider not found', 404);
 
             const body = parsedData ? parsedData.data : await req.json();
-            
+
             const imagePath = body.image_url || slider.image_url;
 
 
@@ -144,7 +144,7 @@ export class WebFrontendController extends BaseController {
             return this.sendSuccess(slider, 'Slider updated successfully');
 
         } catch (error: any) {
-             return this.sendError(error.message, 500);
+            return this.sendError(error.message, 500);
         }
     }
 
@@ -165,24 +165,24 @@ export class WebFrontendController extends BaseController {
     }
 
     // --- Ads ---
-    
+
     async getAds(req: NextRequest) {
         try {
             const { searchParams } = new URL(req.url);
             const location = searchParams.get('location');
 
-             // Check auth to see if admin
+            // Check auth to see if admin
             const authHeader = req.headers.get('authorization');
             let isAdmin = false;
-            
+
             if (authHeader && authHeader.startsWith('Bearer ')) {
                 try {
-                     const token = authHeader.split(' ')[1];
-                     const decoded: any = verifyAccessToken(token);
-                     const user = await User.findByPk(decoded?.userId || decoded?.sub);
-                     if (user && ['admin', 'super_admin'].includes(user.user_type)) {
-                         isAdmin = true;
-                     }
+                    const token = authHeader.split(' ')[1];
+                    const decoded: any = verifyAccessToken(token);
+                    const user = await User.findByPk(decoded?.userId || decoded?.sub);
+                    if (user && ['admin', 'super_admin'].includes(user.user_type)) {
+                        isAdmin = true;
+                    }
                 } catch (e) { /* ignore */ }
             }
 
@@ -196,15 +196,15 @@ export class WebFrontendController extends BaseController {
 
             if (!isAdmin) {
                 whereClause.is_active = true;
-                 whereClause.valid_till = {
+                whereClause.valid_till = {
                     [Op.or]: [
                         { [Op.gte]: new Date() },
                         { [Op.eq]: null }
                     ]
                 };
-                // Randomize and limit to 1 for public view
+                // Randomize and limit to 5 for public view
                 queryOptions.order = [sequelize.random()];
-                queryOptions.limit = 1;
+                queryOptions.limit = 5;
             }
 
             const ads = await FrontendAd.findAll(queryOptions);
@@ -268,13 +268,13 @@ export class WebFrontendController extends BaseController {
                 title: body.title !== undefined ? body.title : ad.title,
                 link: body.link !== undefined ? body.link : ad.link,
                 is_active: body.is_active !== undefined ? (body.is_active === 'true' || body.is_active === true) : ad.is_active,
-                 valid_till: body.valid_till ? new Date(body.valid_till) : (body.valid_till === null ? null : ad.valid_till)
+                valid_till: body.valid_till ? new Date(body.valid_till) : (body.valid_till === null ? null : ad.valid_till)
             });
 
             return this.sendSuccess(ad, 'Ad updated successfully');
 
         } catch (error: any) {
-             return this.sendError(error.message, 500);
+            return this.sendError(error.message, 500);
         }
     }
 
