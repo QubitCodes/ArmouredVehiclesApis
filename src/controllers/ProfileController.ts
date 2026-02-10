@@ -461,4 +461,36 @@ export class ProfileController extends BaseController {
             return this.sendError(String((error as any).message), 500);
         }
     }
+
+    /**
+     * POST /api/v1/user/request-update
+     * Request profile update (Reset to Onboarding)
+     */
+    async requestUpdate(req: NextRequest) {
+        try {
+            const { user, error } = await this.verifyAuth(req);
+            if (error) return error;
+
+            // 1. Update User Profile Status
+            await UserProfile.update(
+                {
+                    onboarding_status: 'update_needed',
+                    current_step: 1,
+                    rejection_reason: null,
+                    review_note: null
+                },
+                { where: { user_id: user!.id } }
+            );
+
+            // 2. Update User Onboarding Step
+            await User.update(
+                { onboarding_step: 1 },
+                { where: { id: user!.id } }
+            );
+
+            return this.sendSuccess({}, 'Profile update requested. Please complete onboarding again.', 200, undefined, req);
+        } catch (error: any) {
+            return this.sendError(String((error as any).message), 500, [], undefined, req);
+        }
+    }
 }

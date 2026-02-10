@@ -89,10 +89,10 @@ export interface UserProfileAttributes {
 	submitted_at?: Date;
 	current_step: number | null;
 	onboarding_status: 'not_started' | 'in_progress' | 'pending_verification' | 'rejected' | 'approved_general' | 'approved_controlled' | 'update_needed';
-	rejection_reason?: string;
+	rejection_reason?: string | null;
 	reviewed_at?: Date;
 	reviewed_by?: string;
-	review_note?: string;
+	review_note?: string | null;
 
 	// TIMESTAMPS & SOFT DELETE
 	created_at?: Date;
@@ -190,10 +190,10 @@ export class UserProfile extends Model<UserProfileAttributes, UserProfileCreatio
 	public declare submitted_at?: Date;
 	public declare current_step: number | null;
 	public declare onboarding_status: 'not_started' | 'in_progress' | 'pending_verification' | 'rejected' | 'approved_general' | 'approved_controlled' | 'update_needed';
-	public declare rejection_reason?: string;
+	public declare rejection_reason?: string | null;
 	public declare reviewed_at?: Date;
 	public declare reviewed_by?: string;
-	public declare review_note?: string;
+	public declare review_note?: string | null;
 
 	public declare readonly created_at: Date;
 	public declare readonly updated_at: Date;
