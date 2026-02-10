@@ -79,10 +79,14 @@ export class ReferenceController extends BaseController {
       // Get max display order
       const maxOrder = await Model.max('display_order') || 0;
 
+      // Extract standard fields and include others
+      const { name, isActive, ...otherFields } = body;
+
       const newItem = await Model.create({
-        name: body.name,
-        is_active: body.isActive ?? true,
+        name,
+        is_active: isActive ?? true,
         display_order: (maxOrder as number) + 1,
+        ...otherFields
       });
 
       return this.sendSuccess(newItem, 'Item created successfully', 201);
@@ -129,10 +133,13 @@ export class ReferenceController extends BaseController {
         }
       }
 
+      const { name, isActive, displayOrder, ...otherFields } = body;
+
       await item.update({
-        name: body.name ?? item.name,
-        is_active: body.isActive ?? item.is_active,
-        display_order: body.displayOrder ?? item.display_order,
+        ...(name && { name }),
+        ...(isActive !== undefined && { is_active: isActive }),
+        ...(displayOrder !== undefined && { display_order: displayOrder }),
+        ...otherFields
       });
 
       return this.sendSuccess(item, 'Item updated successfully');
