@@ -7,6 +7,7 @@ import { Op, fn, col, literal } from 'sequelize';
 import { z } from 'zod';
 import { verifyAccessToken } from '../utils/jwt';
 import { parse } from 'csv-parse/sync';
+// import * as ExcelJS from 'exceljs';
 import { PermissionService } from '../services/PermissionService';
 import { FileUploadService } from '../services/FileUploadService';
 import { FileDeleteService } from '../services/FileDeleteService';
@@ -44,7 +45,7 @@ const createProductSchema = z.object({
 
     // Variants
     drive_types: z.array(z.string()).optional().nullable(),
-    sizes: z.array(z.string()).optional().nullable(),
+    // sizes: z.array(z.string()).optional().nullable(), // REMOVED
     thickness: z.array(z.string()).optional().nullable(),
     colors: z.array(z.string()).optional().nullable(),
     weight_value: z.coerce.number().optional().nullable(),
@@ -174,7 +175,7 @@ export class ProductController extends BaseController {
             }
 
             // --- JSON Parsing for Array Fields stored as Text ---
-            const arrayFields = ['vehicle_fitment', 'specifications', 'features', 'materials', 'performance', 'drive_types', 'sizes', 'thickness', 'colors', 'pricing_terms', 'individual_product_pricing', 'certifications'];
+            const arrayFields = ['vehicle_fitment', 'specifications', 'features', 'materials', 'performance', 'drive_types', 'thickness', 'colors', 'pricing_terms', 'individual_product_pricing', 'certifications'];
 
             arrayFields.forEach(field => {
                 if (typeof p[field] === 'string') {
@@ -412,7 +413,7 @@ export class ProductController extends BaseController {
             // Array Columns
             handleArrayFilter('drive_types', 'drive_types', true);
             handleArrayFilter('colors', 'colors', true);
-            handleArrayFilter('sizes', 'sizes', true); // Mapped to Dimensions checkbox
+            // handleArrayFilter('sizes', 'sizes', true); // REMOVED sizes filter
 
             // Category Filter (Recursive)
             const categoryId = searchParams.get('category_id');
@@ -489,59 +490,50 @@ export class ProductController extends BaseController {
                 if (maxYear) whereClause.year[Op.lte] = parseInt(maxYear);
             }
 
-            // 7. Dimension Filters (Using View ref_product_size_view)
-            const minL = searchParams.get('size_min_l');
-            const maxL = searchParams.get('size_max_l');
-            const minW = searchParams.get('size_min_w');
-            const maxW = searchParams.get('size_max_w');
-            const minH = searchParams.get('size_min_h');
-            const maxH = searchParams.get('size_max_h');
+            // 7. Dimension Filters (Physical Dimensions in CM)
+            // Inputs: length_min, length_max, width_min, width_max, height_min, height_max
+            // Logic: Convert stored value (based on dimension_unit) to CM and compare.
 
-            if (minL || maxL || minW || maxW || minH || maxH) {
-                // We use EXISTS subquery to find products that have AT LEAST ONE size matching the criteria
-                // Note: We need to properly escape or cast params to avoid SQL injection, though Sequelize binds replacements.
+            const dimParams = [
+                { param: 'length', col: 'dimension_length', unitCol: 'dimension_unit' },
+                { param: 'width', col: 'dimension_width', unitCol: 'dimension_unit' },
+                { param: 'height', col: 'dimension_height', unitCol: 'dimension_unit' }
+            ];
 
-                const conditions: string[] = [];
-                const replacements: any = {};
+            dimParams.forEach(dim => {
+                const minVal = parseFloat(searchParams.get(`${dim.param}_min`) || '');
+                const maxVal = parseFloat(searchParams.get(`${dim.param}_max`) || '');
 
-                if (minL) { conditions.push(`v.length >= :minL`); replacements.minL = parseFloat(minL); }
-                if (maxL) { conditions.push(`v.length <= :maxL`); replacements.maxL = parseFloat(maxL); }
-                if (minW) { conditions.push(`v.width >= :minW`); replacements.minW = parseFloat(minW); }
-                if (maxW) { conditions.push(`v.width <= :maxW`); replacements.maxW = parseFloat(maxW); }
-                if (minH) { conditions.push(`v.height >= :minH`); replacements.minH = parseFloat(minH); }
-                if (maxH) { conditions.push(`v.height <= :maxH`); replacements.maxH = parseFloat(maxH); }
+                if (!isNaN(minVal) || !isNaN(maxVal)) {
+                    // SQL to convert stored value to CM
+                    // CASE dimension_unit WHEN 'mm' THEN val/10 WHEN 'm' THEN val*100 WHEN 'in' THEN val*2.54 ...
+                    // REMOVED "Product". prefix to avoid "missing FROM-clause entry" error
+                    const valueInCm = literal(`
+                        (
+                            CASE "${dim.unitCol}"
+                                WHEN 'mm' THEN "${dim.col}" / 10.0
+                                WHEN 'm' THEN "${dim.col}" * 100.0
+                                WHEN 'in' THEN "${dim.col}" * 2.54
+                                WHEN 'ft' THEN "${dim.col}" * 30.48
+                                ELSE "${dim.col}"
+                            END
+                        )
+                    `);
 
-                const subQuery = `
-                    EXISTS (
-                        SELECT 1 
-                        FROM ref_product_size_view v 
-                        WHERE v.original_size = ANY("Product"."sizes") 
-                        AND ${conditions.join(' AND ')}
-                    )
-                `;
-
-                // Add to whereClause using literal
-                whereClause[Op.and] = [
-                    ...(whereClause[Op.and] || []),
-                    literal(
-                        // We must bind values manually if we can't pass replacements easily to top-level FindAll in this structure
-                        // Actually, Sequelize 'replacements' option in findAll works for literals too? 
-                        // It's safer to inline the sanitized number directly since we parsed float above, 
-                        // OR utilize the sequelize valid literal structure.
-                        // For simplicity in this codebase context, we inject the num values directly since they are cast to number.
-
-                        `EXISTS (
-                            SELECT 1 
-                            FROM ref_product_size_view v 
-                            WHERE v.original_size = ANY("Product"."sizes") 
-                            AND ${conditions.map(c => {
-                            // Replace :key with value
-                            return c.replace(/:(\w+)/g, (_, key) => replacements[key]);
-                        }).join(' AND ')}
-                        )`
-                    )
-                ];
-            }
+                    if (!isNaN(minVal)) {
+                        whereClause[Op.and] = [
+                            ...(whereClause[Op.and] || []),
+                            literal(`${valueInCm.val} >= ${minVal}`)
+                        ];
+                    }
+                    if (!isNaN(maxVal)) {
+                        whereClause[Op.and] = [
+                            ...(whereClause[Op.and] || []),
+                            literal(`${valueInCm.val} <= ${maxVal}`)
+                        ];
+                    }
+                }
+            });
 
             const { count, rows } = await Product.findAndCountAll({
                 where: whereClause,
@@ -618,8 +610,8 @@ export class ProductController extends BaseController {
     private async generateFilters(whereClause: any) {
         const filters: any = {};
 
+        // 1. Price Range
         try {
-            // 1. Price Range
             const priceStats = await Product.findOne({
                 where: whereClause,
                 attributes: [
@@ -632,34 +624,67 @@ export class ProductController extends BaseController {
                 min: priceStats?.min_price || 0,
                 max: priceStats?.max_price || 0
             };
+        } catch (e) {
+            console.error('Filter Generation Error (Price):', e);
+            filters.price = { min: 0, max: 0 };
+        }
 
-            // 2. Categories (Product Type)
-            const categories = await Product.findAll({
-                where: whereClause,
-                attributes: [
-                    'category_id',
-                    [fn('COUNT', col('Product.id')), 'count']
-                ],
-                include: [{
-                    model: Category,
-                    as: 'category',
-                    attributes: ['name']
-                }],
-                group: ['category_id', 'category.id', 'category.name'],
-                raw: true,
-                nest: true
-            }) as any[];
+        // 2. Categories (Product Type)
+        // Aggregating counts from main_category, category, and sub_category columns
+        try {
+            const catCounts = new Map<number, number>();
 
-            filters.categories = categories.map(c => ({
-                id: c.category_id,
-                name: c.category?.name || 'Unknown',
-                count: parseInt(c.count)
-            }));
+            // Helper to aggregate counts
+            const aggregate = async (field: string) => {
+                const counts = await Product.findAll({
+                    where: { ...whereClause, [field]: { [Op.ne]: null } },
+                    attributes: [
+                        [field, 'id'],
+                        [fn('COUNT', literal('*')), 'count']
+                    ],
+                    group: [field],
+                    raw: true
+                }) as any[];
 
-            // 3. Brands (RefProductBrand)
+                counts.forEach(c => {
+                    const id = c.id;
+                    const count = parseInt(c.count) || 0;
+                    catCounts.set(id, (catCounts.get(id) || 0) + count);
+                });
+            };
+
+            await Promise.all([
+                aggregate('main_category_id'),
+                aggregate('category_id'),
+                aggregate('sub_category_id')
+            ]);
+
+            if (catCounts.size > 0) {
+                const categoryIds = Array.from(catCounts.keys());
+                const categories = await Category.findAll({
+                    where: { id: { [Op.in]: categoryIds } },
+                    attributes: ['id', 'name'],
+                    raw: true
+                });
+
+                filters.categories = categories.map(c => ({
+                    id: c.id,
+                    name: c.name,
+                    count: catCounts.get(c.id) || 0
+                })).sort((a, b) => a.name.localeCompare(b.name));
+            } else {
+                filters.categories = [];
+            }
+        } catch (e) {
+            console.error('Filter Generation Error (Categories):', e);
+            filters.categories = [];
+        }
+
+        // 3. Brands (RefProductBrand)
+        try {
             const brands = await Product.findAll({
                 attributes: [
-                    [fn('COUNT', col('Product.id')), 'count']
+                    [fn('COUNT', literal('*')), 'count']
                 ],
                 include: [{
                     model: RefProductBrand,
@@ -677,81 +702,136 @@ export class ProductController extends BaseController {
                 name: b['brand.name'],
                 count: parseInt(b.count)
             }));
+        } catch (e) {
+            console.error('Filter Generation Error (Brands):', e);
+            filters.brands = [];
+        }
 
-            // 4. Conditions
-            const conditions = await Product.findAll({
-                attributes: [
-                    'condition',
-                    [fn('COUNT', col('id')), 'count']
-                ],
-                group: ['condition'],
-                where: {
-                    ...whereClause,
-                    condition: { [Op.ne]: null }
-                },
-                raw: true
-            }) as any[];
-            filters.conditions = conditions.map(c => ({
-                name: c.condition ? c.condition.charAt(0).toUpperCase() + c.condition.slice(1) : '',
-                count: parseInt(c.count)
-            }));
-
-            // 5. Country of Origin
-            const countries = await Product.findAll({
-                attributes: [
-                    'country_of_origin',
-                    [fn('COUNT', col('id')), 'count']
-                ],
-                group: ['country_of_origin'],
-                where: {
-                    ...whereClause,
-                    country_of_origin: { [Op.ne]: null }
-                },
-                raw: true
-            }) as any[];
-            filters.countries = countries.map(c => ({
-                name: c.country_of_origin,
-                count: parseInt(c.count)
-            }));
-
-            // 6. Array Fields Helper (Contextual Counts)
-            const getArrayCounts = async (field: string) => {
-                const counts = await Product.findAll({
+        // 4. Conditions (DISABLED)
+        filters.conditions = [];
+        if (false) {
+            try {
+                const conditions = await Product.findAll({
                     attributes: [
-                        [literal(`unnest("${field}")`), 'value'],
+                        'condition',
                         [fn('COUNT', col('id')), 'count']
                     ],
+                    group: ['condition'],
                     where: {
                         ...whereClause,
-                        [field]: { [Op.ne]: null }
+                        condition: { [Op.ne]: null }
                     },
-                    group: [literal(`unnest("${field}")`) as any],
                     raw: true
                 }) as any[];
-                return counts.map(c => ({ name: c.value, count: parseInt(c.count) }));
+                filters.conditions = conditions.map(c => ({
+                    name: c.condition ? c.condition.charAt(0).toUpperCase() + c.condition.slice(1) : '',
+                    count: parseInt(c.count)
+                }));
+            } catch (e) {
+                console.error('Filter Generation Error (Conditions):', e);
+                filters.conditions = [];
+            }
+        }
+
+        // 5. Country of Origin (DISABLED)
+        filters.countries = [];
+        if (false) {
+            try {
+                const countries = await Product.findAll({
+                    attributes: [
+                        'country_of_origin',
+                        [fn('COUNT', col('id')), 'count']
+                    ],
+                    group: ['country_of_origin'],
+                    where: {
+                        ...whereClause,
+                        country_of_origin: { [Op.ne]: null }
+                    },
+                    raw: true
+                }) as any[];
+                filters.countries = countries.map(c => ({
+                    name: c.country_of_origin,
+                    count: parseInt(c.count)
+                }));
+            } catch (e) {
+                console.error('Filter Generation Error (Countries):', e);
+                filters.countries = [];
+            }
+        }
+
+        // 6. Array Fields Helper (Contextual Counts) (DISABLED)
+        filters.drive_types = [];
+        filters.colors = [];
+        if (false) {
+            const getArrayCounts = async (field: string) => {
+                try {
+                    const counts = await Product.findAll({
+                        attributes: [
+                            [literal(`unnest("${field}")`), 'value'],
+                            [fn('COUNT', col('id')), 'count']
+                        ],
+                        where: {
+                            ...whereClause,
+                            [field]: { [Op.ne]: null }
+                        },
+                        group: [literal(`unnest("${field}")`) as any],
+                        raw: true
+                    }) as any[];
+                    return counts.map(c => ({ name: c.value, count: parseInt(c.count) }));
+                } catch (e) {
+                    console.error(`Filter Generation Error (ArrayField: ${field}):`, e);
+                    return [];
+                }
             };
 
             filters.drive_types = await getArrayCounts('drive_types');
 
             // COLORS: From View (Global Options) intersected with Contextual Counts
-            const validColorRows = await Product.sequelize?.query(
-                `SELECT color FROM ref_product_color_view ORDER BY color ASC`,
-                { type: (Product.sequelize as any).QueryTypes.SELECT }
-            ) as any[];
+            try {
+                const validColorRows = await Product.sequelize?.query(
+                    `SELECT color FROM ref_product_color_view ORDER BY color ASC`,
+                    { type: (Product.sequelize as any).QueryTypes.SELECT }
+                ) as any[];
 
-            const colorCounts = await getArrayCounts('colors');
-            const colorMap = new Map(colorCounts.map(c => [c.name, c.count]));
+                const colorCounts = await getArrayCounts('colors');
+                const colorMap = new Map(colorCounts.map(c => [c.name, c.count]));
 
-            filters.colors = validColorRows ? validColorRows.map(c => ({
-                name: c.color,
-                count: colorMap.get(c.color) || 0
-            })) : [];
+                filters.colors = validColorRows ? validColorRows.map(c => ({
+                    name: c.color,
+                    count: colorMap.get(c.color) || 0
+                })) : [];
+            } catch (e) {
+                console.error('Filter Generation Error (Colors):', e);
+                filters.colors = [];
+            }
+        }
 
-            // SIZES: Contextual Counts (or switch to View intersection if desired later)
-            filters.sizes = await getArrayCounts('sizes');
+        // Calculate Global Min/Max for L, W, H in CM
+        try {
+            const dimStats = await Product.findOne({
+                where: whereClause,
+                attributes: [
+                    // Length
+                    [literal(`MIN(CASE dimension_unit WHEN 'mm' THEN dimension_length / 10.0 WHEN 'm' THEN dimension_length * 100.0 WHEN 'in' THEN dimension_length * 2.54 WHEN 'ft' THEN dimension_length * 30.48 ELSE dimension_length END)`), 'min_length'],
+                    [literal(`MAX(CASE dimension_unit WHEN 'mm' THEN dimension_length / 10.0 WHEN 'm' THEN dimension_length * 100.0 WHEN 'in' THEN dimension_length * 2.54 WHEN 'ft' THEN dimension_length * 30.48 ELSE dimension_length END)`), 'max_length'],
+                    // Width
+                    [literal(`MIN(CASE dimension_unit WHEN 'mm' THEN dimension_width / 10.0 WHEN 'm' THEN dimension_width * 100.0 WHEN 'in' THEN dimension_width * 2.54 WHEN 'ft' THEN dimension_width * 30.48 ELSE dimension_width END)`), 'min_width'],
+                    [literal(`MAX(CASE dimension_unit WHEN 'mm' THEN dimension_width / 10.0 WHEN 'm' THEN dimension_width * 100.0 WHEN 'in' THEN dimension_width * 2.54 WHEN 'ft' THEN dimension_width * 30.48 ELSE dimension_width END)`), 'max_width'],
+                    // Height
+                    [literal(`MIN(CASE dimension_unit WHEN 'mm' THEN dimension_height / 10.0 WHEN 'm' THEN dimension_height * 100.0 WHEN 'in' THEN dimension_height * 2.54 WHEN 'ft' THEN dimension_height * 30.48 ELSE dimension_height END)`), 'min_height'],
+                    [literal(`MAX(CASE dimension_unit WHEN 'mm' THEN dimension_height / 10.0 WHEN 'm' THEN dimension_height * 100.0 WHEN 'in' THEN dimension_height * 2.54 WHEN 'ft' THEN dimension_height * 30.48 ELSE dimension_height END)`), 'max_height'],
+                ],
+                raw: true
+            }) as any;
 
+            filters.dimensions = {
+                length: { min: Math.floor(dimStats?.min_length || 0), max: Math.ceil(dimStats?.max_length || 0) },
+                width: { min: Math.floor(dimStats?.min_width || 0), max: Math.ceil(dimStats?.max_width || 0) },
+                height: { min: Math.floor(dimStats?.min_height || 0), max: Math.ceil(dimStats?.max_height || 0) }
+            };
         } catch (e) {
-            console.error('Filter Generation Error', e);
+            console.error('Filter Generation Error (Dimensions):', e);
+            filters.dimensions = { length: { min: 0, max: 0 }, width: { min: 0, max: 0 }, height: { min: 0, max: 0 } };
         }
 
         return filters;
@@ -1015,7 +1095,7 @@ export class ProductController extends BaseController {
                 }
             }
             // Quick fix for arrays if they came as string
-            ['materials', 'features', 'performance', 'drive_types', 'sizes', 'thickness', 'colors', 'pricing_terms', 'individual_product_pricing', 'individualProductPricing', 'certifications'].forEach(field => {
+            ['materials', 'features', 'performance', 'drive_types', 'thickness', 'colors', 'pricing_terms', 'individual_product_pricing', 'individualProductPricing', 'certifications'].forEach(field => {
                 if (typeof body[field] === 'string') {
                     try {
                         body[field] = JSON.parse(body[field]);
@@ -1333,7 +1413,7 @@ export class ProductController extends BaseController {
             const files = parsedData ? parsedData.files : [];
 
             // Handle Parsing for arrays if stringified
-            const arrayFields = ['pricing_tiers', 'materials', 'features', 'performance', 'drive_types', 'sizes', 'thickness', 'colors', 'pricing_terms', 'individual_product_pricing', 'individualProductPricing', 'certifications'];
+            const arrayFields = ['pricing_tiers', 'materials', 'features', 'performance', 'drive_types', 'thickness', 'colors', 'pricing_terms', 'individual_product_pricing', 'individualProductPricing', 'certifications'];
             arrayFields.forEach(field => {
                 if (typeof body[field] === 'string') {
                     try {
@@ -2149,6 +2229,240 @@ export class ProductController extends BaseController {
             return this.sendError(String((error as any).message), 500);
         }
     }
+
+    /**
+     * bulkUpload
+     * POST /api/v1/products/bulk-upload
+     * Create multiple products from Excel or CSV file upload
+     * Supports: .xlsx, .csv
+     */
+    /*
+   async bulkUpload(req: NextRequest) {
+       try {
+           // 1. Auth Check
+           const authHeader = req.headers.get('authorization');
+           if (!authHeader || !authHeader.startsWith('Bearer ')) return this.sendError('Unauthorized', 401);
+
+           let decoded: any;
+           try {
+               const token = authHeader.split(' ')[1];
+               decoded = verifyAccessToken(token);
+           } catch (e) {
+               return this.sendError('Invalid Token', 401);
+           }
+
+           const user = await User.findByPk(decoded.userId || decoded.sub);
+           if (!user) return this.sendError('User not found', 401);
+
+           // Enforce Onboarding
+           const onboardingError = await this.checkOnboarding(user);
+           if (onboardingError) return onboardingError;
+
+           // Permission Check
+           if (user.user_type === 'admin') {
+               const hasPerm = await new PermissionService().hasPermission(user.id, 'product.manage');
+               if (!hasPerm) return this.sendError('Forbidden: Missing product.manage Permission', 403);
+           }
+
+           if (!['vendor', 'admin', 'super_admin'].includes(user.user_type)) {
+               return this.sendError('Forbidden: Only vendors and admins can bulk upload products', 403);
+           }
+
+           // 2. Parse Form Data
+           const formData = await req.formData();
+           const file = formData.get('file') as File | null;
+
+           // Allow admin to force a specific vendor for ALL items in file (optional override)
+           // But usually, we want per-row 'vendor_email' support for admins
+           const forceVendorId = formData.get('vendorId') as string | null;
+
+           if (!file) return this.sendError('File is required in "file" field', 400);
+
+           // 3. Read File Content
+           const fileBuffer = await file.arrayBuffer();
+           const buffer = Buffer.from(fileBuffer);
+
+           let records: any[] = [];
+
+           // Detect format
+           if (file.name.endsWith('.xlsx')) {
+               const workbook = new ExcelJS.Workbook();
+               await workbook.xlsx.load(buffer as any);
+               const worksheet = workbook.worksheets[0];
+
+               if (!worksheet) return this.sendError('Excel file is empty', 400);
+
+               // Get headers from first row
+               const headers: string[] = [];
+               const firstRow = worksheet.getRow(1);
+               firstRow.eachCell((cell, colNumber) => {
+                   headers[colNumber] = cell.value ? String(cell.value).trim() : '';
+               });
+
+               // Iterate validation rows
+               worksheet.eachRow((row, rowNumber) => {
+                   if (rowNumber === 1) return; // Skip header
+                   const rowData: any = {};
+                   row.eachCell((cell, colNumber) => {
+                       const header = headers[colNumber];
+                       if (header) {
+                           // Handle potential rich text or formulas (simple value)
+                           rowData[header] = cell.value;
+                           if (typeof cell.value === 'object' && cell.value !== null && 'text' in cell.value) {
+                               rowData[header] = (cell.value as any).text; // Rich text
+                           } else if (typeof cell.value === 'object' && cell.value !== null && 'result' in cell.value) {
+                               rowData[header] = (cell.value as any).result; // Formula
+                           }
+                       }
+                   });
+                   if (Object.keys(rowData).length > 0) records.push(rowData);
+               });
+
+           } else {
+               // Fallback to CSV
+               const fileContent = new TextDecoder('utf-8').decode(fileBuffer);
+               records = parse(fileContent, {
+                   columns: true,
+                   skip_empty_lines: true,
+                   trim: true,
+                   relax_column_count: true
+               }) as any[];
+           }
+
+           if (!records || records.length === 0) {
+               return this.sendError('File is empty or could not be parsed', 400);
+           }
+
+           // 4. Pre-fetch Data for Lookups (Optimization)
+           const categories = await Category.findAll({ attributes: ['id', 'name'] });
+           const brands = await RefProductBrand.findAll({ attributes: ['id', 'name'] });
+
+           // Map Name -> ID (Case insensitive)
+           const catMap = new Map(categories.map(c => [c.name.toLowerCase(), c.id]));
+           const brandMap = new Map(brands.map(b => [b.name.toLowerCase(), b.id]));
+
+           const results = {
+               success: 0,
+               failed: 0,
+               errors: [] as any[]
+           };
+
+           const createdProducts = [];
+
+           // 5. Process Records
+           for (let i = 0; i < records.length; i++) {
+               const row = records[i];
+               const rowNum = i + 2; // Excel row number (1-based + header)
+
+               try {
+                   // Normalization
+                   const normalize = (val: any) => val ? String(val).trim() : undefined;
+                   const normalizeNum = (val: any) => {
+                       if (val === undefined || val === null || val === '') return undefined;
+                       const num = Number(val);
+                       return isNaN(num) ? undefined : num;
+                   };
+
+                   // --- Lookups ---
+
+                   // 1. Category
+                   let categoryId = normalizeNum(row.category_id);
+                   if (!categoryId && row.category) {
+                       const catName = String(row.category).toLowerCase().trim();
+                       categoryId = catMap.get(catName);
+                   }
+                   if (!categoryId) throw new Error(`Category '${row.category || 'undefined'}' not found.`);
+
+                   // 2. Brand
+                   let brandId = normalizeNum(row.brand_id);
+                   if (!brandId && row.brand) {
+                       const brandName = String(row.brand).toLowerCase().trim();
+                       brandId = brandMap.get(brandName);
+                   }
+                   // Optional: Create brand if not exists? No, strict for now.
+
+                   // 3. Vendor (Admin Only)
+                   let targetVendorId = user.user_type === 'vendor' ? user.id : (forceVendorId || null); // Default to specified or null (admin owned)
+
+                   if (user.user_type === 'admin') {
+                       if (row.vendor_email) {
+                           const email = String(row.vendor_email).toLowerCase().trim();
+                           const vendor = await User.findOne({ where: { email } });
+                           if (vendor) {
+                               if (vendor.user_type === 'vendor') {
+                                   targetVendorId = vendor.id;
+                               } else {
+                                   throw new Error(`User with email '${email}' is not a vendor.`);
+                               }
+                           } else {
+                               throw new Error(`Vendor with email '${email}' not found.`);
+                           }
+                       }
+                   }
+
+                   // --- Construction ---
+                   const productData: any = {
+                       name: normalize(row.name),
+                       sku: normalize(row.sku), // Will auto-gen if empty in create logic
+                       description: normalize(row.description),
+                       base_price: normalizeNum(row.base_price),
+                       category_id: categoryId,
+                       brand_id: brandId,
+                       vendor_id: targetVendorId, // Can be null if admin owned
+                       stock: normalizeNum(row.stock) || 0,
+                       raw_data: row // Store original for debugging/meta if needed? No schema/col for it.
+                   };
+
+                   // --- Validation ---
+                   if (!productData.name) throw new Error('Product Name is required');
+                   if (!productData.base_price) throw new Error('Base Price is required');
+
+                   // Using the schema? simplified for bulk
+                   const validated = createProductSchema.parse(productData);
+
+                   // Auto-generate SKU if missing (logic copied from create)
+                   if (!validated.sku || validated.sku.trim() === '') {
+                       const timestamp = Math.floor(Date.now() / 1000);
+                       const random = Math.floor(1000 + Math.random() * 9000);
+                       validated.sku = `AV-${timestamp}-${random}-${i}`; // Add index to avoid collision in same batch
+                   }
+
+                   const product = await Product.create({
+                       ...validated,
+                       vendor_id: targetVendorId as string, // Cast to string | undefined
+                       status: ProductStatus.DRAFT, // Always draft for bulk
+                       approval_status: 'pending'
+                   });
+
+                   results.success++;
+                   createdProducts.push(product);
+
+               } catch (error: any) {
+                   results.failed++;
+                   results.errors.push({
+                       row: rowNum,
+                       name: row.name || 'Unknown',
+                       error: error.message || 'Unknown error'
+                   });
+               }
+           }
+
+           return this.sendSuccess({
+               ...results,
+               created_count: createdProducts.length
+           }, 'Bulk upload processed', 200);
+
+       } catch (error: any) {
+           console.error('Bulk Upload Error:', error);
+           return this.sendError(String((error as any).message), 500);
+       }
+   }
+
+   */
+
+    /**
+     * NOT NEEDED
+     */
 
     /**
      * bulkCreateFromCsv
