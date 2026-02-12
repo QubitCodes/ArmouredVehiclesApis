@@ -309,21 +309,27 @@ export class InvoiceService {
             shippingAddress = customer?.addresses?.find(a => a.is_default) || customer?.addresses?.[0];
         }
 
-        // Build customer address string
+        // Build customer address string – multi-line like admin/vendor invoices
         let customerAddressStr = '';
         if (shippingAddress) {
-            const parts = [
+            const streetParts = [
                 shippingAddress.address_line1,
-                shippingAddress.address_line2,
+                shippingAddress.address_line2
+            ].filter(Boolean).join(', ');
+
+            const cityLine = [
                 shippingAddress.city,
                 shippingAddress.state,
-                shippingAddress.postal_code,
-                shippingAddress.country
-            ].filter(Boolean);
-            customerAddressStr = parts.join(', ');
+                shippingAddress.postal_code
+            ].filter(Boolean).join(', ');
+
+            customerAddressStr = [streetParts, cityLine, shippingAddress.country]
+                .filter(Boolean)
+                .join('\n');
         }
 
-        const addresseeName = customerProfile?.company_name || customer?.name || 'Customer';
+        // Use full_name from shipping address first, then customer account name
+        const addresseeName = shippingAddress?.full_name || customer?.name || 'Customer';
         const addresseeAddress = customerAddressStr || this.formatProfileAddress(customerProfile);
 
         // AGGREGATE AMOUNTS
