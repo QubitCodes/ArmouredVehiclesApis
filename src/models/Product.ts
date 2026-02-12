@@ -7,6 +7,8 @@ import { RefProductBrand } from './RefProductBrand';
 export const ProductStatus = {
   DRAFT: 'draft',
   PUBLISHED: 'published',
+  INACTIVE: 'inactive',
+  OUT_OF_STOCK: 'out_of_stock',
   PENDING_REVIEW: 'pending_review',
   APPROVED: 'approved',
   REJECTED: 'rejected',

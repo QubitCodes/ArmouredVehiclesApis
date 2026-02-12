@@ -669,6 +669,12 @@ export class AdminOrderController extends BaseController {
             const prevPaymentStatus = order.payment_status;
             const prevShipmentStatus = order.shipment_status;
 
+            // --- GUARD: Cannot approve an order that is not paid ---
+            const effectivePaymentStatus = payment_status || order.payment_status;
+            if (effectiveStatus === 'approved' && prevOrderStatus !== 'approved' && effectivePaymentStatus !== 'paid') {
+                return controller.sendError('Cannot approve order: payment has not been received yet', 400);
+            }
+
             // --- FINANCIAL LOGIC ---
             // --- FINANCIAL LOGIC ---
             // 1. Lock Funds - MOVED TO PAYMENT EVENT (Below)
@@ -801,56 +807,53 @@ export class AdminOrderController extends BaseController {
 
             await order.save();
 
-            // --- INVOICE GENERATION LOGIC ---
+            // --- INVOICE LOGIC ---
+            // Primary invoice generation is handled by the frontend order summary page
+            // via POST /api/v1/invoices/generate/:orderId after Stripe redirect.
+            // However, for ORDER REQUESTS where admin manually marks payment as paid,
+            // the customer may not visit the summary page — so we generate here as catch-up.
             let generatedInvoice = null;
             let updatedAdminInvoice = null;
 
             try {
                 const { InvoiceService } = await import('../services/InvoiceService');
-                // --- INVOICE GENERATION LOGIC ---
-                // Rule 1: Generate BOTH invoices when the order is approved
-                const isNowApproved = effectiveStatus === 'approved' && prevOrderStatus !== 'approved';
-                const isPaid = (payment_status === 'paid') || (order.payment_status === 'paid');
+
+                // Catch-up: Generate invoices when payment just became 'paid' (admin manual payment)
                 const isPaymentJustPaid = payment_status === 'paid' && prevPaymentStatus !== 'paid';
-
-                // Condition for generation: Newly approved and paid, OR just paid (regardless of approval status, as per requirement)
-                // We want to ensure that if it becomes paid, we generate the invoice. 
-                // Checks:
-                // 1. Just became PAID (isPaymentJustPaid)
-                // 2. Just became APPROVED and is already PAID (isNowApproved && isPaid)
-
-                if (isPaymentJustPaid || (isNowApproved && isPaid)) {
-                    // Check for invoices at the GROUP level to prevent duplicates
+                if (isPaymentJustPaid) {
                     const existingInvoices = order.order_group_id
                         ? await InvoiceService.getInvoicesByGroupId(order.order_group_id)
                         : await InvoiceService.getInvoicesByOrderId(order.id);
 
-                    // 1. Customer Invoice (Paid)
+                    // Customer Invoice
                     const custInvoice = existingInvoices.find(i => i.invoice_type === 'customer');
                     if (!custInvoice) {
-                        // Consolidate Invoice (Safe to call even if triggered by sub-order)
                         generatedInvoice = await InvoiceService.generateCustomerInvoice(order.id, invoice_comments || order.invoice_comments, 'paid');
-                        console.log(`Generated customer invoice (Payment/Approval Trigger): ${generatedInvoice?.invoice_number}`);
-                    } else if (custInvoice.payment_status !== 'paid' && isPaid) {
-                        const updated = await InvoiceService.markCustomerInvoicePaid(order.id);
-                        if (updated) generatedInvoice = updated;
+                        console.log(`[AdminOrder] Generated customer invoice (admin payment): ${generatedInvoice?.invoice_number}`);
                     }
 
-                    // 2. Admin/Vendor Invoice (Unpaid initially)
-                    // Admin invoice usually requires Approval + Payment, or just Approval? 
-                    // Requirement: "Admin → Customer was generated... as soon as a customer completes payment"
-                    // We'll keep Admin invoice aligned with Customer invoice generation for now, 
-                    // but it might strictly depend on 'approved' status for validity. 
-                    // However, if paid, it implies a level of validity. Let's generate it to be safe.
-                    const adminInvoice = existingInvoices.find(i => i.invoice_type === 'admin');
-                    if (!adminInvoice && order.vendor_id && order.vendor_id !== 'admin') {
-                        const newAdminInvoice = await InvoiceService.generateAdminInvoice(order.id, invoice_comments || order.invoice_comments);
-                        console.log(`Generated admin invoice: ${newAdminInvoice?.invoice_number}`);
-                        if (!generatedInvoice) generatedInvoice = newAdminInvoice;
+                    // Admin/Vendor Invoice (unpaid initially)
+                    if (order.order_group_id) {
+                        const groupOrders = await Order.findAll({ where: { order_group_id: order.order_group_id } });
+                        for (const gOrder of groupOrders) {
+                            if (gOrder.vendor_id && gOrder.vendor_id !== 'admin') {
+                                const hasAdminInv = existingInvoices.some(i => i.invoice_type === 'admin' && i.order_id === gOrder.id);
+                                if (!hasAdminInv) {
+                                    await InvoiceService.generateAdminInvoice(gOrder.id);
+                                    console.log(`[AdminOrder] Generated admin invoice for order ${gOrder.id}`);
+                                }
+                            }
+                        }
+                    } else if (order.vendor_id && order.vendor_id !== 'admin') {
+                        const hasAdminInv = existingInvoices.some(i => i.invoice_type === 'admin');
+                        if (!hasAdminInv) {
+                            await InvoiceService.generateAdminInvoice(order.id);
+                            console.log(`[AdminOrder] Generated admin invoice for order ${order.id}`);
+                        }
                     }
                 }
 
-                // Rule 2: Mark Admin Invoice as PAID only when delivered
+                // Rule: Mark Admin Invoice as PAID only when delivered
                 const isNowDelivered = shipment_status === 'delivered' && prevShipmentStatus !== 'delivered';
                 if (isNowDelivered) {
                     const updated = await InvoiceService.markAdminInvoicePaid(order.id);

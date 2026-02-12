@@ -96,7 +96,7 @@ const createProductSchema = z.object({
     vehicle_compatibility: z.string().optional().nullable(),
     is_featured: z.preprocess(val => val === 'true' || val === true, z.boolean()).optional(),
     is_top_selling: z.preprocess(val => val === 'true' || val === true, z.boolean()).optional(),
-    status: z.enum(['draft', 'published', 'pending_review', 'approved', 'rejected', 'suspended']).optional(),
+    status: z.enum(['draft', 'published', 'inactive', 'out_of_stock', 'pending_review', 'approved', 'rejected', 'suspended']).optional(),
     individual_product_pricing: z.array(z.object({
         name: z.string(),
         amount: z.coerce.number()
@@ -362,8 +362,8 @@ export class ProductController extends BaseController {
                     }
                     // No default status filter for vendor, so they see drafts.
                 } else {
-                    // Public Guest
-                    whereClause.status = ProductStatus.PUBLISHED;
+                    // Public Guest: show published + out_of_stock
+                    whereClause.status = { [Op.in]: [ProductStatus.PUBLISHED, ProductStatus.OUT_OF_STOCK] };
                     whereClause.approval_status = 'approved';
                 }
             }
@@ -1387,7 +1387,7 @@ export class ProductController extends BaseController {
             const isAdmin = user && ['admin', 'super_admin'].includes(user.user_type);
             // Check ownership directly or via parsed ID comparison
             const isOwner = user && (String(user.id) === String(product.vendor_id));
-            const isPublic = product.status === ProductStatus.PUBLISHED && product.approval_status === 'approved';
+            const isPublic = (product.status === ProductStatus.PUBLISHED || product.status === ProductStatus.OUT_OF_STOCK) && product.approval_status === 'approved';
 
             if (!isPublic && !isAdmin && !isOwner) {
                 // Return 404 to hide existence
@@ -1554,9 +1554,24 @@ export class ProductController extends BaseController {
             delete body.gallery; // Remove from bodyUpdate
             delete body.image;   // Remove legacy image field if present
 
-            // If vendor publishes, set approval to pending
-            if (user.user_type === 'vendor' && body.status === ProductStatus.PUBLISHED && product.approval_status !== 'pending') {
-                body.approval_status = 'pending';
+            // --- Vendor Approval Logic ---
+            if (user.user_type === 'vendor') {
+                const contentFields = [
+                    'name', 'description', 'base_price', 'category_id', 'main_category_id',
+                    'sub_category_id', 'condition', 'year', 'brand_id', 'vehicle_compatibility',
+                    'min_order_quantity', 'compliance_declaration', 'individual_product_pricing'
+                ];
+                const hasContentChanges = contentFields.some(f => body[f] !== undefined);
+                const hasMediaChanges = (files && files.length > 0) || (parsedData?.coverImage !== undefined);
+
+                if ((hasContentChanges || hasMediaChanges) && product.status !== ProductStatus.DRAFT) {
+                    body.status = ProductStatus.DRAFT;
+                    body.approval_status = 'pending';
+                }
+
+                if (body.status && body.status !== ProductStatus.DRAFT && product.status === ProductStatus.DRAFT) {
+                    body.approval_status = 'pending';
+                }
             }
 
             await product.update(body);
@@ -2709,8 +2724,8 @@ export class ProductController extends BaseController {
             }
 
             // Invisibility for unpublished products
-            if (product.status !== ProductStatus.PUBLISHED) {
-                return this.sendError('Product not available for review (Draft status)', 403);
+            if (product.status !== ProductStatus.PUBLISHED && product.status !== ProductStatus.OUT_OF_STOCK) {
+                return this.sendError('Product not available for review (Draft/Inactive status)', 403);
             }
 
             // Validation: Must have at least one image/media to be featured/top selling

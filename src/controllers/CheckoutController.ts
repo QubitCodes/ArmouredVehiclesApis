@@ -185,6 +185,7 @@ export class CheckoutController extends BaseController {
                 if (Number(item.product.packing_charge) > 0) {
                     const packingPrice = Number(item.product.packing_charge);
                     totalVat += (packingPrice * (vatPercent / 100)) * qty;
+                    subtotal += packingPrice * qty; // Include packing in high-value threshold check
 
                     allStripeItems.push({
                         name: 'Packing Charges',
@@ -242,11 +243,11 @@ export class CheckoutController extends BaseController {
 
                 return this.sendSuccess({
                     message: 'Purchase request submitted successfully. Waiting for admin approval.',
-                    orderId: createdOrders[0].id,
+                    orderId: orderGroupId,
                     orderGroupId: orderGroupId,
                     type: 'request',
                     requiresApproval: true,
-                    redirectUrl: `${frontendUrl}/orders/summary/${createdOrders[0].id}?approval_required=true`
+                    redirectUrl: `${frontendUrl}/orders/summary/${orderGroupId}?approval_required=true`
                 }, 'Created', 201);
             } else {
                 // For Direct Payments, only generate Stripe Session

@@ -122,7 +122,9 @@ export abstract class BaseController {
       return { eligible: false, error: 'Product not found' };
     }
 
-    // 1. Product Status & Approval Check
+    if (product.status === ProductStatus.OUT_OF_STOCK) {
+      return { eligible: false, error: 'This product is currently out of stock.' };
+    }
     if (product.status !== ProductStatus.PUBLISHED || product.approval_status !== 'approved') {
       return { eligible: false, error: 'This product is not currently available for purchase (pending review or unpublished).' };
     }

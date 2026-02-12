@@ -2,7 +2,6 @@
 import { NextRequest } from 'next/server';
 import { BaseController } from './BaseController';
 import { StripeService } from '../services/StripeService';
-import { InvoiceService } from '../services/InvoiceService';
 import { OrderService } from '../services/OrderService';
 import { Order, OrderItem, User } from '../models';
 import { sequelize } from '../config/database';
@@ -154,47 +153,8 @@ export class WebhookController extends BaseController {
 
 			console.log(`[Stripe Webhook] Group ${orderGroupId} processed successfully.`);
 
-			// --- INVOICE GENERATION ---
-			if (orders.length > 0) {
-				try {
-					// Use the first order to trigger the consolidated invoice generation
-					const primaryOrder = orders[0];
-					console.log(`[Stripe Webhook] Triggering Invoice Generation for Group ${orderGroupId}`);
-
-					// Check if invoice already exists
-					const existingInvoices = await InvoiceService.getInvoicesByGroupId(orderGroupId);
-					const hasCustomerInvoice = existingInvoices.some(i => i.invoice_type === 'customer');
-
-					if (!hasCustomerInvoice) {
-						const invoice = await InvoiceService.generateCustomerInvoice(primaryOrder.id, null, 'paid');
-						console.log(`[Stripe Webhook] Generated Customer Invoice: ${invoice.invoice_number}`);
-
-						// Also check for Admin Invoices (Vendor -> Admin)
-						// Iterate all orders in group to generate admin invoices for each vendor if needed
-						// (Using a Set to avoid duplicates if multiple orders belong to same vendor in split scenarios, 
-						// though generateAdminInvoice takes orderId, so distinct orders = distinct invoices usually)
-						for (const order of orders) {
-							if (order.vendor_id && order.vendor_id !== 'admin') {
-								// Check if this specific order has an admin invoice
-								const hasAdminInv = existingInvoices.some(i => i.invoice_type === 'admin' && i.order_id === order.id);
-								if (!hasAdminInv) {
-									await InvoiceService.generateAdminInvoice(order.id);
-									console.log(`[Stripe Webhook] Generated Admin Invoice for Order ${order.id}`);
-								}
-							}
-						}
-
-					} else {
-						console.log(`[Stripe Webhook] Customer Invoice already exists for Group ${orderGroupId}`);
-						// Ensure it is marked as paid
-						await InvoiceService.markCustomerInvoicePaid(primaryOrder.id);
-					}
-
-				} catch (invError) {
-					console.error(`[Stripe Webhook] Invoice generation failed:`, invError);
-					// Don't throw, we want to return 200 for the webhook
-				}
-			}
+			// Invoice generation is now handled by the frontend order summary page
+			// via POST /api/v1/invoices/generate/:orderId after Stripe redirect.
 
 		} catch (error) {
 			console.error(`[Stripe Webhook] Failed to process session ${session.id}:`, error);

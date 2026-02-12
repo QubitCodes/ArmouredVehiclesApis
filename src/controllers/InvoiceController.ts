@@ -98,6 +98,98 @@ export class InvoiceController extends BaseController {
 	}
 
 	/**
+	 * POST /api/v1/invoices/generate/:orderId
+	 * Customer-facing endpoint to generate their invoice after payment.
+	 * Idempotent: returns existing invoice if already generated.
+	 */
+	async generateCustomerInvoice(req: NextRequest, { params }: { params: any }) {
+		try {
+			const { user, error } = await this.verifyAuth(req);
+			if (error) return error;
+
+			const { orderId } = await params;
+
+			// Find the order — could be a direct order ID or order_group_id
+			let order = await Order.findByPk(orderId);
+			if (!order) {
+				// Try finding by order_group_id
+				order = await Order.findOne({ where: { order_group_id: orderId } });
+			}
+			if (!order) {
+				return this.sendError('Order not found', 404);
+			}
+
+			// Access control: only the customer who owns the order
+			if (order.user_id !== user!.id) {
+				return this.sendError('Forbidden', 403);
+			}
+
+			// Order must be paid
+			if (order.payment_status !== 'paid') {
+				return this.sendError('Invoice can only be generated for paid orders', 400);
+			}
+
+			// Check if invoice already exists
+			const existingInvoices = order.order_group_id
+				? await InvoiceService.getInvoicesByGroupId(order.order_group_id)
+				: await InvoiceService.getInvoicesByOrderId(order.id);
+
+			const custInvoice = existingInvoices.find(i => i.invoice_type === 'customer');
+
+			if (custInvoice) {
+				// Already generated — return it
+				return this.sendSuccess({
+					invoice: {
+						id: custInvoice.id,
+						invoice_number: custInvoice.invoice_number,
+						access_token: custInvoice.access_token,
+						invoice_type: custInvoice.invoice_type
+					}
+				}, 'Invoice already exists');
+			}
+
+			// Generate the customer invoice
+			const invoice = await InvoiceService.generateCustomerInvoice(order.id, null, 'paid');
+			console.log(`[InvoiceController] Generated customer invoice via frontend: ${invoice.invoice_number}`);
+
+			// Also generate admin (vendor → admin) invoices — unpaid initially
+			if (order.order_group_id) {
+				// Multi-vendor group: generate admin invoices for each vendor sub-order
+				const groupOrders = await Order.findAll({ where: { order_group_id: order.order_group_id } });
+				for (const gOrder of groupOrders) {
+					if (gOrder.vendor_id && gOrder.vendor_id !== 'admin') {
+						const hasAdminInv = existingInvoices.some(i => i.invoice_type === 'admin' && i.order_id === gOrder.id);
+						if (!hasAdminInv) {
+							await InvoiceService.generateAdminInvoice(gOrder.id);
+							console.log(`[InvoiceController] Generated admin invoice for order ${gOrder.id}`);
+						}
+					}
+				}
+			} else if (order.vendor_id && order.vendor_id !== 'admin') {
+				// Single order (no group): generate admin invoice for this vendor order
+				const hasAdminInv = existingInvoices.some(i => i.invoice_type === 'admin');
+				if (!hasAdminInv) {
+					await InvoiceService.generateAdminInvoice(order.id);
+					console.log(`[InvoiceController] Generated admin invoice for standalone order ${order.id}`);
+				}
+			}
+
+			return this.sendSuccess({
+				invoice: {
+					id: invoice.id,
+					invoice_number: invoice.invoice_number,
+					access_token: invoice.access_token,
+					invoice_type: invoice.invoice_type
+				}
+			}, 'Invoice generated successfully');
+
+		} catch (err) {
+			console.error('Generate Customer Invoice Error:', err);
+			return this.sendError('Failed to generate invoice', 500);
+		}
+	}
+
+	/**
 	 * GET /api/v1/invoices/:id
 	 * Get invoice by ID (authenticated)
 	 */
@@ -586,14 +678,7 @@ export class InvoiceController extends BaseController {
 			</tr>
 		`}).join('');
 
-		// Calculate Platform Fees for footer (Customer Invoice only)
-		const platformFees = invoice.invoice_type === 'customer'
-			? items.reduce((sum: number, item: any) => {
-				const base = Number(item.base_price || item.product?.base_price || item.price);
-				const unit = Number(item.price);
-				return sum + ((unit - base) * (item.quantity || 1));
-			}, 0)
-			: 0;
+
 
 		return `
 <!DOCTYPE html>
@@ -1010,15 +1095,9 @@ ${invoice.addressee_email ? `Email: ${invoice.addressee_email}` : ''}</div>
 		<div class="totals-section">
 			<div class="totals-box">
 				<div class="totals-row">
-					<span class="totals-label">${invoice.invoice_type === 'admin' ? 'Subtotal' : 'Subtotal (Base Price)'}</span>
-					<span class="totals-value">${formatCurrency(Number(invoice.subtotal) - (invoice.invoice_type === 'customer' ? platformFees : 0))}</span>
+					<span class="totals-label">Subtotal</span>
+					<span class="totals-value">${formatCurrency(Number(invoice.subtotal))}</span>
 				</div>
-				${invoice.invoice_type === 'customer' && platformFees > 0 ? `
-				<div class="totals-row">
-					<span class="totals-label">Platform Fees</span>
-					<span class="totals-value">${formatCurrency(platformFees)}</span>
-				</div>
-				` : ''}
 				${Number(invoice.vat_amount) > 0 ? `
 				<div class="totals-row">
 					<span class="totals-label">VAT (5%)</span>
