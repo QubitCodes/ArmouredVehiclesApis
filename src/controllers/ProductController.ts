@@ -372,17 +372,28 @@ export class ProductController extends BaseController {
             const searchQuery = searchParams.get('search') || searchParams.get('q');
             if (searchQuery) {
                 const searchLower = `%${searchQuery.toLowerCase()}%`;
+
+                // Pre-query: Find product IDs matching in specifications
+                const specMatches = await ProductSpecification.findAll({
+                    where: {
+                        [Op.or]: [
+                            { label: { [Op.iLike]: searchLower } },
+                            { value: { [Op.iLike]: searchLower } }
+                        ]
+                    },
+                    attributes: ['product_id'],
+                    group: ['product_id'],
+                    raw: true
+                }) as any[];
+                const specProductIds = specMatches.map((s: any) => s.product_id);
+
                 whereClause[Op.or] = [
                     { name: { [Op.iLike]: searchLower } },
                     { sku: { [Op.iLike]: searchLower } },
                     { description: { [Op.iLike]: searchLower } },
                     { technical_description: { [Op.iLike]: searchLower } },
-                    // Search in Product Specifications (Label or Value)
-                    literal(`EXISTS (
-                        SELECT 1 FROM product_specifications ps 
-                        WHERE ps.product_id = "Product"."id" 
-                        AND (ps.label ILIKE '${searchLower}' OR ps.value ILIKE '${searchLower}')
-                    )`)
+                    // Include products that matched via specifications
+                    ...(specProductIds.length > 0 ? [{ id: { [Op.in]: specProductIds } }] : [])
                 ];
             }
 
