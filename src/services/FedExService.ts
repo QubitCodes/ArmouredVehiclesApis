@@ -647,15 +647,46 @@ export class FedExService {
 
         for (const detail of rateReplyDetails) {
             const ratedShipmentDetails = detail.ratedShipmentDetails?.[0];
-            const totalNetCharge = ratedShipmentDetails?.totalNetCharge ||
+            const shipmentRateDetail = ratedShipmentDetails?.shipmentRateDetail;
+
+            // Try to find the charge object or value from multiple possible locations
+            const chargeObj = ratedShipmentDetails?.totalNetCharge ||
                 ratedShipmentDetails?.totalNetFedExCharge ||
-                ratedShipmentDetails?.shipmentRateDetail?.totalNetCharge;
+                shipmentRateDetail?.totalNetCharge ||
+                shipmentRateDetail?.totalNetFedExCharge;
+
+            let totalAmount = 0;
+            let currency = 'USD';
+
+            // Handle numeric or string charge (Direct value)
+            if (typeof chargeObj === 'number') {
+                totalAmount = chargeObj;
+            } else if (typeof chargeObj === 'string') {
+                // Check if it's a numeric string
+                if (!isNaN(parseFloat(chargeObj))) {
+                    totalAmount = parseFloat(chargeObj);
+                }
+            }
+            // Handle object charge ({ amount, currency })
+            else if (chargeObj && typeof chargeObj === 'object') {
+                if ('amount' in chargeObj) {
+                    totalAmount = parseFloat(chargeObj.amount);
+                    currency = chargeObj.currency || currency;
+                }
+            }
+
+            // Fallback currency detection if not found in charge object
+            if (ratedShipmentDetails?.currency) {
+                currency = ratedShipmentDetails.currency;
+            } else if (shipmentRateDetail?.currency) {
+                currency = shipmentRateDetail.currency;
+            }
 
             quotes.push({
                 serviceType: detail.serviceType,
                 serviceName: FEDEX_SERVICE_TYPES[detail.serviceType as keyof typeof FEDEX_SERVICE_TYPES] || detail.serviceType,
-                totalCharge: parseFloat(totalNetCharge?.amount || '0'),
-                currency: totalNetCharge?.currency || 'USD',
+                totalCharge: totalAmount,
+                currency: currency,
                 deliveryDate: detail.commit?.dateDetail?.dayFormat,
                 transitDays: detail.commit?.transitDays
             });

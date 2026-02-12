@@ -139,6 +139,19 @@ export class CheckoutController extends BaseController {
 
             const orderGroupId = await generate8DigitId();
 
+            let parsedShippingDetails = shippingDetails;
+            if (typeof shippingDetails === 'string') {
+                try {
+                    parsedShippingDetails = JSON.parse(shippingDetails);
+                } catch (e) {
+                    console.error('[CHECKOUT ERROR] Failed to parse shippingDetails:', e);
+                }
+            }
+
+            // Re-assign for use below
+            // shippingDetails = parsedShippingDetails; // Avoid reassigning const/let blocked scope if shadowed
+            // Use local var
+
             // Calculate Totals for Stripe and High Value check
             let subtotal = 0;
             let totalVat = 0;
@@ -183,8 +196,8 @@ export class CheckoutController extends BaseController {
             }
 
             // Add Grouped Shipping Items from Frontend Selection
-            if (shippingDetails && typeof shippingDetails === 'object') {
-                Object.entries(shippingDetails).forEach(([vendorId, details]: any) => {
+            if (parsedShippingDetails && typeof parsedShippingDetails === 'object') {
+                Object.entries(parsedShippingDetails).forEach(([vendorId, details]: any) => {
                     const cost = Number(details.total) || 0;
                     if (cost > 0) {
                         totalVat += (cost * (vatPercent / 100));
@@ -221,7 +234,7 @@ export class CheckoutController extends BaseController {
                 const createdOrders = await OrderService.convertCartToOrder(user.id, cart.id, orderGroupId, {
                     addressId,
                     isRequest: true,
-                    shippingCosts: shippingDetails
+                    shippingCosts: parsedShippingDetails
                 });
 
                 let frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
@@ -251,7 +264,7 @@ export class CheckoutController extends BaseController {
                         cartId: cart.id,
                         addressId: addressId || '',
                         userId: user.id,
-                        shippingDetails: shippingDetails ? JSON.stringify(shippingDetails) : ''
+                        shippingDetails: parsedShippingDetails ? JSON.stringify(parsedShippingDetails) : ''
                     },
                     isEmbedded ? {
                         uiMode: 'embedded',
@@ -444,10 +457,8 @@ export class CheckoutController extends BaseController {
             // Fetch items manually if association failed
             for (const order of orders) {
                 if (!order.items || order.items.length === 0) {
-                    console.log(`[RETRY DEBUG] Items missing for Order ${order.id}. Fetching manually...`);
                     const items = await OrderItem.findAll({ where: { order_id: order.id }, raw: true });
-                    order.items = items as any; // Cast to any to assume OrderItem structure
-                    console.log(`[RETRY DEBUG] Fetched ${items.length} items manually.`);
+                    order.items = items as any;
                 }
             }
 

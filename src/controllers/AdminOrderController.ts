@@ -918,8 +918,9 @@ export class AdminOrderController extends BaseController {
             if (!order) return controller.sendError('Order not found', 404);
 
             // Generate Customer Invoice (Consolidated by Group ID logic inside service)
-            // Force 'paid' status as this is an admin override action
-            const invoice = await InvoiceService.generateCustomerInvoice(order.id, comments || null, 'paid');
+            // Use actual order payment status so admin can issue unpaid invoices before manual payment
+            const invoicePaymentStatus = order.payment_status === 'paid' ? 'paid' : 'unpaid';
+            const invoice = await InvoiceService.generateCustomerInvoice(order.id, comments || null, invoicePaymentStatus);
 
             return controller.sendSuccess({
                 message: 'Customer invoice generated successfully',

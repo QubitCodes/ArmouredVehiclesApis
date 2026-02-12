@@ -25,6 +25,7 @@ import FrontendAd from './FrontendAd';
 import { RefProductBrand } from './RefProductBrand';
 import { UserPermission } from './UserPermission';
 import { RefPermission } from './RefPermission';
+import { RefShippingType } from './RefShippingType';
 import * as ReferenceModels from './Reference';
 
 
@@ -189,5 +190,6 @@ export {
   RefProductBrand,
   UserPermission,
   RefPermission,
+  RefShippingType,
   Invoice
 };

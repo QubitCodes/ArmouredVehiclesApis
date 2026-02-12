@@ -19,8 +19,7 @@ export class ReferenceController extends BaseController {
 
       // Normalize: allow nature-of-business to map to nature_of_business
       const modelKey = type.replace(/-/g, '_');
-      console.log(`[box] Reference Debug - Type: ${type}, Key: ${modelKey}`);
-      console.log(`[box] Available Models: ${Object.keys(ReferenceModels).join(', ')}`);
+
 
       const Model = ReferenceModels[modelKey];
 
@@ -34,6 +33,7 @@ export class ReferenceController extends BaseController {
         where: { is_active: true },
         order: [['display_order', 'ASC'], ['name', 'ASC']],
       });
+
 
       return this.sendSuccess(data);
     } catch (error: any) {
@@ -150,6 +150,50 @@ export class ReferenceController extends BaseController {
   }
 
   /**
+   * Reorder reference items
+   * PUT /api/v1/references/:type/reorder
+   */
+  async reorder(req: NextRequest, { params }: { params: { type: string } }) {
+    try {
+      const { user, error } = await this.verifyAdmin(req);
+      if (error) return error;
+
+      const { type } = await params;
+      const modelKey = type.replace(/-/g, '_');
+      const Model = ReferenceModels[modelKey];
+
+      if (!Model) {
+        return this.sendError(`Invalid reference type: ${type}`, 400);
+      }
+
+      const body = await req.json();
+      const { items } = body; // Array of { id, display_order }
+
+      if (!Array.isArray(items)) {
+        return this.sendError('Invalid input format', 400);
+      }
+
+      // Update in transaction or loop
+      // Using loop for simplicity as it's not a high-frequency operation
+      console.log(`[Reorder] Processing ${items.length} items for ${modelKey}`);
+
+      for (const item of items) {
+        console.log(`[Reorder] Updating ID: ${item.id} -> Order: ${item.display_order}`);
+        const [affected] = await Model.update(
+          { display_order: item.display_order },
+          { where: { id: item.id } }
+        );
+        console.log(`[Reorder] Affected rows for ID ${item.id}: ${affected}`);
+      }
+
+      return this.sendSuccess(null, 'Items reordered successfully');
+    } catch (error: any) {
+      console.error('Reference Reorder Error:', error);
+      return this.sendError('Failed to reorder items', 500, [error.message]);
+    }
+  }
+
+  /**
    * Delete (Soft Delete) or Hard Delete a reference item
    * DELETE /api/v1/references/:type/:id
    */
@@ -204,6 +248,7 @@ export class ReferenceController extends BaseController {
       CurrencyService.triggerHomepageSync();
 
       const vatSetting = await PlatformSetting.findOne({ where: { key: 'vat_percentage' } });
+      const subFooterSetting = await PlatformSetting.findOne({ where: { key: 'sub_footer_text' } });
 
       // Get USD rate for frontend conversion (e.g. FedEx rates)
       // Stored as 1 AED = X USD (e.g. 0.2723)
@@ -211,6 +256,7 @@ export class ReferenceController extends BaseController {
 
       return this.sendSuccess({
         vat_percentage: vatSetting ? parseFloat(vatSetting.value) : 5,
+        sub_footer_text: subFooterSetting?.value || '',
         currency_rates: {
           AED_TO_USD: usdRate || 0.2723, // Default fallback
           USD_TO_AED: usdRate ? (1 / usdRate) : 3.6725 // Calculated multiplier
@@ -244,7 +290,8 @@ export class ReferenceController extends BaseController {
         }
       }
       return { user, error: null };
-    } catch (e) {
+    } catch (e: any) {
+      console.error('Verify Admin Token Error:', e.message);
       return { user: null, error: this.sendError('Invalid Token', 401) };
     }
   }

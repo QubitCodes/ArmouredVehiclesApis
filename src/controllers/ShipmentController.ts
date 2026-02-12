@@ -17,7 +17,14 @@ import { Order } from '../models/Order';
 import { Address } from '../models/Address';
 import { User, UserProfile } from '../models';
 import { PlatformSetting } from '../models/PlatformSetting';
+import { RefShippingType } from '../models/RefShippingType';
 import { z } from 'zod';
+
+// DEBUG LOGGING
+const DEBUG_SHIPMENT = false;
+function log(msg: string, data?: any) {
+    if (DEBUG_SHIPMENT) console.log(`[SHIPMENT DEBUG] ${msg}`, data ? JSON.stringify(data, null, 2) : '');
+}
 
 // ============================================================================
 // VALIDATION SCHEMAS
@@ -105,16 +112,16 @@ export class ShipmentController extends BaseController {
      * If fromAddress is not provided, uses admin warehouse address
      */
     async calculateRate(req: NextRequest) {
+        log('Hit calculateRate Endpoint');
         try {
             const { user, error } = await this.verifyAuth(req);
-            if (error) return error;
-
-            // Check if FedEx is configured
-            if (!FedExService.isConfigured()) {
-                return this.sendError('Shipping service not configured', 302);
+            if (error) {
+                log('Auth Failed');
+                return error;
             }
 
             const body = await req.json();
+            log('Request Body', body);
 
             // Validate request body
             const validation = RateRequestSchema.safeParse(body);
@@ -201,10 +208,48 @@ export class ShipmentController extends BaseController {
             };
 
             // Call FedEx Rate API
+            log('Calling FedExService.getRates with input', input);
             const result = await FedExService.getRates(input);
 
             if (!result.success) {
+                log('FedEx API Failed', result.error);
                 return this.sendError(result.error || 'Failed to calculate rates', 302);
+            }
+
+            log('FedEx Success', result.data);
+            try {
+                // Fetch priorities from RefShippingType, sorted by display_order ASC
+                const priorities = await RefShippingType.findAll({
+                    where: { is_active: true },
+                    order: [['display_order', 'ASC']]
+                });
+
+                if (priorities.length > 0 && result.data) {
+                    // Create a priority map: normalized_service_type -> display_order (lower is better)
+                    const priorityMap = new Map<string, number>();
+                    const normalize = (s: string) => s.toUpperCase().replace(/^FEDEX_/, '');
+
+                    priorities.forEach((p) => priorityMap.set(normalize(p.service_type), p.display_order));
+
+                    // Sort result.data
+                    result.data.sort((a: any, b: any) => {
+                        const typeA = normalize(a.serviceType);
+                        const typeB = normalize(b.serviceType);
+
+                        const pA = priorityMap.has(typeA) ? priorityMap.get(typeA)! : 999;
+                        const pB = priorityMap.has(typeB) ? priorityMap.get(typeB)! : 999;
+
+                        // Log for debugging if needed (can remove later)
+                        // log(`Sort cmp: ${a.serviceType}(${pA}) vs ${b.serviceType}(${pB})`);
+
+                        if (pA !== pB) return pA - pB;
+                        // Secondary sort by price
+                        return a.totalCharge - b.totalCharge;
+                    });
+                    log('Sorted Rates by Priority (Normalized)');
+                }
+            } catch (sortErr) {
+                console.error('Failed to sort rates by priority', sortErr);
             }
 
             return this.sendSuccess(result.data, 'Rates calculated successfully');
@@ -283,11 +328,75 @@ export class ShipmentController extends BaseController {
 
             const result = await FedExService.getRates(input);
 
-            if (!result.success) {
+            if (!result.success || !result.data) {
                 return this.sendError(result.error || 'Failed to calculate rates', 302);
             }
 
-            return this.sendSuccess(result.data, 'Order rates calculated successfully');
+            // Fetch Shipping Priority from Ref Table
+            const shippingPriorities = await RefShippingType.findAll({
+                where: { is_active: true },
+                order: [['priority', 'ASC']]
+            });
+
+            // Build priority list from DB or fallback
+            // We now have objects { id, service_type, priority }
+            // Logic:
+            // 1. Iterate through shippingPriorities (which are ordered by priority)
+            // 2. See if result.data has a matching serviceType
+
+            let selectedRate: any = null;
+            let selectedRefId: number | null = null;
+
+            if (shippingPriorities.length > 0) {
+                for (const priorityRef of shippingPriorities) {
+                    const match = result.data.find((rate: any) => rate.serviceType === priorityRef.service_type);
+                    if (match) {
+                        selectedRate = match;
+                        selectedRefId = priorityRef.id;
+                        break;
+                    }
+                }
+            } else {
+                // Fallback if DB is empty - just pick first available, but we can't set ID easily without DB record
+                // Assuming DB is populated as per instructions.
+                if (result.data.length > 0) {
+                    selectedRate = result.data[0];
+                }
+            }
+
+            // If still no selected rate from priority list, fallback to first available
+            // And try to find its ID in the ref table (reverse lookup)
+            if (!selectedRate && result.data.length > 0) {
+                selectedRate = result.data[0];
+                const matchingRef = shippingPriorities.find(sp => sp.service_type === selectedRate.serviceType);
+                if (matchingRef) {
+                    selectedRefId = matchingRef.id;
+                }
+            }
+
+            // Update Order with selected shipping details
+            if (selectedRate) {
+                order.total_shipping = selectedRate.totalCharge;
+                if (selectedRefId) {
+                    order.shipping_type = selectedRefId;
+                }
+
+                // Also update the shipment_details with more info if needed
+                const currentDetails = (order.shipment_details as any) || {};
+                order.shipment_details = {
+                    ...currentDetails,
+                    estimated_delivery: selectedRate.deliveryDate,
+                    service_name: selectedRate.serviceName,
+                    carrier: 'FedEx'
+                };
+
+                await order.save();
+            }
+
+            return this.sendSuccess({
+                rates: result.data,
+                selected: selectedRate
+            }, 'Order rates calculated and updated successfully');
         } catch (error) {
             console.error('Calculate Order Rate Error:', error);
             return this.sendError('Failed to calculate order shipping rates', 300);

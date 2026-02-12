@@ -1,7 +1,8 @@
 import { DataTypes, Model } from 'sequelize';
 import { sequelize } from '../config/database';
 import { RefEntityType } from './RefEntityType';
-export { RefEntityType };
+import { RefShippingType } from './RefShippingType';
+export { RefEntityType, RefShippingType };
 
 // Base attributes shared by most reference tables
 const baseAttributes = {
@@ -190,4 +191,5 @@ export const ReferenceModels: Record<string, any> = {
   procurement_purpose: RefProcurementPurpose,
   end_user_type: RefEndUserType,
   entity_type: RefEntityType,
+  shipping_types: RefShippingType,
 };

@@ -92,13 +92,6 @@ export class AdminController extends BaseController {
             }
         }
 
-        console.log('[DEBUG] formatVendorProfile Result:', {
-            id: formatted.id,
-            buyer: formatted.type_of_buyer,
-            purpose: formatted.procurement_purpose,
-            endUser: formatted.end_user_type,
-            buyerTypeRaw: formatted.buyerType
-        });
 
         return formatted;
     }
@@ -1761,13 +1754,6 @@ export class AdminController extends BaseController {
                 const profile = customer?.profile;
                 const profileData = profile ? (profile.dataValues || profile) : {};
 
-                console.log('[DEBUG] getCustomer Deep Dive:', {
-                    is_model: profile instanceof UserProfile,
-                    keys: Object.keys(profileData),
-                    controlled_val: profileData.controlled_items,
-                    status_val: profileData.onboarding_status,
-                    raw_profile: JSON.stringify(profileData)
-                });
 
                 // Check both direct access and dataValues
                 const isControlled = (profileData.controlled_items === true) || (profileData.onboarding_status === 'approved_controlled');
@@ -1775,12 +1761,7 @@ export class AdminController extends BaseController {
                 if (!isControlled) {
                     return NextResponse.json({
                         success: false,
-                        message: 'Forbidden: Access restricted to Controlled Customers',
-                        debug_info: {
-                            controlled_raw: profileData.controlled_items,
-                            status_raw: profileData.onboarding_status,
-                            profile_keys: Object.keys(profileData)
-                        }
+                        message: 'Forbidden: Access restricted to Controlled Customers'
                     }, { status: 403 });
                 }
             }
@@ -1889,8 +1870,6 @@ export class AdminController extends BaseController {
             const decoded: any = verifyAccessToken(token);
             const userId = decoded?.userId || decoded?.sub;
 
-            console.log('[DEBUG] Token Decoded:', decoded);
-            console.log('[DEBUG] Resolved UserId:', userId);
 
             const user = await User.findByPk(userId);
 

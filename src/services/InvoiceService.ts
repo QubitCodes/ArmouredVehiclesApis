@@ -62,13 +62,17 @@ export class InvoiceService {
         companyPhone: string | null;
         companyEmail: string | null;
         logoUrl: string | null;
+        invoiceFooter: string | null;
     }> {
         const keys = [
             'admin_company_name',
-            'admin_company_address',
+            'admin_company_street',
+            'admin_company_city',
+            'admin_company_country',
             'admin_company_phone',
             'admin_company_email',
-            'admin_logo_url'
+            'admin_logo_url',
+            'admin_invoice_footer'
         ];
 
         const settings = await PlatformSetting.findAll({
@@ -80,12 +84,20 @@ export class InvoiceService {
             settingsMap[s.key] = s.value;
         });
 
+        // Build multi-line address: street on line 1, city + country on line 2
+        const street = settingsMap['admin_company_street'] || '';
+        const city = settingsMap['admin_company_city'] || '';
+        const country = settingsMap['admin_company_country'] || '';
+        const line2Parts = [city, country].filter(Boolean).join(', ');
+        const companyAddress = [street, line2Parts].filter(Boolean).join('<br/>') || 'Dubai, UAE';
+
         return {
             companyName: settingsMap['admin_company_name'] || 'Armoured Vehicles LLC',
-            companyAddress: settingsMap['admin_company_address'] || 'Dubai, UAE',
+            companyAddress,
             companyPhone: settingsMap['admin_company_phone'] || null,
             companyEmail: settingsMap['admin_company_email'] || null,
-            logoUrl: settingsMap['admin_logo_url'] || null
+            logoUrl: settingsMap['admin_logo_url'] || null,
+            invoiceFooter: settingsMap['admin_invoice_footer'] || null
         };
     }
 
@@ -96,6 +108,29 @@ export class InvoiceService {
         const key = type === 'admin' ? 'vendor_invoice_terms' : 'customer_invoice_terms';
         const setting = await PlatformSetting.findOne({ where: { key } });
         return setting?.value || null;
+    }
+
+    /**
+     * Fetches bank account details for invoices
+     * Returns parsed JSON array from platform_settings key 'admin_bank_accounts'
+     */
+    static async getBankAccounts(): Promise<Array<{
+        bank_name?: string;
+        account_holder: string;
+        account_number: string;
+        iban: string;
+        currency: string;
+        bic?: string;
+        bank_address?: string;
+    }>> {
+        const setting = await PlatformSetting.findOne({ where: { key: 'admin_bank_accounts' } });
+        if (!setting?.value) return [];
+        try {
+            return JSON.parse(setting.value);
+        } catch (e) {
+            console.error('[InvoiceService] Failed to parse bank accounts JSON:', e);
+            return [];
+        }
     }
 
     /**

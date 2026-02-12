@@ -30,6 +30,7 @@ interface OrderAttributes {
   vat_amount?: number;
   admin_commission?: number;
   total_shipping?: number;
+  shipping_type?: number | null;
   total_packing?: number;
 }
 
@@ -62,6 +63,7 @@ export class Order extends Model<OrderAttributes, OrderCreationAttributes> imple
   declare public vat_amount: number;
   declare public admin_commission: number;
   declare public total_shipping: number;
+  declare public shipping_type?: number | null;
   declare public total_packing: number;
 
   public items?: OrderItem[];
@@ -167,6 +169,10 @@ Order.init(
       type: DataTypes.DECIMAL(10, 2),
       defaultValue: 0,
       allowNull: false,
+    },
+    shipping_type: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
     },
     total_packing: {
       type: DataTypes.DECIMAL(10, 2),

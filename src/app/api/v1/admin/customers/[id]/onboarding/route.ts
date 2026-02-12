@@ -49,6 +49,5 @@ export async function PATCH(
   props: { params: Promise<{ id: string }> }
 ) {
   const resolvedParams = await props.params;
-  console.log('[DEBUG] Route Resolved Params:', resolvedParams);
   return AdminController.updateCustomerOnboarding(request, { params: { id: resolvedParams.id } });
 }

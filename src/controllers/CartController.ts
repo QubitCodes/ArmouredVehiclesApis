@@ -20,8 +20,6 @@ export class CartController extends BaseController {
 		const authHeader = req.headers.get('authorization');
 		const sessionIdClient = req.headers.get('x-session-id');
 
-		console.log(`[CHECKOUT DEBUG] CART API (${req.nextUrl.pathname}): AuthHeader=${authHeader ? 'YES' : 'NO'}, SessionID=${sessionIdClient}`);
-		if (authHeader) console.log(`[CHECKOUT DEBUG] CART API: Token start=${authHeader.substring(0, 20)}`);
 
 		let userId: string | null = null;
 		let sessionId: string | null = sessionIdClient; // Client must send this generated ID
@@ -33,20 +31,16 @@ export class CartController extends BaseController {
 				if (decoded && (decoded.sub || decoded.userId)) {
 					userId = decoded.sub || decoded.userId;
 				}
-				console.log(`[CHECKOUT DEBUG] CART API: Resolved UserID=${userId}`);
 			} catch (e) {
 				// Invalid token -> Throw 401
-				console.log(`[CHECKOUT DEBUG] CART API: Token Invalid/Expired`);
 				throw new Error('TOKEN_EXPIRED');
 			}
 		} else {
 			// GUEST LOGIC DISABLED (Strict Auth Enforced)
-			console.log(`[CHECKOUT DEBUG] CART API: Guest Access Blocked (Strict Mode)`);
 			throw new Error('TOKEN_MISSING');
 
 			/* 
 			// --- Legacy Hybrid/Guest Logic (Preserved for future use. JkWorkz) ---
-			console.log(`[CHECKOUT DEBUG] CART API: Is Guest`);
 			// Session logic was here - implied by userId being null and sessionId being set
 			// For now, we fall through, but if we want to block guests, we throw error.
 			*/

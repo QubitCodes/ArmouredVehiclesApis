@@ -278,8 +278,12 @@ export class InvoiceController extends BaseController {
 				}
 			}
 
+			// Fetch bank accounts and admin company details for invoice
+			const bankAccounts = await InvoiceService.getBankAccounts();
+			const adminDetails = await InvoiceService.getAdminDetails();
+
 			// Build invoice HTML
-			const html = this.buildInvoiceHtml(invoice, order);
+			const html = this.buildInvoiceHtml(invoice, order, bankAccounts, adminDetails);
 
 			return new Response(html, {
 				headers: {
@@ -417,7 +421,11 @@ export class InvoiceController extends BaseController {
 				}
 			}
 
-			const html = this.buildInvoiceHtml(invoice, finalOrder);
+			// Fetch bank accounts and admin company details for invoice
+			const bankAccounts = await InvoiceService.getBankAccounts();
+			const adminDetails = await InvoiceService.getAdminDetails();
+
+			const html = this.buildInvoiceHtml(invoice, finalOrder, bankAccounts, adminDetails);
 
 			return new Response(html, {
 				headers: {
@@ -433,7 +441,7 @@ export class InvoiceController extends BaseController {
 	/**
 	 * Builds A4-sized HTML invoice
 	 */
-	private buildInvoiceHtml(invoice: Invoice, order: Order & { items?: (OrderItem & { product?: Product })[] } | null): string {
+	private buildInvoiceHtml(invoice: Invoice, order: Order & { items?: (OrderItem & { product?: Product })[] } | null, bankAccounts: any[] = [], adminDetails?: { companyName: string; companyAddress: string; companyPhone: string | null; companyEmail: string | null; logoUrl: string | null; invoiceFooter: string | null }): string {
 		const rawItems = order?.items || [];
 
 		// Normalize items to plain objects to ensure property access works
@@ -442,12 +450,33 @@ export class InvoiceController extends BaseController {
 		});
 
 		if (items.length > 0) {
-			console.log(`[InvoiceHTML] First item keys:`, Object.keys(items[0]));
+
 		}
 
-		console.log(`[InvoiceHTML] Building invoice ${invoice.invoice_number} for Order ${order?.id}. Items count: ${items.length}`);
 
-		const logoUrl = invoice.issuer_logo_url ? getFileUrl(invoice.issuer_logo_url) : '';
+
+		// Company details: For admin invoices (Vendor → Admin), show the VENDOR (issuer) info in the header.
+		// For customer invoices (Admin → Customer), show the admin/platform info.
+		const isVendorInvoice = invoice.invoice_type === 'admin';
+		const companyName = isVendorInvoice
+			? (invoice.issuer_name || adminDetails?.companyName || 'Vendor')
+			: (adminDetails?.companyName || invoice.issuer_name);
+		const companyAddress = isVendorInvoice
+			? (invoice.issuer_address || adminDetails?.companyAddress || '')
+			: (adminDetails?.companyAddress || invoice.issuer_address);
+		const companyPhone = isVendorInvoice
+			? (invoice.issuer_phone || null)
+			: (adminDetails?.companyPhone || invoice.issuer_phone);
+		const companyEmail = isVendorInvoice
+			? (invoice.issuer_email || null)
+			: (adminDetails?.companyEmail || invoice.issuer_email);
+
+		// Debug: log what details were used for the header
+
+
+		// Logo: use NEXT_PUBLIC_WEBSITE_URL/logo.png (the web app's public logo)
+		const websiteUrl = (process.env.NEXT_PUBLIC_WEBSITE_URL || 'http://localhost:3001').replace(/\/$/, '');
+		const logoUrl = `${websiteUrl}/final-logo (1).svg`;
 		const sealClass = invoice.payment_status === 'paid' ? 'seal-paid' : 'seal-unpaid';
 		const sealText = invoice.payment_status === 'paid' ? 'PAID' : 'UNPAID';
 
@@ -461,6 +490,59 @@ export class InvoiceController extends BaseController {
 				month: 'long',
 				day: 'numeric'
 			});
+		};
+
+		/**
+		 * Converts a number to words with proper currency unit names
+		 * e.g. 619.50 AED => "Six Hundred Nineteen Dirhams and Fifty Fils Only"
+		 */
+		const numberToWords = (num: number, currency: string): string => {
+			const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
+				'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+			const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+			/** Currency unit names: [singular main, plural main, singular sub, plural sub] */
+			const currencyUnits: Record<string, [string, string, string, string]> = {
+				'AED': ['Dirham', 'Dirhams', 'Fil', 'Fils'],
+				'USD': ['Dollar', 'Dollars', 'Cent', 'Cents'],
+				'EUR': ['Euro', 'Euros', 'Cent', 'Cents'],
+				'GBP': ['Pound', 'Pounds', 'Penny', 'Pence'],
+				'SAR': ['Riyal', 'Riyals', 'Halala', 'Halalas'],
+			};
+			const units = currencyUnits[currency] || [currency, currency, 'Cent', 'Cents'];
+
+			const convertChunk = (n: number): string => {
+				if (n === 0) return '';
+				if (n < 20) return ones[n];
+				if (n < 100) return tens[Math.floor(n / 10)] + (n % 10 ? ' ' + ones[n % 10] : '');
+				return ones[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' ' + convertChunk(n % 100) : '');
+			};
+
+			const wholePart = Math.floor(Math.abs(num));
+			const decimalPart = Math.round((Math.abs(num) - wholePart) * 100);
+
+			if (wholePart === 0 && decimalPart === 0) return `Zero ${units[1]}`;
+
+			let result = '';
+			if (wholePart >= 1000000) {
+				result += convertChunk(Math.floor(wholePart / 1000000)) + ' Million ';
+			}
+			if (wholePart >= 1000) {
+				result += convertChunk(Math.floor((wholePart % 1000000) / 1000)) + ' Thousand ';
+			}
+			result += convertChunk(wholePart % 1000);
+			result = result.trim();
+
+			// Add main currency unit
+			result += ' ' + (wholePart === 1 ? units[0] : units[1]);
+
+			// Add subunit if any
+			if (decimalPart > 0) {
+				const subWords = convertChunk(decimalPart);
+				result += ` and ${subWords} ${decimalPart === 1 ? units[2] : units[3]}`;
+			}
+
+			return result;
 		};
 
 		const orderSubtotal = items.reduce((sum: number, i: any) => sum + (Number(i.price || 0) * (i.quantity || 1)), 0);
@@ -535,98 +617,162 @@ export class InvoiceController extends BaseController {
 			background: #f5f5f5;
 		}
 		
-			.invoice-container {
-				width: 210mm;
-				/* min-height: 297mm;  Removed to prevent extra blank page */
-				margin: 0 auto;
-				padding: 15mm;
+		.invoice-container {
+			width: 210mm;
+			margin: 0 auto;
+			padding: 15mm;
+			background: white;
+			box-shadow: 0 0 10px rgba(0,0,0,0.1);
+			position: relative;
+		}
+		
+		@media print {
+			@page {
+				margin: 0;
+				size: A4;
+			}
+			body {
 				background: white;
-				box-shadow: 0 0 10px rgba(0,0,0,0.1);
-				position: relative;
+				margin: 0;
+				padding: 0;
 			}
-			
-			@media print {
-				@page {
-					margin: 0;
-					size: A4;
-				}
-				body {
-					background: white;
-					margin: 0;
-					padding: 0;
-				}
-				.invoice-container {
-					width: 100%;
-					margin: 0;
-					padding: 15mm;
-					box-shadow: none;
-					page-break-after: avoid;
-				}
-				.no-print {
-					display: none !important;
-				}
+			.invoice-container {
+				width: 100%;
+				margin: 0;
+				padding: 15mm;
+				box-shadow: none;
+				page-break-after: avoid;
 			}
-			
-			/* Header */
-			.invoice-header {
-				display: flex;
-				justify-content: space-between;
-				align-items: flex-start;
-				margin-bottom: 30px;
-				padding-bottom: 20px;
-				border-bottom: 2px solid #2c3e50;
+			.no-print {
+				display: none !important;
 			}
-			
-			.logo-section {
-				flex: 0 0 200px;
-			}
-			
-			.logo-section img {
-				max-width: 180px;
-				max-height: 80px;
-				object-fit: contain;
-			}
-			
-			.invoice-title-section {
-				text-align: right;
-			}
-			
-			.invoice-title {
-				font-size: 32px;
-				font-weight: 700;
-				color: #2c3e50;
-				text-transform: uppercase;
-				letter-spacing: 2px;
-			}
-			
-			.invoice-number {
-				font-size: 14px;
-				color: #7f8c8d;
-				margin-top: 5px;
-			}
-			
-			.invoice-date {
-				font-size: 12px;
-				color: #7f8c8d;
-				margin-top: 3px;
-			}
-			
-			/* Seal */
-			.seal {
-				position: absolute;
-				top: 180px; /* Moved down to avoid obscuring header */
-				right: 40px;
-				width: 100px;
-				height: 100px;
-				border-radius: 50%;
-				display: flex;
-				align-items: center;
-				justify-content: center;
-				font-size: 18px;
-				font-weight: 700;
-				transform: rotate(-15deg);
-				opacity: 0.85;
-			}
+		}
+		
+		/* Letterhead Header */
+		.letterhead {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			padding-bottom: 16px;
+			border-bottom: 3px solid #2c3e50;
+			margin-bottom: 24px;
+		}
+		
+		.letterhead-logo {
+			flex: 0 0 160px;
+		}
+		
+		.letterhead-logo img {
+			max-width: 150px;
+			max-height: 70px;
+			object-fit: contain;
+		}
+		
+		.letterhead-title {
+			flex: 1;
+			text-align: center;
+		}
+		
+		.letterhead-title h1 {
+			font-size: 30px;
+			font-weight: 700;
+			color: #2c3e50;
+			text-transform: uppercase;
+			letter-spacing: 3px;
+		}
+		
+		.letterhead-company {
+			flex: 0 0 220px;
+			text-align: right;
+			font-size: 10px;
+			color: #555;
+			line-height: 1.6;
+		}
+		
+		.letterhead-company .company-name {
+			font-size: 12px;
+			font-weight: 700;
+			color: #2c3e50;
+			margin-bottom: 3px;
+		}
+		
+		/* Info Row: Bill To + Invoice Details */
+		.info-row {
+			display: flex;
+			justify-content: space-between;
+			align-items: flex-start;
+			margin-bottom: 28px;
+		}
+		
+		.bill-to {
+			flex: 0 0 40%;
+		}
+		
+		.invoice-details {
+			flex: 0 0 38%;
+			text-align: right;
+		}
+		
+		.section-label {
+			font-size: 10px;
+			text-transform: uppercase;
+			color: #7f8c8d;
+			font-weight: 600;
+			margin-bottom: 8px;
+			letter-spacing: 1px;
+		}
+		
+		.bill-to-name {
+			font-size: 16px;
+			font-weight: 600;
+			color: #2c3e50;
+			margin-bottom: 4px;
+		}
+		
+		.bill-to-details {
+			font-size: 11px;
+			color: #555;
+			white-space: pre-line;
+		}
+		
+		.detail-table {
+			width: 100%;
+			border-collapse: collapse;
+		}
+		
+		.detail-table td {
+			padding: 5px 0;
+			font-size: 11px;
+		}
+		
+		.detail-table .dt-label {
+			color: #7f8c8d;
+			text-align: right;
+			padding-right: 12px;
+			white-space: nowrap;
+		}
+		
+		.detail-table .dt-value {
+			color: #2c3e50;
+			font-weight: 600;
+			text-align: right;
+		}
+		
+		/* Seal */
+		.seal {
+			position: static;
+			width: 70px;
+			height: 70px;
+			border-radius: 50%;
+			display: none; /* Hidden: status is shown separately in invoice details */
+			align-items: center;
+			justify-content: center;
+			font-size: 14px;
+			font-weight: 700;
+			transform: rotate(-15deg);
+			opacity: 0.85;
+			flex-shrink: 0;
+		}
 		
 		.seal-paid {
 			border: 4px solid #27ae60;
@@ -636,39 +782,6 @@ export class InvoiceController extends BaseController {
 		.seal-unpaid {
 			border: 4px solid #e74c3c;
 			color: #e74c3c;
-		}
-		
-		/* Parties */
-		.parties-section {
-			display: flex;
-			justify-content: space-between;
-			margin-bottom: 30px;
-		}
-		
-		.party-box {
-			flex: 0 0 48%;
-		}
-		
-		.party-label {
-			font-size: 10px;
-			text-transform: uppercase;
-			color: #7f8c8d;
-			font-weight: 600;
-			margin-bottom: 8px;
-			letter-spacing: 1px;
-		}
-		
-		.party-name {
-			font-size: 16px;
-			font-weight: 600;
-			color: #2c3e50;
-			margin-bottom: 5px;
-		}
-		
-		.party-details {
-			font-size: 11px;
-			color: #555;
-			white-space: pre-line;
 		}
 		
 		/* Items Table */
@@ -701,13 +814,8 @@ export class InvoiceController extends BaseController {
 			background: #f9f9f9;
 		}
 		
-		.text-center {
-			text-align: center;
-		}
-		
-		.text-right {
-			text-align: right;
-		}
+		.text-center { text-align: center; }
+		.text-right { text-align: right; }
 		
 		/* Totals */
 		.totals-section {
@@ -737,13 +845,8 @@ export class InvoiceController extends BaseController {
 			color: #2c3e50;
 		}
 		
-		.totals-label {
-			color: #7f8c8d;
-		}
-		
-		.totals-value {
-			font-weight: 600;
-		}
+		.totals-label { color: #7f8c8d; }
+		.totals-value { font-weight: 600; }
 		
 		/* Comments */
 		.comments-section {
@@ -767,18 +870,25 @@ export class InvoiceController extends BaseController {
 			white-space: pre-line;
 		}
 		
-		/* Terms */
-		.terms-section {
+		/* Footer: T&C + Bank Details side by side */
+		.footer-row {
+			display: flex;
+			gap: 24px;
 			padding-top: 20px;
 			border-top: 1px solid #ecf0f1;
 		}
 		
-		.terms-title {
+		.footer-col {
+			flex: 1;
+		}
+		
+		.footer-title {
 			font-size: 11px;
 			text-transform: uppercase;
 			color: #7f8c8d;
 			font-weight: 600;
 			margin-bottom: 8px;
+			letter-spacing: 0.5px;
 		}
 		
 		.terms-text {
@@ -786,6 +896,26 @@ export class InvoiceController extends BaseController {
 			color: #888;
 			white-space: pre-line;
 			line-height: 1.6;
+		}
+		
+		.bank-account {
+			margin-bottom: 10px;
+			font-size: 10px;
+			color: #555;
+			line-height: 1.5;
+		}
+		
+		.bank-account .bank-label {
+			color: #7f8c8d;
+			display: inline-block;
+			min-width: 55px;
+		}
+		
+		.bank-account .bank-holder {
+			font-weight: 600;
+			color: #2c3e50;
+			font-size: 11px;
+			margin-bottom: 2px;
 		}
 		
 		/* Action Buttons */
@@ -808,32 +938,10 @@ export class InvoiceController extends BaseController {
 			transition: all 0.2s;
 		}
 		
-		.btn-print {
-			background: #3498db;
-			color: white;
-		}
-		
-		.btn-print:hover {
-			background: #2980b9;
-		}
-		
-		.btn-download {
-			background: #27ae60;
-			color: white;
-		}
-		
-		.btn-download:hover {
-			background: #229954;
-		}
-		
-		.btn-copy {
-			background: #9b59b6;
-			color: white;
-		}
-		
-		.btn-copy:hover {
-			background: #8e44ad;
-		}
+		.btn-print { background: #3498db; color: white; }
+		.btn-print:hover { background: #2980b9; }
+		.btn-copy { background: #9b59b6; color: white; }
+		.btn-copy:hover { background: #8e44ad; }
 	</style>
 </head>
 <body>
@@ -843,36 +951,42 @@ export class InvoiceController extends BaseController {
 	</div>
 	
 	<div class="invoice-container">
-		<!-- Seal -->
-		<div class="seal ${sealClass}">${sealText}</div>
 		
-		<!-- Header -->
-		<div class="invoice-header">
-			<div class="logo-section">
-				${logoUrl ? `<img src="${logoUrl}" alt="Company Logo" />` : '<div style="height:60px;"></div>'}
+		<!-- Letterhead Header -->
+		<div class="letterhead">
+			<div class="letterhead-logo">
+				<img src="${logoUrl}" alt="Company Logo" />
 			</div>
-			<div class="invoice-title-section">
-				<div class="invoice-title">Invoice</div>
-				<div class="invoice-number">${invoice.invoice_number}</div>
-				<div class="invoice-date">Date: ${formatDate(invoice.created_at)}</div>
+			<div class="letterhead-title">
+				<h1>Invoice</h1>
+			</div>
+			<div class="letterhead-company">
+				<div class="company-name">${companyName}</div>
+				${companyAddress}
+				${companyPhone ? `<br/>Tel: ${companyPhone}` : ''}
+				${companyEmail ? `<br/>Email: ${companyEmail}` : ''}
 			</div>
 		</div>
 		
-		<!-- Parties -->
-		<div class="parties-section">
-			<div class="party-box">
-				<div class="party-label">From</div>
-				<div class="party-name">${invoice.issuer_name}</div>
-				<div class="party-details">${invoice.issuer_address}
-${invoice.issuer_phone ? `Tel: ${invoice.issuer_phone}` : ''}
-${invoice.issuer_email ? `Email: ${invoice.issuer_email}` : ''}</div>
-			</div>
-			<div class="party-box">
-				<div class="party-label">Bill To</div>
-				<div class="party-name">${invoice.addressee_name}</div>
-				<div class="party-details">${invoice.addressee_address}
+		<!-- Bill To + Seal + Invoice Details -->
+		<div class="info-row">
+			<div class="bill-to">
+				<div class="section-label">Bill To</div>
+				<div class="bill-to-name">${invoice.addressee_name}</div>
+				<div class="bill-to-details">${invoice.addressee_address}
 ${invoice.addressee_phone ? `Tel: ${invoice.addressee_phone}` : ''}
 ${invoice.addressee_email ? `Email: ${invoice.addressee_email}` : ''}</div>
+			</div>
+			<div style="display:flex;align-items:center;justify-content:center;flex:0 0 auto;padding:0 10px;">
+				<div class="seal ${sealClass}">${sealText}</div>
+			</div>
+			<div class="invoice-details">
+				<div class="section-label">Invoice Details</div>
+				<table class="detail-table">
+					<tr><td class="dt-label">Invoice No:</td><td class="dt-value">${invoice.invoice_number}</td></tr>
+					<tr><td class="dt-label">Date:</td><td class="dt-value">${formatDate(invoice.created_at)}</td></tr>
+					<tr><td class="dt-label">Status:</td><td class="dt-value" style="color:${invoice.payment_status === 'paid' ? '#27ae60' : '#e74c3c'};text-transform:uppercase;">${invoice.payment_status}</td></tr>
+				</table>
 			</div>
 		</div>
 		
@@ -927,8 +1041,13 @@ ${invoice.addressee_email ? `Email: ${invoice.addressee_email}` : ''}</div>
 					<span>Grand Total</span>
 					<span>${formatCurrency(Number(invoice.total_amount))}</span>
 				</div>
+				<div style="margin-top:8px;font-size:10px;color:#7f8c8d;font-style:italic;text-align:right;">
+					${numberToWords(Number(invoice.total_amount), invoice.currency)} Only
+				</div>
 			</div>
 		</div>
+		
+
 		
 		<!-- Comments -->
 		${invoice.comments ? `
@@ -938,11 +1057,34 @@ ${invoice.addressee_email ? `Email: ${invoice.addressee_email}` : ''}</div>
 		</div>
 		` : ''}
 		
-		<!-- Terms & Conditions -->
-		${invoice.terms_conditions ? `
-		<div class="terms-section">
-			<div class="terms-title">Terms & Conditions</div>
-			<div class="terms-text">${invoice.terms_conditions}</div>
+		<!-- Footer: Terms & Conditions + Bank Details -->
+		${(invoice.terms_conditions || bankAccounts.length > 0) ? `
+		<div class="footer-row">
+			${invoice.terms_conditions ? `
+			<div class="footer-col">
+				<div class="footer-title">Terms &amp; Conditions</div>
+				<div class="terms-text">${invoice.terms_conditions}</div>
+			</div>
+			` : ''}
+			${bankAccounts.length > 0 ? `
+			<div class="footer-col">
+				<div class="footer-title">Bank Details</div>
+				${bankAccounts.map((acc: any) => `
+				<div class="bank-account">
+					<div class="bank-holder">${acc.account_holder} (${acc.currency})</div>
+					<span class="bank-label">A/C:</span> ${acc.account_number}<br/>
+					<span class="bank-label">IBAN:</span> ${acc.iban}<br/>
+					<span class="bank-label">BIC:</span> ${acc.bic || 'N/A'}<br/>
+					${acc.bank_address ? `<span class="bank-label">Bank:</span> ${acc.bank_address}` : ''}
+				</div>
+				`).join('')}
+			</div>
+			` : ''}
+		</div>
+		` : ''}
+		${adminDetails?.invoiceFooter ? `
+		<div style="text-align:center;margin-top:20px;padding-top:12px;border-top:1px solid #ecf0f1;font-size:9px;color:#999;font-style:italic;">
+			${adminDetails.invoiceFooter}
 		</div>
 		` : ''}
 	</div>
