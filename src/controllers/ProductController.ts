@@ -967,11 +967,12 @@ export class ProductController extends BaseController {
                     // Strictly enforce PUBLISHED for vendor products shown to admin
                     whereClause.status = ProductStatus.PUBLISHED;
                 } else {
-                    // Default Admin Inventory to PUBLISHED if no status provided
+                    // Admin Inventory: show ALL statuses unless explicitly filtered
                     const statusParam = searchParams.get('status');
-                    if (!statusParam || statusParam === 'all') {
-                        whereClause.status = ProductStatus.PUBLISHED;
+                    if (statusParam && statusParam !== 'all') {
+                        whereClause.status = statusParam;
                     }
+                    // No default status filter — admin sees all their products
                 }
             }
 
@@ -2308,7 +2309,6 @@ export class ProductController extends BaseController {
      * POST /api/v1/products/bulk-upload
      * Create multiple products from Excel or CSV file upload
      * Supports: .xlsx, .csv
-     */
     /*
    async bulkUpload(req: NextRequest) {
        try {

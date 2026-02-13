@@ -190,13 +190,13 @@ export class CategoryController extends BaseController {
 					raw: true
 				}) as any[];
 
-				// Published-only count
+				// Published-only count (includes 'published' and 'out_of_stock' — anything customer-visible)
 				const pubCounts = await Product.findAll({
 					attributes: [
 						[field, 'cat_id'],
 						[Product.sequelize!.fn('COUNT', Product.sequelize!.col('id')), 'count']
 					],
-					where: { [field]: { [Op.not]: null }, status: 'published' },
+					where: { [field]: { [Op.not]: null }, status: { [Op.in]: ['published', 'out_of_stock'] } },
 					group: [field],
 					raw: true
 				}) as any[];
