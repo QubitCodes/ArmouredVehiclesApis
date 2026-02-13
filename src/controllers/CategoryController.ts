@@ -72,16 +72,33 @@ export class CategoryController extends BaseController {
 				return { user: null, error: this.sendError('Only admins can perform this action', 403) };
 			}
 
-            if (user.user_type === 'admin') {
-                 const hasPerm = await new PermissionService().hasPermission(user.id, 'category.manage');
-                 if (!hasPerm) {
-                     return { user: null, error: this.sendError('Forbidden: Missing category.manage Permission', 403) };
-                 }
-            }
+			if (user.user_type === 'admin') {
+				const hasPerm = await new PermissionService().hasPermission(user.id, 'category.manage');
+				if (!hasPerm) {
+					return { user: null, error: this.sendError('Forbidden: Missing category.manage Permission', 403) };
+				}
+			}
 
 			return { user, error: null };
 		} catch (e) {
 			return { user: null, error: this.sendError('Invalid token', 401) };
+		}
+	}
+
+	/**
+	 * Helper: Check if the requester is an admin
+	 */
+	private async isAdminRequest(req: NextRequest): Promise<boolean> {
+		const authHeader = req.headers.get('authorization');
+		if (!authHeader || !authHeader.startsWith('Bearer ')) return false;
+		try {
+			const token = authHeader.split(' ')[1];
+			const decoded: any = verifyAccessToken(token);
+			const user = await User.findByPk(decoded.userId || decoded.sub);
+			if (!user) return false;
+			return ['admin', 'super_admin'].includes(user.user_type);
+		} catch (e) {
+			return false;
 		}
 	}
 
@@ -94,33 +111,29 @@ export class CategoryController extends BaseController {
 
 		const authHeader = req.headers.get('authorization');
 		if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            // No token => Filter
 			return true;
 		}
 
 		try {
 			const token = authHeader.split(' ')[1];
 			const decoded: any = verifyAccessToken(token);
-            // Need to fetch user with profile to check onboarding_status
 			const user = await User.findByPk(decoded.userId || decoded.sub, { include: ['profile'] });
 
-			if (!user) return true; // User not found => Filter
+			if (!user) return true;
 
-            // Allow Admins and Vendors to see everything (User instruction: vendors access everything)
-            if (['admin', 'super_admin', 'vendor'].includes(user.user_type)) {
-                return false; // Do NOT filter
-            }
-            
-            // Check onboarding status for Customers or others
-            const profile: any = user.profile; 
-            if (profile && profile.onboarding_status === 'approved_controlled') {
-                return false; // Approved => Do NOT filter
-            }
+			if (['admin', 'super_admin', 'vendor'].includes(user.user_type)) {
+				return false;
+			}
 
-            return true; // Not approved => Filter
+			const profile: any = user.profile;
+			if (profile && profile.onboarding_status === 'approved_controlled') {
+				return false;
+			}
+
+			return true;
 
 		} catch (e) {
-			return true; // Invalid token => Filter
+			return true;
 		}
 	}
 
@@ -130,25 +143,30 @@ export class CategoryController extends BaseController {
 	 */
 	async list(req: NextRequest) {
 		try {
-            const filterControlled = await this.shouldFilterControlled(req);
-            const whereClause: any = {};
-            
-            if (filterControlled) {
-                // exclude controlled categories
-                whereClause.is_controlled = { [Op.not]: true }; 
-            }
+			const filterControlled = await this.shouldFilterControlled(req);
+			const isAdmin = await this.isAdminRequest(req);
+			const whereClause: any = {};
+
+			// Non-admins only see active categories
+			if (!isAdmin) {
+				whereClause.is_active = true;
+			}
+
+			if (filterControlled) {
+				whereClause.is_controlled = { [Op.not]: true };
+			}
 
 			const categories = await Category.findAll({
-                where: Object.keys(whereClause).length ? whereClause : undefined,
+				where: Object.keys(whereClause).length ? whereClause : undefined,
 				order: [['name', 'ASC']],
 				// Always include parent to determine category level for product counts
-                include: [
-                    { 
-                        model: Category, 
-                        as: 'parent',
-                        attributes: ['id', 'is_controlled', 'parent_id'] 
-                    }
-                ]
+				include: [
+					{
+						model: Category,
+						as: 'parent',
+						attributes: ['id', 'is_controlled', 'is_active', 'parent_id']
+					}
+				]
 			});
 
 			// Get product counts based on category level:
@@ -156,87 +174,141 @@ export class CategoryController extends BaseController {
 			// Level 1 (Category, parent is main): products.category_id  
 			// Level 2 (Subcategory, parent is category): products.sub_category_id
 
-			// Count by main_category_id (for Level 0 categories)
-			const mainCounts = await Product.findAll({
-				attributes: [
-					'main_category_id',
-					[Product.sequelize!.fn('COUNT', Product.sequelize!.col('id')), 'count']
-				],
-				where: { main_category_id: { [Op.not]: null } },
-				group: ['main_category_id'],
-				raw: true
-			}) as unknown as { main_category_id: number; count: string }[];
+			/**
+			 * Helper: Build total and published count maps for a given category field.
+			 * Returns { totalMap, pubMap } where each maps category ID -> count.
+			 */
+			const buildCountMaps = async (field: string) => {
+				// Total count (all statuses)
+				const totalCounts = await Product.findAll({
+					attributes: [
+						[field, 'cat_id'],
+						[Product.sequelize!.fn('COUNT', Product.sequelize!.col('id')), 'count']
+					],
+					where: { [field]: { [Op.not]: null } },
+					group: [field],
+					raw: true
+				}) as any[];
 
-			const mainCountMap = new Map<number, number>();
-			mainCounts.forEach((pc: any) => {
-				mainCountMap.set(pc.main_category_id, parseInt(pc.count) || 0);
-			});
+				// Published-only count
+				const pubCounts = await Product.findAll({
+					attributes: [
+						[field, 'cat_id'],
+						[Product.sequelize!.fn('COUNT', Product.sequelize!.col('id')), 'count']
+					],
+					where: { [field]: { [Op.not]: null }, status: 'published' },
+					group: [field],
+					raw: true
+				}) as any[];
 
-			// Count by category_id (for Level 1 categories)
-			const catCounts = await Product.findAll({
-				attributes: [
-					'category_id',
-					[Product.sequelize!.fn('COUNT', Product.sequelize!.col('id')), 'count']
-				],
-				where: { category_id: { [Op.not]: null } },
-				group: ['category_id'],
-				raw: true
-			}) as unknown as { category_id: number; count: string }[];
+				const totalMap = new Map<number, number>();
+				totalCounts.forEach((pc: any) => {
+					totalMap.set(pc.cat_id, parseInt(pc.count) || 0);
+				});
 
-			const catCountMap = new Map<number, number>();
-			catCounts.forEach((pc: any) => {
-				catCountMap.set(pc.category_id, parseInt(pc.count) || 0);
-			});
+				const pubMap = new Map<number, number>();
+				pubCounts.forEach((pc: any) => {
+					pubMap.set(pc.cat_id, parseInt(pc.count) || 0);
+				});
 
-			// Count by sub_category_id (for Level 2 categories)
-			const subCounts = await Product.findAll({
-				attributes: [
-					'sub_category_id',
-					[Product.sequelize!.fn('COUNT', Product.sequelize!.col('id')), 'count']
-				],
-				where: { sub_category_id: { [Op.not]: null } },
-				group: ['sub_category_id'],
-				raw: true
-			}) as unknown as { sub_category_id: number; count: string }[];
+				return { totalMap, pubMap };
+			};
 
-			const subCountMap = new Map<number, number>();
-			subCounts.forEach((pc: any) => {
-				subCountMap.set(pc.sub_category_id, parseInt(pc.count) || 0);
-			});
+			// Build count maps for all three category levels in parallel
+			const [mainMaps, catMaps, subMaps] = await Promise.all([
+				buildCountMaps('main_category_id'),
+				buildCountMaps('category_id'),
+				buildCountMaps('sub_category_id')
+			]);
 
-			// Add product_count to each category based on its level
+			// Add product_count (total) and published_product_count to each category
 			const categoriesWithCount = categories.map((cat: any) => {
 				const catJson = cat.toJSON ? cat.toJSON() : { ...cat };
-				
+
 				// Determine category level based on parent_id
 				// Level 0: no parent_id (Main Category)
 				// Level 1: has parent_id but parent has no parent (Category)
 				// Level 2: parent has parent_id (Subcategory)
 				if (!catJson.parent_id) {
 					// Level 0 - Main Category
-					catJson.product_count = mainCountMap.get(catJson.id) || 0;
+					catJson.product_count = mainMaps.totalMap.get(catJson.id) || 0;
+					catJson.published_product_count = mainMaps.pubMap.get(catJson.id) || 0;
 				} else if (catJson.parent && !catJson.parent.parent_id) {
 					// Level 1 - Category (parent is main category)
-					catJson.product_count = catCountMap.get(catJson.id) || 0;
+					catJson.product_count = catMaps.totalMap.get(catJson.id) || 0;
+					catJson.published_product_count = catMaps.pubMap.get(catJson.id) || 0;
 				} else {
 					// Level 2 - Subcategory
-					catJson.product_count = subCountMap.get(catJson.id) || 0;
+					catJson.product_count = subMaps.totalMap.get(catJson.id) || 0;
+					catJson.published_product_count = subMaps.pubMap.get(catJson.id) || 0;
 				}
-				
+
 				return catJson;
 			});
 
-            if (filterControlled) {
-                // Filter in memory for parent/grandparent control status
-                const filtered = categoriesWithCount.filter((cat: any) => {
-                    if (cat.is_controlled) return false;
-                    if (cat.parent && cat.parent.is_controlled) return false;
-                    return true;
-                });
-                return this.sendSuccess(filtered);
-            }
+			// --- Compute recursive totals (bottom-up aggregation) ---
+			// Build a child map from the flat list
+			const childMap = new Map<number, any[]>();
+			categoriesWithCount.forEach((cat: any) => {
+				if (cat.parent_id) {
+					if (!childMap.has(cat.parent_id)) childMap.set(cat.parent_id, []);
+					childMap.get(cat.parent_id)!.push(cat);
+				}
+			});
 
-			return this.sendSuccess(categoriesWithCount);
+			// Set direct_subcategory_count for each category
+			categoriesWithCount.forEach((cat: any) => {
+				const children = childMap.get(cat.id) || [];
+				cat.direct_subcategory_count = children.length;
+			});
+
+			/**
+			 * Recursive helper: compute total product counts and subcategory counts
+			 * by summing this category's direct counts + all descendants' direct counts.
+			 */
+			const computeRecursiveTotals = (cat: any): { totalProducts: number; totalPublished: number; totalSubcats: number } => {
+				const children = childMap.get(cat.id) || [];
+				let totalProducts = cat.product_count || 0;
+				let totalPublished = cat.published_product_count || 0;
+				let totalSubcats = children.length; // direct children
+
+				for (const child of children) {
+					const childTotals = computeRecursiveTotals(child);
+					totalProducts += childTotals.totalProducts;
+					totalPublished += childTotals.totalPublished;
+					totalSubcats += childTotals.totalSubcats; // grandchildren + deeper
+				}
+
+				cat.total_product_count = totalProducts;
+				cat.total_published_product_count = totalPublished;
+				cat.total_subcategory_count = totalSubcats;
+
+				return { totalProducts, totalPublished, totalSubcats };
+			};
+
+			// Run bottom-up from roots (categories with no parent)
+			categoriesWithCount.filter((cat: any) => !cat.parent_id).forEach(computeRecursiveTotals);
+
+			// Filter out categories whose parent is inactive (non-admin only)
+			let result = categoriesWithCount;
+			if (!isAdmin) {
+				result = result.filter((cat: any) => {
+					// If this category's parent is inactive, hide it
+					if (cat.parent && cat.parent.is_active === false) return false;
+					return true;
+				});
+			}
+
+			if (filterControlled) {
+				// Filter in memory for parent/grandparent control status
+				result = result.filter((cat: any) => {
+					if (cat.is_controlled) return false;
+					if (cat.parent && cat.parent.is_controlled) return false;
+					return true;
+				});
+			}
+
+			return this.sendSuccess(result);
 		} catch (error: any) {
 			return this.sendError(String((error as any).message), 500);
 		}
@@ -248,12 +320,17 @@ export class CategoryController extends BaseController {
 	 */
 	async listMain(req: NextRequest) {
 		try {
-            const filterControlled = await this.shouldFilterControlled(req);
-            const whereClause: any = { parent_id: null };
+			const filterControlled = await this.shouldFilterControlled(req);
+			const isAdmin = await this.isAdminRequest(req);
+			const whereClause: any = { parent_id: null };
 
-            if (filterControlled) {
-                whereClause.is_controlled = { [Op.not]: true };
-            }
+			// Always filter active categories for dropdowns/navigation
+			// Management tables use list() instead
+			whereClause.is_active = true;
+
+			if (filterControlled) {
+				whereClause.is_controlled = { [Op.not]: true };
+			}
 
 			const categories = await Category.findAll({
 				where: whereClause,
@@ -276,20 +353,24 @@ export class CategoryController extends BaseController {
 				return this.sendError('Invalid parent ID', 400);
 			}
 
-            const filterControlled = await this.shouldFilterControlled(req);
+			const filterControlled = await this.shouldFilterControlled(req);
 
-            if (filterControlled) {
-                // Check if Parent is Controlled. If so, return empty.
-                const parent = await Category.findByPk(parentId);
-                if (parent && parent.is_controlled) {
-                    return this.sendSuccess([]);
-                }
-            }
+			// Always check if parent is active/controlled before returning children
+			// This endpoint is used by the public web sidebar; admin panel uses list() instead
+			const parent = await Category.findByPk(parentId);
+			if (parent) {
+				if (parent.is_active === false) {
+					return this.sendSuccess([]);
+				}
+				if (filterControlled && parent.is_controlled) {
+					return this.sendSuccess([]);
+				}
+			}
 
-            const whereClause: any = { parent_id: parentId };
-            if (filterControlled) {
-                whereClause.is_controlled = { [Op.not]: true };
-            }
+			const whereClause: any = { parent_id: parentId, is_active: true };
+			if (filterControlled) {
+				whereClause.is_controlled = { [Op.not]: true };
+			}
 
 			const categories = await Category.findAll({
 				where: whereClause,
@@ -327,29 +408,43 @@ export class CategoryController extends BaseController {
 				whereClause.parent_id = pid;
 			}
 
-            const filterControlled = await this.shouldFilterControlled(req);
-            if (filterControlled) {
-                whereClause.is_controlled = { [Op.not]: true };
-                // Search might return children of controlled parents.
-                // We should probably include parent to check.
-            }
+			const filterControlled = await this.shouldFilterControlled(req);
+			const isAdmin = await this.isAdminRequest(req);
 
+			if (!isAdmin) {
+				whereClause.is_active = true;
+			}
+
+			if (filterControlled) {
+				whereClause.is_controlled = { [Op.not]: true };
+			}
+
+			const needsParent = !isAdmin || filterControlled;
 			const categories = await Category.findAll({
 				where: whereClause,
 				order: [['name', 'ASC']],
-                include: filterControlled ? [{ model: Category, as: 'parent' }] : undefined
+				include: needsParent ? [{ model: Category, as: 'parent', attributes: ['id', 'is_controlled', 'is_active', 'parent_id'] }] : undefined
 			});
 
-            if (filterControlled) {
-                const filtered = categories.filter((cat: any) => {
-                     if (cat.is_controlled) return false;
-                     if (cat.parent && cat.parent.is_controlled) return false;
-                     return true;
-                });
-                return this.sendSuccess(filtered);
-            }
+			let result: any[] = categories.map((c: any) => c.toJSON ? c.toJSON() : c);
 
-			return this.sendSuccess(categories);
+			// Filter out categories whose parent is inactive
+			if (!isAdmin) {
+				result = result.filter((cat: any) => {
+					if (cat.parent && cat.parent.is_active === false) return false;
+					return true;
+				});
+			}
+
+			if (filterControlled) {
+				result = result.filter((cat: any) => {
+					if (cat.is_controlled) return false;
+					if (cat.parent && cat.parent.is_controlled) return false;
+					return true;
+				});
+			}
+
+			return this.sendSuccess(result);
 		} catch (error: any) {
 			return this.sendError(String((error as any).message), 500);
 		}
@@ -377,18 +472,32 @@ export class CategoryController extends BaseController {
 				return this.sendError('Category not found', 404);
 			}
 
-            // Check Control Logic
-            const filterControlled = await this.shouldFilterControlled(req);
-            if (filterControlled) {
-                // If category is controlled, or parent is controlled
-                if (category.is_controlled) return this.sendError('Category not found', 404); // Hide it
-                if (category.parent && category.parent.is_controlled) return this.sendError('Category not found', 404);
-                
-                // Also, filter children in the response?
-                if (category.children && category.children.length > 0) {
-                    category.children = category.children.filter((child: any) => !child.is_controlled);
-                }
-            }
+			// Check Control Logic
+			const filterControlled = await this.shouldFilterControlled(req);
+
+			// Always block access to inactive categories
+			// This endpoint is used by the web frontend; admin panel uses list() for its table
+			if (category.is_active === false) {
+				return this.sendError('Category not found', 404);
+			}
+			// Also block if parent category is inactive
+			if (category.parent && category.parent.is_active === false) {
+				return this.sendError('Category not found', 404);
+			}
+
+			if (filterControlled) {
+				if (category.is_controlled) return this.sendError('Category not found', 404);
+				if (category.parent && category.parent.is_controlled) return this.sendError('Category not found', 404);
+
+				if (category.children && category.children.length > 0) {
+					category.children = category.children.filter((child: any) => !child.is_controlled);
+				}
+			}
+
+			// Filter inactive children
+			if (category.children && category.children.length > 0) {
+				category.children = category.children.filter((child: any) => child.is_active !== false);
+			}
 
 			return this.sendSuccess(category);
 		} catch (error: any) {
@@ -407,30 +516,32 @@ export class CategoryController extends BaseController {
 				return this.sendError('Invalid category ID', 400);
 			}
 
-            const filterControlled = await this.shouldFilterControlled(req);
+			const filterControlled = await this.shouldFilterControlled(req);
 
 			const path: Category[] = [];
 			let currentId: number | null = id;
-            let hidden = false;
+			let hidden = false;
 
 			while (currentId) {
 				const category: any = await Category.findByPk(currentId);
 				if (!category) break;
-                
-                if (filterControlled && category.is_controlled) {
-                    hidden = true;
-                    // Dont break immediately if we want to check ancestors, 
-                    // but if any node in path is controlled, the whole path to target is compromised?
-                    // Actually, if a user can't see a parent, they shouldn't see the child.
-                    // So if we find a controlled node, the request for 'id' should fail.
-                    break;
-                }
+
+				// Always hide inactive categories
+				if (category.is_active === false) {
+					hidden = true;
+					break;
+				}
+
+				if (filterControlled && category.is_controlled) {
+					hidden = true;
+					break;
+				}
 
 				path.unshift(category);
 				currentId = category.parent_id;
 			}
-            
-            if (hidden) return this.sendError('Category not found', 404);
+
+			if (hidden) return this.sendError('Category not found', 404);
 
 			return this.sendSuccess(path);
 		} catch (error: any) {
@@ -471,15 +582,15 @@ export class CategoryController extends BaseController {
 			if (error) return error;
 
 			let body = parsedData ? parsedData.data : await req.json();
-            const files = parsedData ? parsedData.files : [];
+			const files = parsedData ? parsedData.files : [];
 
-            // If body fields came as strings in FormData, parse/clean them
-            if (typeof body.parentId === 'string') {
-                body.parentId = body.parentId === "null" || body.parentId === "" ? null : parseInt(body.parentId);
-            }
-             if (typeof body.isControlled === 'string') {
-                body.isControlled = body.isControlled === 'true';
-            }
+			// If body fields came as strings in FormData, parse/clean them
+			if (typeof body.parentId === 'string') {
+				body.parentId = body.parentId === "null" || body.parentId === "" ? null : parseInt(body.parentId);
+			}
+			if (typeof body.isControlled === 'string') {
+				body.isControlled = body.isControlled === 'true';
+			}
 
 			const validated = createCategorySchema.parse(body);
 
@@ -494,20 +605,20 @@ export class CategoryController extends BaseController {
 				}
 			}
 
-            // Generate unique slug
-            const slug = await this.generateUniqueSlug(validated.name);
+			// Generate unique slug
+			const slug = await this.generateUniqueSlug(validated.name);
 
-            // Handle Image Upload
-            let imagePath = validated.image || null;
-            if (files && files.length > 0) {
-                // Assuming first file is the image
-                const file = files[0]; 
-                // Save to categories/{slug} or categories/{timestamp}
-                 const subdir = `categories`; 
-                 // saveFile logic: file_uploads/categories/UUID-name.ext
-                 imagePath = await FileUploadService.saveFile(file, subdir);
-                 // The service returns relative path "file_uploads/..."
-            }
+			// Handle Image Upload
+			let imagePath = validated.image || null;
+			if (files && files.length > 0) {
+				// Assuming first file is the image
+				const file = files[0];
+				// Save to categories/{slug} or categories/{timestamp}
+				const subdir = `categories`;
+				// saveFile logic: file_uploads/categories/UUID-name.ext
+				imagePath = await FileUploadService.saveFile(file, subdir);
+				// The service returns relative path "file_uploads/..."
+			}
 
 			const category = await Category.create({
 				name: validated.name,
@@ -523,12 +634,12 @@ export class CategoryController extends BaseController {
 			if (error instanceof z.ZodError) {
 				return this.sendError('Validation Error', 400, error.issues);
 			}
-            if (error.name === 'SequelizeUniqueConstraintError') {
-                return this.sendError('Category already exists', 400);
-            }
-            if (error.name === 'SequelizeForeignKeyConstraintError') {
-                return this.sendError('Invalid Parent Category ID', 400);
-            }
+			if (error.name === 'SequelizeUniqueConstraintError') {
+				return this.sendError('Category already exists', 400);
+			}
+			if (error.name === 'SequelizeForeignKeyConstraintError') {
+				return this.sendError('Invalid Parent Category ID', 400);
+			}
 			return this.sendError('Internal Server Error', 500, [], error);
 		}
 	}
@@ -554,15 +665,15 @@ export class CategoryController extends BaseController {
 			}
 
 			let body = parsedData ? parsedData.data : await req.json();
-            const files = parsedData ? parsedData.files : [];
+			const files = parsedData ? parsedData.files : [];
 
-            // clean types
-            if (typeof body.parentId === 'string') {
-                body.parentId = body.parentId === "null" || body.parentId === "" ? null : parseInt(body.parentId);
-            }
-             if (typeof body.isControlled === 'string') {
-                body.isControlled = body.isControlled === 'true';
-            }
+			// clean types
+			if (typeof body.parentId === 'string') {
+				body.parentId = body.parentId === "null" || body.parentId === "" ? null : parseInt(body.parentId);
+			}
+			if (typeof body.isControlled === 'string') {
+				body.isControlled = body.isControlled === 'true';
+			}
 
 			const validated = updateCategorySchema.parse(body);
 
@@ -588,18 +699,18 @@ export class CategoryController extends BaseController {
 				}
 			}
 
-            let slug = undefined;
-            if (validated.name && validated.name !== existing.name) {
-                slug = await this.generateUniqueSlug(validated.name, id);
-            }
+			let slug = undefined;
+			if (validated.name && validated.name !== existing.name) {
+				slug = await this.generateUniqueSlug(validated.name, id);
+			}
 
-            // Handle Image
-            let imagePath = validated.image; // If string url passed
-            if (files && files.length > 0) {
-                 const file = files[0];
-                 const subdir = `categories`;
-                 imagePath = await FileUploadService.saveFile(file, subdir);
-            }
+			// Handle Image
+			let imagePath = validated.image; // If string url passed
+			if (files && files.length > 0) {
+				const file = files[0];
+				const subdir = `categories`;
+				imagePath = await FileUploadService.saveFile(file, subdir);
+			}
 
 			await existing.update({
 				name: validated.name ?? existing.name,
@@ -649,14 +760,14 @@ export class CategoryController extends BaseController {
 			}
 
 			// Check if category has products (via any of the three category fields)
-			const productCount = await Product.count({ 
-				where: { 
+			const productCount = await Product.count({
+				where: {
 					[Op.or]: [
 						{ main_category_id: id },
 						{ category_id: id },
 						{ sub_category_id: id }
 					]
-				} 
+				}
 			});
 			if (productCount > 0) {
 				return this.sendError(
@@ -667,6 +778,46 @@ export class CategoryController extends BaseController {
 
 			await existing.destroy();
 			return this.sendSuccess(null, 'Category deleted');
+		} catch (error: any) {
+			return this.sendError(String((error as any).message), 500);
+		}
+	}
+
+	/**
+	 * PATCH /api/v1/categories/:id
+	 * Toggle category active status (Admin only)
+	 */
+	async toggleActive(req: NextRequest, { params }: { params: { id: string } }) {
+		try {
+			const { user, error } = await this.verifyAdmin(req);
+			if (error) return error;
+
+			const id = parseInt(params.id);
+			if (isNaN(id)) {
+				return this.sendError('Invalid category ID', 400);
+			}
+
+			const category = await Category.findByPk(id);
+			if (!category) {
+				return this.sendError('Category not found', 404);
+			}
+
+			// Read the desired state from the request body
+			let body: any = {};
+			try { body = await req.json(); } catch (e) { /* empty body */ }
+
+			// If is_active is provided in body, use it; otherwise toggle
+			const newStatus = typeof body.is_active === 'boolean'
+				? body.is_active
+				: !(category.is_active !== false);
+
+			await category.update({ is_active: newStatus });
+
+			const message = newStatus
+				? 'Category activated successfully'
+				: 'Category deactivated. It and any subcategories/products under it will be hidden from the public storefront.';
+
+			return this.sendSuccess(category, message);
 		} catch (error: any) {
 			return this.sendError(String((error as any).message), 500);
 		}

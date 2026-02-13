@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { CategoryController } from '@/controllers/CategoryController';
 
+// Force recompile: inactive category filtering
 const controller = new CategoryController();
 
 /**
@@ -24,11 +25,11 @@ const controller = new CategoryController();
  *         description: Category not found
  */
 export async function GET(
-	req: NextRequest,
-	context: { params: Promise<{ id: string }> }
+    req: NextRequest,
+    context: { params: Promise<{ id: string }> }
 ) {
-	const params = await context.params;
-	return controller.getById(req, { params });
+    const params = await context.params;
+    return controller.getById(req, { params });
 }
 
 /**
@@ -69,11 +70,11 @@ export async function GET(
  *         description: Category not found
  */
 export async function PUT(
-	req: NextRequest,
-	context: { params: Promise<{ id: string }> }
+    req: NextRequest,
+    context: { params: Promise<{ id: string }> }
 ) {
-	const params = await context.params;
-    
+    const params = await context.params;
+
     const contentType = req.headers.get('content-type') || '';
     if (contentType.includes('multipart/form-data')) {
         const formData = await req.formData();
@@ -91,7 +92,7 @@ export async function PUT(
         return controller.update(req, { params, parsedData: { data, files } });
     }
 
-	return controller.update(req, { params });
+    return controller.update(req, { params });
 }
 
 /**
@@ -121,9 +122,41 @@ export async function PUT(
  *         description: Category not found
  */
 export async function DELETE(
-	req: NextRequest,
-	context: { params: Promise<{ id: string }> }
+    req: NextRequest,
+    context: { params: Promise<{ id: string }> }
 ) {
-	const params = await context.params;
-	return controller.delete(req, { params });
+    const params = await context.params;
+    return controller.delete(req, { params });
+}
+
+/**
+ * @swagger
+ * /api/v1/categories/{id}:
+ *   patch:
+ *     tags: [Categories]
+ *     summary: Toggle category active status (Admin only)
+ *     description: Toggles the is_active flag on a category. Deactivated categories are hidden from the public storefront.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Category status toggled
+ *       401:
+ *         description: Authentication required
+ *       403:
+ *         description: Admin only
+ *       404:
+ *         description: Category not found
+ */
+export async function PATCH(
+    req: NextRequest,
+    context: { params: Promise<{ id: string }> }
+) {
+    const params = await context.params;
+    return controller.toggleActive(req, { params });
 }

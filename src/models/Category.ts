@@ -9,13 +9,14 @@ interface CategoryAttributes {
   image?: string | null;
   description?: string | null;
   is_controlled: boolean;
+  is_active: boolean;
   parent_id?: number | null;
   created_at?: Date;
   updated_at?: Date;
   deleted_at?: Date | null;
 }
 
-interface CategoryCreationAttributes extends Optional<CategoryAttributes, 'id' | 'image' | 'created_at' | 'updated_at' | 'deleted_at'> {}
+interface CategoryCreationAttributes extends Optional<CategoryAttributes, 'id' | 'image' | 'is_active' | 'created_at' | 'updated_at' | 'deleted_at'> { }
 
 export class Category extends Model<CategoryAttributes, CategoryCreationAttributes> implements CategoryAttributes {
   public id!: number;
@@ -25,7 +26,8 @@ export class Category extends Model<CategoryAttributes, CategoryCreationAttribut
   public description?: string | null;
   public parent_id?: number | null;
   public is_controlled!: boolean;
-  
+  public is_active!: boolean;
+
   public readonly created_at?: Date;
   public readonly updated_at?: Date;
   public readonly deleted_at?: Date | null;
@@ -66,6 +68,11 @@ Category.init(
       type: DataTypes.BOOLEAN,
       allowNull: false,
       defaultValue: false,
+    },
+    is_active: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
     },
     parent_id: {
       type: DataTypes.INTEGER,

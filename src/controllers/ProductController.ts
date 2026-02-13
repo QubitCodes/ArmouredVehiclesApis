@@ -11,6 +11,7 @@ import { parse } from 'csv-parse/sync';
 import { PermissionService } from '../services/PermissionService';
 import { FileUploadService } from '../services/FileUploadService';
 import { FileDeleteService } from '../services/FileDeleteService';
+import { sequelize } from '../config/database';
 
 // Mock schema for create - expand later
 const pricingTierSchema = z.object({
@@ -262,32 +263,37 @@ export class ProductController extends BaseController {
     /**
      * Helper: Get All Descendant Category IDs (Recursive)
      */
+    /**
+     * Helper: Get All Descendant Category IDs (Recursive CTE)
+     */
     private async getAllCategoryDescendants(rootId: number): Promise<number[]> {
-        const ids = [rootId];
-        let currentLevelIds = [rootId];
+        // Safe recursive query using CTE
+        const query = `
+            WITH RECURSIVE category_tree AS (
+                SELECT id, parent_id
+                FROM categories
+                WHERE id = :rootId
+                UNION ALL
+                SELECT c.id, c.parent_id
+                FROM categories c
+                INNER JOIN category_tree ct ON c.parent_id = ct.id
+            )
+            SELECT id FROM category_tree;
+        `;
 
-        // Iteratively fetch children to avoid recursion depth issues
-        while (currentLevelIds.length > 0) {
-            const children = await Category.findAll({
-                where: { parent_id: { [Op.in]: currentLevelIds } },
-                attributes: ['id'],
+        try {
+            const results: any[] = await sequelize.query(query, {
+                replacements: { rootId },
+                type: (sequelize as any).QueryTypes.SELECT,
                 raw: true
-            }) as any[];
+            });
 
-            if (!children.length) break;
-
-            // Collect new IDs
-            const childIds = children.map(c => c.id);
-            // Check for potential circular dependency (safety check) - though DB constraints should prevent it
-            const newIds = childIds.filter(id => !ids.includes(id));
-
-            if (newIds.length === 0) break;
-
-            ids.push(...newIds);
-            currentLevelIds = newIds;
+            return results.map(r => r.id);
+        } catch (error) {
+            console.error('Error fetching category descendants via CTE:', error);
+            // Fallback to just the root ID if something explodes, though unlikely
+            return [rootId];
         }
-
-        return ids;
     }
 
     /**
@@ -475,6 +481,47 @@ export class ProductController extends BaseController {
 
             const subCatId = searchParams.get('sub_category_id');
             if (subCatId) whereClause.sub_category_id = subCatId;
+
+            // Filter out products under inactive categories (non-admin only)
+            if (!isAdmin) {
+                const inactiveCats = await Category.findAll({
+                    where: { is_active: false },
+                    attributes: ['id'],
+                    raw: true
+                }) as any[];
+
+                if (inactiveCats.length > 0) {
+                    const inactiveIds = inactiveCats.map((c: any) => c.id);
+                    // Also get all descendants of inactive categories
+                    const allInactiveIds = new Set<number>(inactiveIds);
+                    let currentLevelIds = inactiveIds;
+                    while (currentLevelIds.length > 0) {
+                        const children = await Category.findAll({
+                            where: { parent_id: { [Op.in]: currentLevelIds } },
+                            attributes: ['id'],
+                            raw: true
+                        }) as any[];
+                        const childIds = children.map((c: any) => c.id).filter((id: number) => !allInactiveIds.has(id));
+                        if (childIds.length === 0) break;
+                        childIds.forEach((id: number) => allInactiveIds.add(id));
+                        currentLevelIds = childIds;
+                    }
+
+                    const excludeIds = Array.from(allInactiveIds);
+                    const inactiveFilter = {
+                        [Op.and]: [
+                            { main_category_id: { [Op.or]: [{ [Op.notIn]: excludeIds }, { [Op.is]: null }] } },
+                            { category_id: { [Op.or]: [{ [Op.notIn]: excludeIds }, { [Op.is]: null }] } },
+                            { sub_category_id: { [Op.or]: [{ [Op.notIn]: excludeIds }, { [Op.is]: null }] } }
+                        ]
+                    };
+
+                    if (!whereClause[Op.and]) {
+                        whereClause[Op.and] = [];
+                    }
+                    whereClause[Op.and].push(inactiveFilter);
+                }
+            }
 
             // Vendor Filter (Admin Only)
             const vendorId = searchParams.get('vendor_id');
