@@ -249,13 +249,21 @@ export class ReferenceController extends BaseController {
 
       const vatSetting = await PlatformSetting.findOne({ where: { key: 'vat_percentage' } });
       const subFooterSetting = await PlatformSetting.findOne({ where: { key: 'sub_footer_text' } });
+      const vatRulesSetting = await PlatformSetting.findOne({ where: { key: 'vat_rules' } });
 
       // Get USD rate for frontend conversion (e.g. FedEx rates)
       // Stored as 1 AED = X USD (e.g. 0.2723)
       const usdRate = await CurrencyService.getRate('USD');
 
+      // Parse vat_rules JSON for frontend consumption
+      let vatRules: any[] = [];
+      if (vatRulesSetting?.value) {
+        try { vatRules = JSON.parse(vatRulesSetting.value); } catch { /* ignore parse errors */ }
+      }
+
       return this.sendSuccess({
         vat_percentage: vatSetting ? parseFloat(vatSetting.value) : 5,
+        vat_rules: vatRules,
         sub_footer_text: subFooterSetting?.value || '',
         currency_rates: {
           AED_TO_USD: usdRate || 0.2723, // Default fallback
@@ -265,6 +273,103 @@ export class ReferenceController extends BaseController {
     } catch (error: any) {
       console.error('Settings Fetch Error:', error);
       return this.sendError('Failed to fetch settings', 500, [error.message]);
+    }
+  }
+
+  /**
+   * Get a single platform setting by key
+   * GET /api/v1/platform-settings/:key
+   */
+  async getSettingByKey(req: NextRequest, { params }: { params: Promise<{ key: string }> }) {
+    try {
+      const { key } = await params;
+      const setting = await PlatformSetting.findOne({ where: { key } });
+
+      if (!setting) {
+        return this.sendError(`Setting '${key}' not found`, 404);
+      }
+
+      // Try to parse as JSON, fallback to raw string
+      let parsedValue: any;
+      try {
+        parsedValue = JSON.parse(setting.value);
+      } catch {
+        parsedValue = setting.value;
+      }
+
+      return this.sendSuccess({
+        key: setting.key,
+        value: parsedValue,
+        description: setting.description,
+      });
+    } catch (error: any) {
+      console.error('Get Setting Error:', error);
+      return this.sendError('Failed to fetch setting', 500, [error.message]);
+    }
+  }
+
+  /**
+   * Update a platform setting by key (Admin only)
+   * PUT /api/v1/platform-settings/:key
+   * Body: { value: any }
+   */
+  async updateSettingByKey(req: NextRequest, { params }: { params: Promise<{ key: string }> }) {
+    try {
+      const { user, error } = await this.verifyAdmin(req);
+      if (error) return error;
+
+      const { key } = await params;
+      const body = await req.json();
+
+      if (body.value === undefined) {
+        return this.sendError('value is required', 400);
+      }
+
+      const setting = await PlatformSetting.findOne({ where: { key } });
+      if (!setting) {
+        return this.sendError(`Setting '${key}' not found`, 404);
+      }
+
+      // Special validation for vat_rules
+      if (key === 'vat_rules') {
+        if (!Array.isArray(body.value)) {
+          return this.sendError('vat_rules value must be an array', 400);
+        }
+        for (const rule of body.value) {
+          if (
+            typeof rule.vendor_to_admin_vat_percent !== 'number' ||
+            rule.vendor_to_admin_vat_percent < 0 ||
+            rule.vendor_to_admin_vat_percent > 100
+          ) {
+            return this.sendError(
+              `Invalid vendor_to_admin_vat_percent for scenario "${rule.scenario}". Must be 0-100.`,
+              400
+            );
+          }
+          if (
+            typeof rule.admin_to_customer_vat_percent !== 'number' ||
+            rule.admin_to_customer_vat_percent < 0 ||
+            rule.admin_to_customer_vat_percent > 100
+          ) {
+            return this.sendError(
+              `Invalid admin_to_customer_vat_percent for scenario "${rule.scenario}". Must be 0-100.`,
+              400
+            );
+          }
+        }
+      }
+
+      // Stringify objects/arrays, keep primitives as-is
+      const serialized = typeof body.value === 'object'
+        ? JSON.stringify(body.value)
+        : String(body.value);
+
+      await setting.update({ value: serialized });
+
+      return this.sendSuccess({ key, value: body.value }, 'Setting updated successfully');
+    } catch (error: any) {
+      console.error('Update Setting Error:', error);
+      return this.sendError('Failed to update setting', 500, [error.message]);
     }
   }
 

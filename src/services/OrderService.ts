@@ -2,24 +2,23 @@
 import { Cart, CartItem, Order, OrderItem, Product, User, PlatformSetting, Address, UserProfile } from '../models';
 import { sequelize } from '../config/database';
 import { applyCommission } from '../utils/priceHelper';
+import { VatService } from './VatService';
 
 export class OrderService {
 
     /**
-     * Get platform settings (VAT and Commission)
+     * Get platform settings (Commission only — VAT is now per-group via VatService)
      */
     private static async getPlatformSettings() {
         try {
-            const vatSetting = await PlatformSetting.findOne({ where: { key: 'vat_percentage' } });
             const commSetting = await PlatformSetting.findOne({ where: { key: 'admin_commission_percentage' } });
 
             return {
-                vatPercent: vatSetting ? parseFloat(vatSetting.value) : 5,
                 commPercent: commSetting ? parseFloat(commSetting.value) : 10
             };
         } catch (e) {
             console.error("Error fetching platform settings, using defaults", e);
-            return { vatPercent: 5, commPercent: 10 };
+            return { commPercent: 10 };
         }
     }
 
@@ -103,15 +102,19 @@ export class OrderService {
                 }
             }
 
-            const { vatPercent, commPercent } = await this.getPlatformSettings();
+            const { commPercent } = await this.getPlatformSettings();
 
             // 4. Group Items by Vendor
             const vendorGroups = new Map<string, any[]>();
             const consolidatedItems = new Map<string, any>();
 
-            // Fetch user specific discount
+            // Fetch user profile for discount and customer country (VAT)
             const userProfile = await UserProfile.findOne({ where: { user_id: userId }, transaction: t });
             const discountPercent = userProfile?.discount || 0;
+
+            // 3b. Customer's registered country for per-group VAT calculation
+            // VAT is based on the company's registered country, NOT the delivery address
+            const customerCountry: string | null = userProfile?.country || null;
 
             for (const item of cart.items) {
                 if (!item.product) continue;
@@ -180,6 +183,22 @@ export class OrderService {
                     if (shippingInfo) {
                         groupShipping = Number(shippingInfo.total) || 0;
                     }
+
+                    // --- Per-Group VAT Calculation ---
+                    // Fetch the vendor's registered country for VAT rule matching
+                    let vendorCountry: string | null = null;
+                    if (actualVendorId) {
+                        const vendorProfile = await UserProfile.findOne({
+                            where: { user_id: actualVendorId },
+                            attributes: ['country'],
+                            transaction: t
+                        });
+                        vendorCountry = vendorProfile?.country || null;
+                    }
+
+                    // Get VAT rates for this vendor→customer country pair
+                    const vatResult = await VatService.getVatForScenario(vendorCountry, customerCountry);
+                    const vatPercent = vatResult.adminToCustomerVat;
 
                     const taxableAmount = groupSubtotal + groupShipping + groupPacking;
                     const vatAmount = (taxableAmount * vatPercent) / 100;

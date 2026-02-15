@@ -283,7 +283,14 @@ export class AdminOrderController extends BaseController {
                 order = await Order.findOne({
                     where: { id },
                     include: [
-                        { model: User, as: 'user', attributes: ['id', 'name', 'email', 'phone'] },
+                        {
+                            model: User, as: 'user', attributes: ['id', 'name', 'email', 'phone'],
+                            include: [{ model: UserProfile, as: 'profile', attributes: ['country'] }]
+                        },
+                        {
+                            model: User, as: 'vendor', attributes: ['id', 'name'],
+                            include: [{ model: UserProfile, as: 'profile', attributes: ['company_name', 'country'] }]
+                        },
                         {
                             model: OrderItem,
                             as: 'items',
@@ -297,12 +304,15 @@ export class AdminOrderController extends BaseController {
                 // Admin fetch: Full view
                 order = await Order.findByPk(id, {
                     include: [
-                        { model: User, as: 'user', attributes: ['name', 'email', 'phone', 'country_code', 'username', 'user_type'] }, // Added fields for frontend
+                        {
+                            model: User, as: 'user', attributes: ['name', 'email', 'phone', 'country_code', 'username', 'user_type'],
+                            include: [{ model: UserProfile, as: 'profile', attributes: ['country'] }]
+                        },
                         {
                             model: User,
                             as: 'vendor',
                             attributes: ['id', 'name', 'email', 'username'],
-                            include: [{ model: UserProfile, as: 'profile', attributes: ['company_name'] }]
+                            include: [{ model: UserProfile, as: 'profile', attributes: ['company_name', 'country'] }]
                         },
                         {
                             model: OrderItem,
@@ -381,12 +391,15 @@ export class AdminOrderController extends BaseController {
                 const groupedOrdersDetails = await Order.findAll({
                     where: { order_group_id: order.order_group_id },
                     include: [
-                        { model: User, as: 'user', attributes: ['name', 'email', 'phone'] },
+                        {
+                            model: User, as: 'user', attributes: ['name', 'email', 'phone'],
+                            include: [{ model: UserProfile, as: 'profile', attributes: ['country'] }]
+                        },
                         {
                             model: User,
                             as: 'vendor',
                             attributes: ['id', 'name', 'email', 'username'],
-                            include: [{ model: UserProfile, as: 'profile', attributes: ['company_name'] }]
+                            include: [{ model: UserProfile, as: 'profile', attributes: ['company_name', 'country'] }]
                         },
                         {
                             model: OrderItem,

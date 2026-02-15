@@ -550,8 +550,16 @@ export class FedExService {
             return { success: false, error: 'FedEx not configured' };
         }
 
-        // Determine if international shipment
-        const isInternational = input.fromAddress.countryCode !== input.toAddress.countryCode;
+        // Determine if customs clearance is needed (case-insensitive)
+        // With a UAE-based FedEx account, customs clearance is required when:
+        //   1. Origin and destination countries differ (genuine international), OR
+        //   2. Either country differs from the FedEx account's home country (AE)
+        //      e.g. IN→IN through a UAE account is still cross-border billing
+        const fromCountry = (input.fromAddress.countryCode || '').toUpperCase();
+        const toCountry = (input.toAddress.countryCode || '').toUpperCase();
+        const accountCountry = 'AE'; // FedEx account registered country
+        const isInternational = fromCountry !== toCountry || fromCountry !== accountCountry || toCountry !== accountCountry;
+        console.log(`[FedEx getRates] fromCountry=${fromCountry}, toCountry=${toCountry}, accountCountry=${accountCountry}, isInternational=${isInternational}`);
 
         // Sanitize addresses for FedEx API
         const fromState = input.fromAddress.stateOrProvinceCode;
@@ -610,6 +618,9 @@ export class FedExService {
                     }
                 ],
                 customsClearanceDetail: isInternational ? {
+                    commercialInvoice: {
+                        shipmentPurpose: 'SOLD'
+                    },
                     dutiesPayment: {
                         paymentType: 'SENDER',
                         payor: {
@@ -635,10 +646,11 @@ export class FedExService {
         };
 
 
+        console.log('[FedEx getRates] Full Payload:', JSON.stringify(payload, null, 2));
         const response = await this.apiRequest<any>('/rate/v1/rates/quotes', 'POST', payload);
 
         if (!response.success || !response.data) {
-            return { success: false, error: response.error };
+            return { success: false, error: response.error, errorCode: response.errorCode };
         }
 
         // Parse rate quotes from response
@@ -740,6 +752,9 @@ export class FedExService {
                     dimensions: input.dimensions || undefined
                 }),
                 customsClearanceDetail: input.fromAddress.countryCode !== input.toAddress.countryCode ? {
+                    commercialInvoice: {
+                        shipmentPurpose: 'SOLD'
+                    },
                     dutiesPayment: {
                         paymentType: 'SENDER',
                         payor: {

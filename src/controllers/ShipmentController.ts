@@ -142,8 +142,8 @@ export class ShipmentController extends BaseController {
                     if (vendorUser && (vendorUser as any).profile) {
                         const vendorProfile = (vendorUser as any).profile;
 
-                        const country = vendorProfile.country || 'United Arab Emirates';
-                        const isUAE = country === 'United Arab Emirates' || country === 'UAE';
+                        const country = vendorProfile.country || 'AE';
+                        const isUAE = country.toUpperCase() === 'AE';
 
                         const street = vendorProfile.address_line1 || vendorProfile.address_line_1 || vendorProfile.street; // Fixed typo
                         const city = vendorProfile.city || (isUAE ? 'Dubai' : '');
@@ -161,7 +161,7 @@ export class ShipmentController extends BaseController {
                             city: city,
                             stateOrProvinceCode: stateCode,
                             postalCode: postalCode,
-                            countryCode: isUAE ? 'AE' : (vendorProfile.country_code || (country ? country.substring(0, 2).toUpperCase() : 'AE'))
+                            countryCode: country.toUpperCase() || 'AE'
                         };
 
 
@@ -197,6 +197,52 @@ export class ShipmentController extends BaseController {
                 };
             }
 
+            /**
+             * TODO: Remove manual shipping fallback once FedEx multi-country account support is enabled.
+             * Currently, FedEx UAE account cannot service routes where both origin and destination
+             * are outside UAE. For such routes, we return 0 shipping and flag as manual shipping
+             * so that Armoured Mart admins can arrange shipping separately.
+             */
+
+            /**
+             * Normalize country value to ISO 2-letter code.
+             * Handles cases where profile stores full name (e.g. "United Arab Emirates")
+             * instead of the ISO code ("AE").
+             */
+            const normalizeCountryCode = (val: string): string => {
+                const v = (val || '').trim().toUpperCase();
+                // Already a 2-letter code
+                if (v.length === 2) return v;
+                // Common name → code mappings
+                const nameMap: Record<string, string> = {
+                    'UNITED ARAB EMIRATES': 'AE', 'UAE': 'AE',
+                    'INDIA': 'IN', 'UNITED STATES': 'US', 'USA': 'US',
+                    'UNITED KINGDOM': 'GB', 'UK': 'GB',
+                    'SAUDI ARABIA': 'SA', 'KSA': 'SA',
+                    'QATAR': 'QA', 'OMAN': 'OM', 'KUWAIT': 'KW',
+                    'BAHRAIN': 'BH', 'GERMANY': 'DE', 'FRANCE': 'FR',
+                    'CHINA': 'CN', 'JAPAN': 'JP', 'AUSTRALIA': 'AU',
+                    'CANADA': 'CA', 'PAKISTAN': 'PK', 'TURKEY': 'TR',
+                    'EGYPT': 'EG', 'JORDAN': 'JO', 'IRAQ': 'IQ',
+                    'IRAN': 'IR', 'SOUTH KOREA': 'KR', 'SINGAPORE': 'SG',
+                };
+                return nameMap[v] || v;
+            };
+
+            const fromCountry = normalizeCountryCode(fromAddress.countryCode);
+            const toCountry = normalizeCountryCode(toAddress.countryCode);
+            const ACCOUNT_COUNTRY = 'AE';
+
+            log(`Country check — from: "${fromAddress.countryCode}" → ${fromCountry}, to: "${toAddress.countryCode}" → ${toCountry}`);
+
+            if (fromCountry !== ACCOUNT_COUNTRY && toCountry !== ACCOUNT_COUNTRY) {
+                log(`Manual shipping: both origin (${fromCountry}) and destination (${toCountry}) are outside ${ACCOUNT_COUNTRY}`);
+                return this.sendSuccess([], 'Manual shipping — rates will be arranged by admin', 100, {
+                    manualShipping: true,
+                    reason: `FedEx UAE account does not support ${fromCountry} → ${toCountry} routes. Shipping will be arranged separately.`
+                });
+            }
+
             const input: RateRequestInput = {
                 fromAddress,
                 fromContact,
@@ -213,6 +259,15 @@ export class ShipmentController extends BaseController {
 
             if (!result.success) {
                 log('FedEx API Failed', result.error);
+
+                // Handle specific FedEx error codes with user-friendly messages
+                if (result.errorCode === 'RATE.LOCATION.NOSERVICE') {
+                    return this.sendError(
+                        'Shipping is not available for this vendor-to-destination route. The vendor may be outside the supported shipping network.',
+                        302
+                    );
+                }
+
                 return this.sendError(result.error || 'Failed to calculate rates', 302);
             }
 
@@ -309,7 +364,7 @@ export class ShipmentController extends BaseController {
                 city: profile.city,
                 stateOrProvinceCode: profile.state || profile.city,
                 postalCode: profile.postal_code || '00000',
-                countryCode: profile.country === 'United Arab Emirates' ? 'AE' : profile.country?.substring(0, 2) || 'AE'
+                countryCode: profile.country?.toUpperCase() || 'AE'
             };
 
             const customerContact: FedExContact = {
@@ -498,7 +553,7 @@ export class ShipmentController extends BaseController {
                 city: customerProfile.city || 'Dubai',
                 stateOrProvinceCode: customerProfile.state || customerProfile.city || 'DXB',
                 postalCode: customerProfile.postal_code || '00000',
-                countryCode: customerProfile.country === 'United Arab Emirates' ? 'AE' : customerProfile.country?.substring(0, 2)?.toUpperCase() || 'AE'
+                countryCode: customerProfile.country?.toUpperCase() || 'AE'
             };
 
             const recipientContact: FedExContact = {
@@ -540,7 +595,7 @@ export class ShipmentController extends BaseController {
                     city: vCity || 'Dubai',
                     stateOrProvinceCode: vState || 'DXB',
                     postalCode: vPostal || '00000',
-                    countryCode: vCountry === 'United Arab Emirates' ? 'AE' : (vCountry?.substring(0, 2)?.toUpperCase() || 'AE')
+                    countryCode: vCountry?.toUpperCase() || 'AE'
                 };
 
                 pickupContact = {

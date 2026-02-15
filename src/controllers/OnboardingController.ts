@@ -107,7 +107,7 @@ export class OnboardingController extends BaseController {
 			let profile = await UserProfile.findOne({ where: { user_id: user!.id } });
 
 			const updateData: any = {
-				country,
+				country: country?.toUpperCase(),
 				company_name: companyName,
 				company_email: companyEmail,
 				company_phone: companyPhone,
@@ -205,7 +205,7 @@ export class OnboardingController extends BaseController {
 			const mappedEntityTypeId = entityTypeMap[entityTypeValue] || (typeof entityType === 'number' ? entityType : null);
 
 			const updates: any = {
-				country_of_registration: countryOfRegistration,
+				country: countryOfRegistration?.toUpperCase(),
 				registered_company_name: registeredCompanyName,
 				trade_brand_name: tradeBrandName,
 				year_of_establishment: yearOfEstablishment ? parseInt(yearOfEstablishment) : undefined,

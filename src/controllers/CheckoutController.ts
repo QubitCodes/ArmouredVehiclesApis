@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import { BaseController } from './BaseController';
 import { OrderComplianceService } from '../services/OrderComplianceService';
 import { OrderService } from '../services/OrderService';
+import { VatService } from '../services/VatService';
 import { Cart, CartItem, Order, OrderItem, Product, User, PlatformSetting, Address } from '../models';
 import { verifyAccessToken } from '../utils/jwt';
 import { sequelize } from '../config/database';
@@ -29,18 +30,16 @@ export class CheckoutController extends BaseController {
     }
 
     private async getPlatformSettings() {
-        // Fetch VAT and Admin Commission, default to 5% and 10%
+        // Fetch Admin Commission (VAT is now per-group via VatService)
         try {
-            const vatSetting = await PlatformSetting.findOne({ where: { key: 'vat_percentage' } });
             const commSetting = await PlatformSetting.findOne({ where: { key: 'admin_commission_percentage' } });
 
             return {
-                vatPercent: vatSetting ? parseFloat(vatSetting.value) : 5,
                 commPercent: commSetting ? parseFloat(commSetting.value) : 10
             };
         } catch (e) {
             console.error("Error fetching platform settings, using defaults", e);
-            return { vatPercent: 5, commPercent: 10 };
+            return { commPercent: 10 };
         }
     }
 
@@ -119,8 +118,6 @@ export class CheckoutController extends BaseController {
             const { addressId, shippingDetails } = body;
             const isEmbedded = true;
 
-            const { vatPercent } = await this.getPlatformSettings();
-
             // Check Compliance
             const compliance = await OrderComplianceService.checkCompliance(user.id, cart.id);
             const isComplianceRequest = compliance.type === 'request';
@@ -148,83 +145,117 @@ export class CheckoutController extends BaseController {
                 }
             }
 
-            // Re-assign for use below
-            // shippingDetails = parsedShippingDetails; // Avoid reassigning const/let blocked scope if shadowed
-            // Use local var
+            // --- Per-Vendor-Group VAT Calculation for Stripe ---
+            // Fetch user profile for discount and customer registered country (VAT)
+            const userProfile = await UserProfile.findOne({ where: { user_id: user.id } });
+            const discountPercent = userProfile?.discount || 0;
 
-            // Calculate Totals for Stripe and High Value check
+            // Customer country for VAT = registered company country, NOT delivery address
+            const customerCountry: string | null = userProfile?.country || null;
+
+            // Group cart items by vendor
+            const vendorGroupMap = new Map<string, any[]>();
+            for (const item of cart.items) {
+                if (!item.product) continue;
+                const vId = item.product.vendor_id || 'admin';
+                if (!vendorGroupMap.has(vId)) vendorGroupMap.set(vId, []);
+                vendorGroupMap.get(vId)!.push(item);
+            }
+
             let subtotal = 0;
             let totalVat = 0;
             const allStripeItems: any[] = [];
 
-            // Fetch user profile for discount
-            const userProfile = await UserProfile.findOne({ where: { user_id: user.id } });
-            const discountPercent = userProfile?.discount || 0;
+            // 3. For each vendor group, compute per-group VAT
+            for (const [vendorId, vendorItems] of vendorGroupMap) {
+                const actualVendorId = vendorId === 'admin' ? null : vendorId;
 
-            for (const item of cart.items) {
-                if (!item.product) continue;
+                // Fetch vendor country for VAT rule matching
+                let vendorCountry: string | null = null;
+                if (actualVendorId) {
+                    const vendorProfile = await UserProfile.findOne({
+                        where: { user_id: actualVendorId },
+                        attributes: ['country']
+                    });
+                    vendorCountry = vendorProfile?.country || null;
+                }
 
-                // Use applyCommission to get the customer-facing price (inflation included)
-                const formattedProduct = await applyCommission(item.product, discountPercent);
-                const price = Number(formattedProduct.price) || 0;
+                // Get VAT rate for this vendor→customer pair
+                const vatResult = await VatService.getVatForScenario(vendorCountry, customerCountry);
+                const vatPercent = vatResult.adminToCustomerVat;
 
-                const qty = item.quantity;
-                subtotal += price * qty; // Total price customer pays (before VAT)
+                let groupVat = 0;
 
-                // Accumulate VAT
-                totalVat += (price * (vatPercent / 100)) * qty;
+                for (const item of vendorItems) {
+                    if (!item.product) continue;
 
-                allStripeItems.push({
-                    name: item.product.name,
-                    amount: Math.round(price * 100),
-                    quantity: qty,
-                    currency: 'aed'
-                });
+                    // Use applyCommission to get the customer-facing price (inflation included)
+                    const formattedProduct = await applyCommission(item.product, discountPercent);
+                    const price = Number(formattedProduct.price) || 0;
+                    const qty = item.quantity;
 
-                // Note: Per-product legacy shipping charge is IGNORED in favor of shippingDetails
-                if (Number(item.product.packing_charge) > 0) {
-                    const packingPrice = Number(item.product.packing_charge);
-                    totalVat += (packingPrice * (vatPercent / 100)) * qty;
-                    subtotal += packingPrice * qty; // Include packing in high-value threshold check
+                    subtotal += price * qty;
+                    groupVat += (price * (vatPercent / 100)) * qty;
 
                     allStripeItems.push({
-                        name: 'Packing Charges',
-                        amount: Math.round(packingPrice * 100),
+                        name: item.product.name,
+                        amount: Math.round(price * 100),
                         quantity: qty,
                         currency: 'aed'
                     });
-                }
-            }
 
-            // Add Grouped Shipping Items from Frontend Selection
-            if (parsedShippingDetails && typeof parsedShippingDetails === 'object') {
-                Object.entries(parsedShippingDetails).forEach(([vendorId, details]: any) => {
-                    const cost = Number(details.total) || 0;
-                    if (cost > 0) {
-                        totalVat += (cost * (vatPercent / 100));
+                    // Packing charges
+                    if (Number(item.product.packing_charge) > 0) {
+                        const packingPrice = Number(item.product.packing_charge);
+                        groupVat += (packingPrice * (vatPercent / 100)) * qty;
+                        subtotal += packingPrice * qty;
 
                         allStripeItems.push({
-                            name: `Shipping (${details.method || 'Standard'})`,
-                            amount: Math.round(cost * 100),
-                            quantity: 1,
+                            name: 'Packing Charges',
+                            amount: Math.round(packingPrice * 100),
+                            quantity: qty,
                             currency: 'aed'
                         });
                     }
-                    subtotal += cost; // Approximate for high-value check
-                });
-            }
+                }
 
-            // Add VAT Line Item
-            if (totalVat > 0) {
-                allStripeItems.push({
-                    name: `VAT (${vatPercent}%)`,
-                    amount: Math.round(totalVat * 100),
-                    quantity: 1,
-                    currency: 'aed'
-                });
-            } else {
-                // Fallback (or Error): If no shipping details provided for a shipment order
-                // Maybe warn? For now proceed, assuming 0 shipping if not provided.
+                // Shipping VAT for this vendor group
+                if (parsedShippingDetails && typeof parsedShippingDetails === 'object') {
+                    const shippingEntry = parsedShippingDetails[vendorId] || parsedShippingDetails[actualVendorId || 'admin'];
+                    if (shippingEntry) {
+                        const cost = Number(shippingEntry.total) || 0;
+                        if (cost > 0) {
+                            groupVat += (cost * (vatPercent / 100));
+
+                            allStripeItems.push({
+                                name: `Shipping (${shippingEntry.method || 'Standard'})`,
+                                amount: Math.round(cost * 100),
+                                quantity: 1,
+                                currency: 'aed'
+                            });
+                        }
+                        subtotal += cost;
+                    }
+                }
+
+                // Add per-group VAT line item to Stripe
+                if (groupVat > 0) {
+                    // Get a vendor label for the Stripe line item
+                    let vendorLabel = 'Platform';
+                    if (actualVendorId) {
+                        const vendorUser = await User.findByPk(actualVendorId, { attributes: ['name'] });
+                        vendorLabel = vendorUser?.name || 'Vendor';
+                    }
+
+                    allStripeItems.push({
+                        name: `VAT (${vatPercent}%) - ${vendorLabel}`,
+                        amount: Math.round(groupVat * 100),
+                        quantity: 1,
+                        currency: 'aed'
+                    });
+                }
+
+                totalVat += groupVat;
             }
 
             const isHighValue = subtotal >= 10000;

@@ -66,7 +66,7 @@ export class AdminController extends BaseController {
 
         // Map Country Codes to Names
         // Fields that store country codes (CCA2)
-        const countryFields = ['country_of_registration', 'bank_country', 'country'];
+        const countryFields = ['bank_country', 'country'];
 
         // Fetch countries for mapping if any field is provided as a code (usually 2 chars)
         const needsMapping = countryFields.some(f => formatted[f] && formatted[f].length <= 3);
@@ -1265,7 +1265,7 @@ export class AdminController extends BaseController {
             // --- Permission Logic (Universal UAE Rule) ---
             if (user.user_type === 'admin') {
                 const permissionService = new PermissionService();
-                const isUAE = ['UAE', 'United Arab Emirates', 'United Arab Emirates (UAE)'].includes(profile.country);
+                const isUAE = profile.country?.toUpperCase() === 'AE';
                 const isControlled = profile.controlled_items === true;
 
                 let requiredPermission = 'vendor.approve';
@@ -1309,7 +1309,7 @@ export class AdminController extends BaseController {
                     const fieldStepMap: Record<string, number> = {
                         // Step 1: Company Info
                         'registered_company_name': 1,
-                        'country_of_registration': 1,
+                        'country': 1,
                         'year_of_establishment': 1,
                         'entity_type': 1,
                         'official_website': 1,
@@ -1905,7 +1905,7 @@ export class AdminController extends BaseController {
                 const permissionService = new PermissionService();
 
                 // Check if strict permission is required
-                const isUAE = ['UAE', 'United Arab Emirates', 'United Arab Emirates (UAE)'].includes(profile.country);
+                const isUAE = profile.country?.toUpperCase() === 'AE';
                 const isControlledIsSet = profile.controlled_items === true;
 
                 let requiredPermission = 'customer.approve';

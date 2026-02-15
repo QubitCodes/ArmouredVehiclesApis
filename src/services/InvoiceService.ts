@@ -3,6 +3,7 @@ import { Order, OrderItem } from '../models/Order';
 import { User, UserProfile, Address, PlatformSetting } from '../models';
 import { randomBytes } from 'crypto';
 import { Op } from 'sequelize';
+import { VatService } from './VatService';
 
 /**
  * InvoiceService
@@ -163,9 +164,10 @@ export class InvoiceService {
         const order = await Order.findByPk(orderId, {
             include: [
                 { model: OrderItem, as: 'items' },
-                { model: User, as: 'vendor', include: [{ model: UserProfile, as: 'profile' }] }
+                { model: User, as: 'vendor', include: [{ model: UserProfile, as: 'profile' }] },
+                { model: User, as: 'user', include: [{ model: UserProfile, as: 'profile' }, { model: Address, as: 'addresses' }] }
             ]
-        }) as Order & { vendor?: User & { profile?: UserProfile }; items?: OrderItem[] };
+        }) as Order & { vendor?: User & { profile?: UserProfile }; user?: User & { profile?: UserProfile; addresses?: Address[] }; items?: OrderItem[] };
 
         if (!order) {
             throw new Error('Order not found');
@@ -182,16 +184,40 @@ export class InvoiceService {
         const issuerName = vendorProfile?.company_name || vendor?.name || 'Vendor';
         const issuerAddress = this.formatProfileAddress(vendorProfile);
 
+        // --- Per-Group VAT: Recalculate using vendor_to_admin rate ---
+        const vendorCountry = vendorProfile?.country || null;
+
+        // Get customer's shipping address country
+        let customerCountry: string | null = null;
+        if (order.shipment_details && typeof order.shipment_details === 'object') {
+            customerCountry = (order.shipment_details as any).country || null;
+        }
+        if (!customerCountry) {
+            // Fallback to customer profile/address
+            const customer = order.user;
+            const defaultAddr = customer?.addresses?.find((a: any) => a.is_default) || customer?.addresses?.[0];
+            customerCountry = (defaultAddr as any)?.country || customer?.profile?.country || null;
+        }
+
+        const vatResult = await VatService.getVatForScenario(vendorCountry, customerCountry);
+        const vendorVatPercent = vatResult.vendorToAdminVat;
+
         // Calculate amounts (minus admin commission)
-        const totalAmount = Number(order.total_amount);
+        const totalAmount = Number(order.total_amount) || 0;
         const adminCommission = Number(order.admin_commission) || 0;
-        const vatAmount = Number(order.vat_amount) || 0;
         const shippingAmount = Number(order.total_shipping) || 0;
         const packingAmount = Number(order.total_packing) || 0;
 
         // Vendor amount = total - commission
         const vendorTotal = totalAmount - adminCommission;
-        // Proportionally adjust subtotal (subtotal = total - vat - shipping - packing)
+
+        // Recalculate VAT using the vendor_to_admin rate
+        // Taxable base = vendorTotal minus the customer VAT (we re-derive from base amounts)
+        const customerVatAmount = Number(order.vat_amount) || 0;
+        const baseWithoutCustomerVat = totalAmount - customerVatAmount;
+        const vatAmount = (baseWithoutCustomerVat * vendorVatPercent) / 100;
+
+        // Subtotal for admin invoice (vendor perspective)
         const subtotal = vendorTotal - vatAmount - shippingAmount - packingAmount;
 
         const invoiceNumber = await this.generateInvoiceNumber('admin');
